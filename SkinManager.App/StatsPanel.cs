@@ -13,7 +13,7 @@ using SkinManager.Core;
 namespace SkinManager.App
 {
     /// <summary>A list of records: a name, a small line under it, wins–losses, the win rate as a bar. Rows can be clicked.</summary>
-    class RecordTable : Panel
+    class RecordTable : Control
     {
         public sealed class Row { public string Name, Note; public Record Record; public object Tag; public bool Header; public double? Chance; public Image Icon; public bool Wide; }
         public List<Row> Rows = new List<Row>();
@@ -25,24 +25,38 @@ namespace SkinManager.App
 
         public RecordTable()
         {
-            DoubleBuffered = true; AutoScroll = true; BackColor = Color.FromArgb(150, 20, 22, 28);
-            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw, true);
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+            DoubleBuffered = true; BackColor = Color.FromArgb(150, 20, 22, 28);
             MouseMove += (s, e) => { int i = At(e.Location); if (i != _hover) { _hover = i; Cursor = i >= 0 && RowClicked != null && !Rows[i].Header ? Cursors.Hand : Cursors.Default; Invalidate(); } };
             MouseLeave += (s, e) => { _hover = -1; Invalidate(); };
             MouseClick += (s, e) => { int i = At(e.Location); if (i >= 0 && !Rows[i].Header) { Selected = Rows[i].Tag; RowClicked?.Invoke(Rows[i]); Invalidate(); } };
         }
 
-        int At(Point p) { int i = (p.Y - AutoScrollPosition.Y) / H; return i >= 0 && i < Rows.Count ? i : -1; }
+        // scrolling: the wheel, or dragging the thin bar on the right (its own, so it can't trip up)
+        int _scroll; bool _drag; int _dragFrom, _scrollFrom;
+        int MaxScroll => Math.Max(0, Rows.Count * H - ClientSize.Height);
+        void SetScroll(int v) { int s = Math.Max(0, Math.Min(MaxScroll, v)); if (s != _scroll) { _scroll = s; Invalidate(); } }
+        RectangleF Thumb() { if (MaxScroll <= 0) return RectangleF.Empty; float h = Math.Max(30, ClientSize.Height * (float)ClientSize.Height / (Rows.Count * H)); return new RectangleF(Width - 7, (ClientSize.Height - h) * _scroll / MaxScroll, 5, h); }
+        protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); SetScroll(_scroll - e.Delta / 2); }
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); Focus(); }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); SetScroll(_scroll); Invalidate(); }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (MaxScroll > 0 && e.X >= Width - 12) { _drag = true; _dragFrom = e.Y; _scrollFrom = _scroll; } }
+        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); _drag = false; }
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); if (_drag) { float range = ClientSize.Height - Thumb().Height; if (range > 0) SetScroll(_scrollFrom + (int)((e.Y - _dragFrom) / range * MaxScroll)); } }
 
-        public void Show(List<Row> rows) { Rows = rows; AutoScrollMinSize = new Size(0, rows.Count * H); AutoScrollPosition = new Point(0, 0); Invalidate(); }
+        int At(Point p) { if (p.X >= Width - 12 && MaxScroll > 0) return -1; int i = (p.Y + _scroll) / H; return i >= 0 && i < Rows.Count ? i : -1; }
+
+        public void Show(List<Row> rows) { Rows = rows; _scroll = 0; Invalidate(); }
 
         public static Color RateColor(double rate) => rate >= 0.55 ? Theme.Good : rate >= 0.45 ? Theme.Warn : Theme.Bad;
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TranslateTransform(0, AutoScrollPosition.Y);
-            int w = ClientSize.Width;
+            var thumb = Thumb();
+            if (!thumb.IsEmpty) using (var b = new SolidBrush(Color.FromArgb(110, 255, 255, 255))) using (var p = StatsArt.Round(thumb, 2.5f)) g.FillPath(b, p);
+            g.TranslateTransform(0, -_scroll);
+            int w = ClientSize.Width - (MaxScroll > 0 ? 10 : 0);
             if (Rows.Count == 0) using (var b = new SolidBrush(Theme.Muted)) g.DrawString(Empty, Theme.Body, b, 16, 16);
             for (int i = 0; i < Rows.Count; i++)
             {
@@ -151,7 +165,6 @@ namespace SkinManager.App
         string _tab = "Overview";
         Dictionary<int, string> _stageNames;
         readonly StatsData _data = new StatsData();
-        readonly Dictionary<int, List<string>> _subNames = new Dictionary<int, List<string>>();
         int _loadId;
 
         readonly TileView _profile = new TileView();
@@ -168,11 +181,12 @@ namespace SkinManager.App
         readonly CharacterCard _charCard = new CharacterCard();
         readonly MatchList _matches = new MatchList();
         readonly MatchCard _matchCard = new MatchCard();
+        readonly ProgressView _progress = new ProgressView();
 
         static ComboBox Combo(int w) => new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = w, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text };
         sealed class Item { public string Text; public object Value; public override string ToString() => Text; }
 
-        static readonly string[] Views = { "Overview", "Characters", "Matches", "Matchups", "Stages", "Opponents", "Win chance" };
+        static readonly string[] Views = { "Overview", "Progress", "Characters", "Matches", "Matchups", "Stages", "Opponents", "Win chance" };
 
         public StatsPanel(Func<BrawlOnlineInstall> install, Func<Installer> installer)
         {
@@ -187,14 +201,14 @@ namespace SkinManager.App
             foreach (var t in Views)
             {
                 var b = Theme.Secondary(t); b.Margin = new Padding(0, 0, 8, 0);
-                b.Click += (s, e) => { _tab = t; ShowAll(); };
+                b.Click += (s, e) => { _tab = t; if (t == "Matches") b.Text = "Matches"; ShowAll(); };
                 _tabs.Controls.Add(b);
             }
-            _overview.Data = _chart.Data = _charCard.Data = _matches.Data = _matchCard.Data = _data;
+            _overview.Data = _chart.Data = _charCard.Data = _matches.Data = _matchCard.Data = _progress.Data = _data;
             _chart.Picked += c => { _charCard.Character = c; _charCard.ToTop(); _charCard.Invalidate(); };
             _matches.Picked += id => { _matchCard.Game = id; _matchCard.ToTop(); _matchCard.Invalidate(); };
             _matchCard.ShowReplay += ShowReplayFile;
-            _body.Controls.AddRange(new Control[] { _tools, _table, _sideTitle, _side, _overview, _chart, _charCard, _matches, _matchCard });
+            _body.Controls.AddRange(new Control[] { _tools, _table, _sideTitle, _side, _overview, _chart, _charCard, _matches, _matchCard, _progress });
             Resize += (s, e) => Arrange();
             VisibleChanged += (s, e) => { if (Visible && _h == null) Reload(); };
             Arrange();
@@ -219,7 +233,7 @@ namespace SkinManager.App
             _table.Location = new Point(0, toolsH); _table.Size = new Size(tableW, _body.Height - toolsH);
             _sideTitle.Location = new Point(tableW + 16, toolsH); _sideTitle.AutoSize = false; _sideTitle.Size = new Size(_body.Width - tableW - 16, 26);
             _side.Location = new Point(tableW + 16, toolsH + 30); _side.Size = new Size(_body.Width - tableW - 16, _body.Height - toolsH - 30);
-            _overview.Bounds = new Rectangle(0, 0, _body.Width, _body.Height);
+            _overview.Bounds = _progress.Bounds = new Rectangle(0, 0, _body.Width, _body.Height);
             int left = (int)(_body.Width * 0.52);
             _chart.Bounds = new Rectangle(0, 0, left, _body.Height);
             _charCard.Bounds = new Rectangle(left + 14, 0, _body.Width - left - 14, _body.Height);
@@ -228,29 +242,70 @@ namespace SkinManager.App
             _matchCard.Bounds = new Rectangle(list + 14, 0, _body.Width - list - 14, _body.Height);
         }
 
-        async void Reload()
+        void Reload() { _ = Load(false); }
+
+        Task _loading;
+        bool _again;
+        long _lastGameId = -1;
+        static readonly DateTime Started = DateTime.UtcNow;
+        /// <summary>A game finished since the last look (its id), with its report ready.</summary>
+        public event Action<long> NewGame;
+        public StatsData Data => _data;
+
+        long? _newGame;
+        /// <summary>A new game's report is ready: Matches shows it (and says so on its tab).</summary>
+        public void MarkNew(long gameId)
         {
-            var install = _install();
-            if (install == null) { _profile.Big = "Brawl Online isn't set up on this PC yet."; _profile.Invalidate(); return; }
-            _profile.Big = "Reading your games…"; _profile.Invalidate(); _refresh.Enabled = false;
-            try
+            _newGame = gameId; _matchCard.Game = gameId; _matches.Selected = gameId; _matchCard.ToTop();
+            foreach (Control b in _tabs.Controls) if (b.Text.StartsWith("Matches")) b.Text = "Matches •";
+            ShowAll();
+        }
+
+        /// <summary>Reads the history again (and any new replays), after a game ends: the page needn't be open.</summary>
+        public void CheckNewGame() { _ = Load(true); }
+
+        /// <summary>Reads (or reads again) everything; one at a time (a second call while reading reads once more after).</summary>
+        Task Load(bool quiet)
+        {
+            if (_loading != null && !_loading.IsCompleted) { _again = true; return _loading; }
+            _loading = LoadOnce(quiet);
+            return _loading;
+        }
+
+        async Task LoadOnce(bool quiet)
+        {
+            do
             {
-                if (_stageNames == null)
-                    _stageNames = await Task.Run(() => { try { using (var card = _installer()?.OpenCard()) return card != null ? StageSelect.SlotListNames(card) : new Dictionary<int, string>(); } catch { return new Dictionary<int, string>(); } });
-                string path = MatchHistory.DatabasePath(install);
-                if (!System.IO.File.Exists(path)) { _profile.Big = "No games yet"; _profile.Small = "Brawl Online keeps your history once you've played online."; _profile.Invalidate(); return; }
-                var names = _stageNames;
-                _h = await Task.Run(() => MatchHistory.Load(path, names));
-                ShowAll();
-                if (_art == null) { var installer = _installer; _art = await Task.Run(() => StatsArt.Get(installer)); ShowAll(); }
-                LoadReplays();
-            }
-            catch (Exception e)
-            {
-                Program.Log("reading the match history", e);
-                _profile.Big = "Your match history couldn't be read"; _profile.Small = e.Message; _profile.Invalidate();
-            }
-            finally { _refresh.Enabled = true; }
+                _again = false;
+                var install = _install();
+                if (install == null) { _profile.Big = "Brawl Online isn't set up on this PC yet."; _profile.Invalidate(); return; }
+                if (!quiet || _h == null) { _profile.Big = "Reading your games…"; _profile.Invalidate(); }
+                _refresh.Enabled = false;
+                try
+                {
+                    if (_stageNames == null)
+                        _stageNames = await Task.Run(() => { try { using (var card = _installer()?.OpenCard()) return card != null ? StageSelect.SlotListNames(card) : new Dictionary<int, string>(); } catch { return new Dictionary<int, string>(); } });
+                    string path = MatchHistory.DatabasePath(install);
+                    if (!System.IO.File.Exists(path)) { _profile.Big = "No games yet"; _profile.Small = "Brawl Online keeps your history once you've played online."; _profile.Invalidate(); return; }
+                    var names = _stageNames;
+                    _h = await Task.Run(() => MatchHistory.Load(path, names));
+                    ShowAll();
+                    if (_art == null) { var installer = _installer; _art = await Task.Run(() => StatsArt.Get(installer)); ShowAll(); }
+                    await LoadReplays();
+                    // a game played while the app is open (or, the first time, the newest one if it's from then) gets a report
+                    var newest = _h.Singles().OrderBy(x => x.Game.Id).Select(x => x.Game).LastOrDefault();
+                    Program.Trace($"stats read: newest game {newest?.Id}, last seen {_lastGameId}");
+                    bool test = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") != null && _lastGameId < 0;
+                    if (newest != null && newest.Id > _lastGameId && (_lastGameId >= 0 || newest.Start > Started || test)) NewGame?.Invoke(newest.Id);
+                    if (newest != null) _lastGameId = Math.Max(_lastGameId, newest.Id);
+                }
+                catch (Exception e)
+                {
+                    Program.Log("reading the match history", e);
+                    _profile.Big = "Your match history couldn't be read"; _profile.Small = e.Message; _profile.Invalidate();
+                }
+                finally { _refresh.Enabled = true; }
+            } while (_again);
         }
 
         /// <summary>Where a replay is: where Brawl Online saved it, or the same month folder in this PC's Documents.</summary>
@@ -268,10 +323,47 @@ namespace SkinManager.App
             catch { return null; }
         }
 
-        /// <summary>Reads every game's replay in the background (once: kept in the cache), then the move names.</summary>
-        async void LoadReplays()
+        Dictionary<int, MoveTable> _tables;
+        string _tablesKey;
+
+        /// <summary>Every fighter's move names and landing lags (a quick read of each moveset), once.</summary>
+        async Task LoadTables()
+        {
+            if (_tables != null) return;
+            var installer = _installer;
+            var t = await Task.Run(() =>
+            {
+                var o = new Dictionary<int, MoveTable>();
+                try
+                {
+                    using (var card = installer()?.OpenCard())
+                        if (card != null)
+                            foreach (var id in Enumerable.Range(0, 60).Select(Fighters.Same).Distinct())
+                            {
+                                var ch = Characters.All.FirstOrDefault(x => string.Equals(x.Name, Fighters.Name(id), StringComparison.OrdinalIgnoreCase));
+                                if (ch == null) continue;
+                                try { var mt = FrameDataBook.MoveTable(card, ch); if (mt != null) o[id] = mt; } catch { }
+                            }
+                }
+                catch (Exception e) { Program.Log("reading move names", e); }
+                return o;
+            });
+            _tables = t;
+            // what the habits were read with: if P+'s moves change, the replays are read again
+            using (var sha = System.Security.Cryptography.SHA1.Create())
+            {
+                var text = string.Join("|", t.OrderBy(kv => kv.Key).Select(kv => kv.Key + ":" + string.Join(",", kv.Value.Names) + ":" + string.Join(",", kv.Value.LandingLag)));
+                _tablesKey = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text))).Replace("-", "").Substring(0, 16);
+            }
+        }
+
+        MoveTable TableOf(int character) => _tables != null && _tables.TryGetValue(Fighters.Same(character), out var t) ? t : null;
+
+        /// <summary>Reads every game's replay in the background (once: kept in the cache), then works out your progress.</summary>
+        async Task LoadReplays()
         {
             int id = ++_loadId;
+            await LoadTables();
             var games = _h.Singles().Where(x => !_data.Smash.ContainsKey(x.Game.Id)).ToList();
             string cache = System.IO.Path.Combine(Program.DataFolder, "Cache", "replays");
             _data.ReplaysLoading = games.Count > 0; _data.ReplaysTotal = games.Count; _data.ReplaysRead = 0;
@@ -284,6 +376,7 @@ namespace SkinManager.App
                 Profile(); if (n % 24 == 0) RefreshViews();
             });
             IProgress<int> report = progress;
+            Func<int, MoveTable> tables = TableOf; string key = _tablesKey;
             await Task.Run(() =>
             {
                 int done = 0;
@@ -292,7 +385,7 @@ namespace SkinManager.App
                     try
                     {
                         var path = Locate(x.Game.File);
-                        if (path != null) { var s = GameSmash.Of(x.Game, x.Me, x.Them, Replays.Cached(path, cache)); if (s != null) found[x.Game.Id] = s; }
+                        if (path != null) { var s = GameSmash.Of(x.Game, x.Me, x.Them, Replays.Cached(path, cache, tables, key)); if (s != null) found[x.Game.Id] = s; }
                     }
                     catch (Exception e) { if (Program.Testing) Program.Log("reading a replay", e); }
                     int n = System.Threading.Interlocked.Increment(ref done);
@@ -301,34 +394,24 @@ namespace SkinManager.App
             });
             if (id != _loadId) return;
             foreach (var kv in found) _data.Smash[kv.Key] = kv.Value;
-            // the move names of every character in them (a quick read of each one's moveset)
-            var chars = _data.Smash.Values.SelectMany(s => new[] { s.MyCharacter, s.TheirCharacter }).Distinct().Where(c => !_subNames.ContainsKey(c)).ToList();
-            if (chars.Count > 0)
-            {
-                var installer = _installer;
-                var read = await Task.Run(() =>
-                {
-                    var o = new Dictionary<int, List<string>>();
-                    try
-                    {
-                        using (var card = installer()?.OpenCard())
-                            if (card != null)
-                                foreach (var c in chars)
-                                {
-                                    var ch = Characters.All.FirstOrDefault(x => string.Equals(x.Name, Fighters.Name(c), StringComparison.OrdinalIgnoreCase));
-                                    try { o[c] = ch != null ? FrameDataBook.SubactionNames(card, ch) ?? new List<string>() : new List<string>(); } catch { o[c] = new List<string>(); }
-                                }
-                    }
-                    catch (Exception e) { Program.Log("reading move names", e); }
-                    return o;
-                });
-                foreach (var kv in read) _subNames[kv.Key] = kv.Value;
-            }
             _data.ReplaysLoading = false;
-            Profile(); RefreshViews();
+            var all = _h.Singles().ToList(); var smash = _data.Smash;
+            _data.Career = await Task.Run(() => Progress.Compute(all, smash, MoveName));
+            _data.Typical = new PlayerHabits(); _data.TypicalGames = 0;
+            foreach (var s in smash.Values) if (s.TheirHabits != null && s.TheirHabits.Known) { _data.Typical.Add(s.TheirHabits); _data.TypicalGames++; }
+            Profile(); RefreshViews(); ShowAll();
         }
 
-        string MoveName(int character, int sub) => _subNames.TryGetValue(character, out var l) && sub >= 0 && sub < l.Count ? MoveNames.Friendly(l[sub]) : null;
+        /// <summary>What a player tends to do, from your games against them (empty until the replays are read).</summary>
+        public List<(string Habit, string Tip)> Scout(string userId, int max = 3)
+        {
+            if (userId == null || _data.Career == null) return new List<(string, string)>();
+            var h = new PlayerHabits(); int n = 0;
+            foreach (var s in _data.Smash.Values) if (s.ThemPlayer.UserId == userId && s.TheirHabits != null && s.TheirHabits.Known) { h.Add(s.TheirHabits); n++; }
+            return Scouting.Lines(h, n, _data.Typical, _data.TypicalGames, max);
+        }
+
+        string MoveName(int character, int sub) { var t = TableOf(character); return t != null && sub >= 0 && sub < t.Names.Count ? MoveNames.Friendly(t.Names[sub]) : null; }
 
         void RefreshViews() { foreach (Control c in _body.Controls) if (c is ScrollView || c is CharacterChart) c.Invalidate(); }
 
@@ -369,7 +452,7 @@ namespace SkinManager.App
             _data.History = _h; _data.Games = games;
             _data.Head = Head; _data.Portrait = Portrait; _data.Stage = StagePic; _data.MoveName = MoveName;
             Profile();
-            foreach (Control b in _tabs.Controls) Theme.Toggle((Button)b, b.Text == _tab);
+            foreach (Control b in _tabs.Controls) Theme.Toggle((Button)b, b.Text.TrimEnd(' ', '•') == _tab);
             _tools.Controls.Clear(); _tools.Height = 0;
             _side.Visible = _sideTitle.Visible = false;
             _table.RowClicked -= OpponentClicked; _table.RowClicked -= MatchupClicked;
@@ -377,11 +460,13 @@ namespace SkinManager.App
             bool table = _tab == "Matchups" || _tab == "Stages" || _tab == "Opponents" || _tab == "Win chance";
             _table.Visible = _tools.Visible = table;
             _overview.Visible = _tab == "Overview";
+            _progress.Visible = _tab == "Progress";
             _chart.Visible = _charCard.Visible = _tab == "Characters";
             _matches.Visible = _matchCard.Visible = _tab == "Matches";
             switch (_tab)
             {
                 case "Overview": _overview.Invalidate(); break;
+                case "Progress": _progress.Invalidate(); break;
                 case "Characters":
                     if (_charCard.Character == null || !games.Any(g => g.Me.Character == _charCard.Character))
                         _charCard.Character = games.GroupBy(g => g.Me.Character).OrderByDescending(g => g.Count()).Select(g => (int?)g.Key).FirstOrDefault();
@@ -466,7 +551,14 @@ namespace SkinManager.App
             var games = _h.Singles(_ranked).Where(g => g.Them.UserId == id).ToList();
             _side.Visible = _sideTitle.Visible = true;
             _sideTitle.Text = games.Last().Them.Name;
-            var rows = new List<RecordTable.Row> { new RecordTable.Row { Header = true, Name = "What they play against you" } };
+            var rows = new List<RecordTable.Row>();
+            var scout = Scout(id, 4);
+            if (scout.Count > 0)
+            {
+                rows.Add(new RecordTable.Row { Header = true, Name = "What they tend to do" });
+                rows.AddRange(scout.Select(l => new RecordTable.Row { Name = l.Habit, Note = "→ " + l.Tip }));
+            }
+            rows.Add(new RecordTable.Row { Header = true, Name = "What they play against you" });
             rows.AddRange(games.GroupBy(g => g.Them.Character).OrderByDescending(g => g.Count()).Select(g => new RecordTable.Row { Name = Fighters.Name(g.Key), Note = $"{g.Count()} of {games.Count} games", Record = MatchHistory.Count(g), Icon = Head(g.Key) }));
             rows.Add(new RecordTable.Row { Header = true, Name = "Your stages against them" });
             rows.AddRange(games.GroupBy(g => g.Game.Stage).OrderByDescending(g => g.Count()).Select(g => new RecordTable.Row { Name = _h.StageName(g.Key), Record = MatchHistory.Count(g), Icon = StagePic(g.Key), Wide = true }));

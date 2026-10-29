@@ -18,6 +18,15 @@ namespace SkinManager.Core
         /// opening; and theirs that killed you. Subaction numbers.</summary>
         public List<int> Landed = new List<int>(), KillMoves = new List<int>(), Openers = new List<int>(), DeathMoves = new List<int>();
         public bool Won => MePlayer.Won == true;
+        // the game's highlights
+        public PlayerHabits MyHabits, TheirHabits;
+        public float BestComboDamage; public int BestComboHits; public List<int> BestComboMoves = new List<int>();
+        public float BestComboStart;                    // their percent when it started
+        public int ZeroToDeaths, EdgeguardKills, SelfDestructs, EarliestKill = -1;
+        public float HighestPercent;                    // the most you were on and lived through a hit
+        public int WorstDeficit;                        // the most stocks you were behind at any moment
+        public bool LastStockClutch;                    // both on their last stock at some point, and you won
+        public int Seconds => Replay.Frames / 60;
         public int MyCharacter => MePlayer.Character;
         public int TheirCharacter => ThemPlayer.Character;
         public int? MyStocksLeft => Replay.EndStocks.Count > Me ? Replay.EndStocks[Me] : (int?)null;
@@ -45,6 +54,38 @@ namespace SkinManager.Core
                 if (death.Victim == ti) { s.Kills++; s.KillPercents.Add(death.Percent); if (death.Killer == mi && death.Move >= 0) s.KillMoves.Add(death.Move); }
                 else if (death.Victim == mi) { s.Deaths++; s.DeathPercents.Add(death.Percent); if (death.Killer == ti && death.Move >= 0) s.DeathMoves.Add(death.Move); }
             }
+            s.MyHabits = d.Habits.Count > mi ? d.Habits[mi] : null; s.TheirHabits = d.Habits.Count > ti ? d.Habits[ti] : null;
+            // your best opening, and the ones that took a stock from (near) nothing
+            foreach (var o in d.Openings.Where(o => o.Attacker == mi))
+            {
+                var hits = d.Hits.Where(h => h.Attacker == mi && h.Victim == ti && h.Frame >= o.Start && h.Frame <= o.End).ToList();
+                if (hits.Count == 0) continue;
+                if (o.Damage > s.BestComboDamage || o.Damage == s.BestComboDamage && o.Hits > s.BestComboHits)
+                { s.BestComboDamage = o.Damage; s.BestComboHits = o.Hits; s.BestComboMoves = hits.Select(h => h.Move).ToList(); s.BestComboStart = hits[0].Before; }
+                if (o.Killed && hits[0].Before <= 10) s.ZeroToDeaths++;
+            }
+            float left = d.StageLeft, right = d.StageRight;
+            foreach (var death in d.Deaths.Where(x => x.Victim == ti))
+            {
+                if (death.Killer == mi)
+                {
+                    if (death.Percent >= 20 && (s.EarliestKill < 0 || death.Percent < s.EarliestKill)) s.EarliestKill = (int)death.Percent;   // under 20%: they gave it away
+                    var killing = d.Hits.LastOrDefault(h => h.Victim == ti && h.Attacker == mi && h.Frame <= death.Frame);
+                    // off the stage: well past its edge and not above it, or below it
+                    if (killing != null && right - left > 20 && ((killing.X < left - 10 || killing.X > right + 10) && killing.Y < 15 || killing.Y < -15)) s.EdgeguardKills++;
+                }
+            }
+            s.SelfDestructs = d.Deaths.Count(x => x.Victim == mi && x.Killer < 0);
+            foreach (var h in d.Hits.Where(h => h.Victim == mi)) s.HighestPercent = Math.Max(s.HighestPercent, h.Before + h.Damage);
+            // stocks through the game
+            int mine = (s.MyStocksLeft ?? 0) + s.Deaths, theirs = (s.TheirStocksLeft ?? 0) + s.Kills;
+            foreach (var death in d.Deaths.OrderBy(x => x.Frame))
+            {
+                if (death.Victim == mi) mine--; else if (death.Victim == ti) theirs--;
+                s.WorstDeficit = Math.Max(s.WorstDeficit, theirs - mine);
+                if (mine == 1 && theirs == 1) s.LastStockClutch = true;
+            }
+            if (!s.Won) s.LastStockClutch = false;
             ReplayHit last = null;
             foreach (var h in d.Hits.Where(h => h.Attacker == mi))
             {

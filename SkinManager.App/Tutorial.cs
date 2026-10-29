@@ -228,8 +228,9 @@ namespace SkinManager.App
                 case "Stat Tracker": return new List<TutorialStep>
                 {
                     new TutorialStep("Your Stat Tracker", "Everything here comes from Brawl Online's own records of your games and its replays (only read, never changed). Smash stats (openings, kill moves...) need the replays, which are read once in the background."),
-                    new TutorialStep("Views", "Overview: your form and Smash stats lately. Characters: how you do with each fighter. Matches: a simple list of your games, click one for how it went. Then your records by matchup, stage and opponent, and your chance to win.", Biggest(p, c => c is FlowLayoutPanel && c.Controls.OfType<Button>().Any())),
+                    new TutorialStep("Views", "Overview: your form, Smash stats and habits. Progress: your level, badges and personal bests. Characters: each fighter you play. Matches: your games, each with its report. Then matchups, stages, opponents (with what they tend to do) and your chance to win.", Biggest(p, c => c is FlowLayoutPanel && c.Controls.OfType<Button>().Any())),
                     new TutorialStep("Ranked or not", "Show all games, only ranked, or only unranked.", Of<ComboBox>(p)),
+                    new TutorialStep("After every game", "With the overlay on (Settings), a report card pops up over the game a few seconds after it ends: your grade, the XP you earned, new badges and personal bests. The full report is under Matches."),
                 };
             }
             return null;

@@ -17,6 +17,7 @@ namespace SkinManager.App
         public MatchHistory History;
         public StatsArt Art;
         public bool Dismissed;
+        public Func<string, List<(string Habit, string Tip)>> Scout;   // a player's habits from your games against them
         public bool Pill;              // during the fight: a slim bar
         public Rectangle? Game;        // where the game is on screen
 
@@ -70,6 +71,8 @@ namespace SkinManager.App
                     var mains = vsThem.GroupBy(x => x.Them.Character).OrderByDescending(x => x.Count()).Take(3).Select(x => $"{Fighters.Name(x.Key)} ×{x.Count()}");
                     lines.Add(("They usually play: " + string.Join(", ", mains), Theme.Text));
                 }
+                if (Scout != null && oppId != null)
+                    foreach (var l in Scout(oppId).Take(2)) lines.Add(("Scouting: " + l.Habit.Replace(" of the time", ""), Theme.Accent));
                 if (s.MyChar != null && s.TheirChar != null)
                 {
                     var mu = MatchHistory.Count(h.Singles().Where(x => x.Me.Character == s.MyChar && x.Them.Character == s.TheirChar));

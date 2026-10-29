@@ -76,6 +76,7 @@ namespace SkinManager.App
     class FullOverlay : OverlayForm
     {
         public LiveState State; public MatchHistory History; public StatsArt Art; public string Hotkey = "Alt+T";
+        public Func<string, List<(string Habit, string Tip)>> Scout;
 
         public FullOverlay() { Size = new Size(860, 520); }
 
@@ -157,6 +158,18 @@ namespace SkinManager.App
             foreach (var c in vs.GroupBy(v => v.Them.Character).OrderByDescending(v => v.Count()).Take(5))
                 Row(g, ref y, x, colW, Art?.Head(c.Key), false, Fighters.Name(c.Key), MatchHistory.Count(c), $"{c.Count()} of {vs.Count} games");
             if (vs.Count == 0) Text(g, "Nothing kept about them yet: the matchup and stage records still count.", Theme.Small, Theme.Muted, new RectangleF(x, y, colW, 40));
+            var scout = Scout != null && oppId != null ? Scout(oppId) : new List<(string Habit, string Tip)>();
+            if (scout.Count > 0)
+            {
+                y += 4; Heading(g, ref y, x, colW, "They tend to");
+                foreach (var l in scout.Take(3))
+                {
+                    if (y > Height - 60) break;
+                    Text(g, l.Habit, Theme.Small, Theme.Text, new RectangleF(x, y, colW, 18));
+                    Text(g, "→ " + l.Tip, Theme.Small, Theme.Accent, new RectangleF(x, y + 16, colW, 18));
+                    y += 38;
+                }
+            }
 
             // 2: the matchup and your picks against their character
             x += colW + 18; y = y0;

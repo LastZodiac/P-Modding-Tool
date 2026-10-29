@@ -54,6 +54,29 @@ namespace SkinManager.App
         bool _historyLoading;
 
         FullOverlay _full;
+        ReportCard _report;
+        DateTime _checkAgainAt = DateTime.MaxValue;
+
+        /// <summary>A game just ended: its report over the game (if the overlay is on), and the Stat Tracker shows it.</summary>
+        void ShowReport(long gameId)
+        {
+            try
+            {
+                var d = _stats.Data;
+                Program.Trace($"report for game {gameId}: career {(d.Career == null ? "not ready" : "ready")}");
+                if (d.Career == null || !d.Career.Games.TryGetValue(gameId, out var p)) return;
+                var x = d.History.Singles().FirstOrDefault(v => v.Game.Id == gameId);
+                if (x.Game == null) return;
+                d.Smash.TryGetValue(gameId, out var smash);
+                _stats.MarkNew(gameId);
+                bool test = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") != null;
+                if (!(_look.Stats && _look.Card) && !test) return;
+                if (_report == null) _report = new ReportCard();
+                _report.Game = _game ?? (_install != null ? GameWindow.Find(_install) : null);
+                _report.Show(p, smash, x.Me, x.Them, d.History.StageName(x.Game.Stage), d.MoveName, StatsArt.Cached);
+            }
+            catch (Exception e) { Program.Log("after-game report", e); }
+        }
         DateTime _pillAt = DateTime.MaxValue, _gameLookAt;
         Rectangle? _game;
 
@@ -67,7 +90,8 @@ namespace SkinManager.App
                 bool changed = false;
                 foreach (var line in _log.NewLines()) changed |= _live.Feed(line);
                 var s = _live.State;
-                if (DateTime.Now >= _reloadAt) { _reloadAt = DateTime.MaxValue; _cardHistory = null; changed = true; }
+                if (DateTime.Now >= _reloadAt) { _reloadAt = DateTime.MaxValue; _cardHistory = null; changed = true; _stats.CheckNewGame(); _checkAgainAt = DateTime.Now.AddSeconds(12); }
+                if (DateTime.Now >= _checkAgainAt) { _checkAgainAt = DateTime.MaxValue; _stats.CheckNewGame(); }   // in case the game was saved late
                 // where the game is (it can be moved or resized): checked every 2 seconds
                 if (DateTime.Now >= _gameLookAt)
                 {
@@ -84,13 +108,14 @@ namespace SkinManager.App
                     bool show = s.Phase == MatchPhase.Found || s.Phase == MatchPhase.Loading || s.Phase == MatchPhase.Playing || s.Phase == MatchPhase.GameOver;
                     if (show && s.OpponentName != null)
                     {
-                        if (_card == null) _card = new LiveCard();
+                        if (_card == null) _card = new LiveCard { Scout = id => _stats.Scout(id, 2) };
                         _card.Game = _game;
                         if (s.Phase != MatchPhase.Playing) _card.Pill = false;
                         _card.State = s.Copy(); _card.History = _cardHistory; if (_card.Art == null) _card.Art = StatsArt.Cached;
                         _card.Refresh2(); if (!_card.Visible) _card.Show();
                     }
                     else _card?.Hide();
+                    if (s.Phase == MatchPhase.Found || s.Phase == MatchPhase.Loading) _report?.Hide();   // on to the next game
                     if (_full != null && _full.Visible) { _full.State = s.Copy(); _full.History = _cardHistory; _full.Invalidate(); }
                 }
                 if (_card != null && _card.Visible && DateTime.Now >= _pillAt) { _pillAt = DateTime.MaxValue; _card.Pill = true; _card.Refresh2(); }
@@ -104,7 +129,7 @@ namespace SkinManager.App
         void ToggleFull()
         {
             if (!_look.Stats || _install == null) return;
-            if (_full == null) _full = new FullOverlay();
+            if (_full == null) _full = new FullOverlay { Scout = id => _stats.Scout(id, 3) };
             if (_full.Visible) { _full.Hide(); return; }
             if (_cardHistory == null && !_historyLoading) LoadCardHistory();
             _full.Hotkey = _look.HotkeyText; _full.State = _live.State.Copy(); _full.History = _cardHistory; _full.Art = StatsArt.Cached;
@@ -278,6 +303,7 @@ namespace SkinManager.App
             _content.Controls.Add(_library); _content.Controls.Add(_store); _content.Controls.Add(_slotsPage); _content.Controls.Add(_swap); _content.Controls.Add(_settings);
             _credits = new CreditsPanel { Visible = false }; _content.Controls.Add(_credits);
             _stats = new StatsPanel(() => _install, () => _installer) { Visible = false }; _content.Controls.Add(_stats);
+            _stats.NewGame += ShowReport;
             _frameData = new FrameDataPanel(() => _installer) { Visible = false }; _content.Controls.Add(_frameData);
 
             // sidebar
@@ -436,6 +462,8 @@ namespace SkinManager.App
             Program.Trace("library: " + _lib.Skins.Count + " skins");
             _installer = NewInstaller();
             Program.Trace("installer ready");
+            // the Stat Tracker reads your games in the background, so a game played from now on gets its report
+            if (_look.Stats || Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") != null) _stats.CheckNewGame();
             foreach (var c in Characters.All.OrderBy(c => c.Name)) _characters.Items.Add(c);
             _characters.SelectedIndex = 0;
             _library.Refresh();

@@ -16,14 +16,14 @@ using System.Text;
 
 namespace SkinManager.Core
 {
-    [DataContract] public sealed class ReplayHit { [DataMember] public int Frame, Attacker, Victim, Move; [DataMember] public float Damage, Before; }
+    [DataContract] public sealed class ReplayHit { [DataMember] public int Frame, Attacker, Victim, Move; [DataMember] public float Damage, Before, X, Y; }   // X, Y: where the one hit was
     [DataContract] public sealed class ReplayDeath { [DataMember] public int Frame, Victim, Killer = -1, Move = -1; [DataMember] public float Percent; }
     [DataContract] public sealed class ReplayOpening { [DataMember] public int Attacker, Start, End, Hits, FirstMove; [DataMember] public float Damage; [DataMember] public bool Killed; }
 
     [DataContract]
     public sealed class ReplayData
     {
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 4;
         [DataMember] public int Version = CurrentVersion;
         [DataMember] public string File; [DataMember] public long Size;
         [DataMember] public int Frames;
@@ -33,15 +33,23 @@ namespace SkinManager.Core
         [DataMember] public List<ReplayHit> Hits = new List<ReplayHit>();
         [DataMember] public List<ReplayDeath> Deaths = new List<ReplayDeath>();
         [DataMember] public List<ReplayOpening> Openings = new List<ReplayOpening>();
+        [DataMember] public float StageLeft, StageRight;                 // how far anyone stood on the ground, each way
+        [DataMember] public List<PlayerHabits> Habits = new List<PlayerHabits>();   // per player (when the move names were known)
+        [DataMember] public string NamesKey;                             // which move names the habits were read with
         public int PlayerOf(string userId, string code) { for (int i = 0; i < Ids.Count; i++) if (userId != null && Ids[i] == userId || code != null && Codes[i] == code) return i; return -1; }
     }
 
     public static class Replays
     {
         const int OwnerPercent = 128 + 36, OwnerStocks = 128 + 55, MotionSub = 768 + 90;
+        const int PostureX = 1136 + 12, PostureY = 1136 + 16, PostureFacing = 1136 + 64, Situation = 1344 + 44;   // situation: 0 ground, 1 ledge, 2 air
 
         /// <summary>Reads a replay. Throws if it isn't one.</summary>
-        public static ReplayData Read(string path)
+        public static ReplayData Read(string path) => Read(path, null, null);
+
+        /// <summary>Reads a replay; with move names (a character's subaction animation names by number) also each
+        /// player's habits. Throws if it isn't one.</summary>
+        public static ReplayData Read(string path, Func<int, MoveTable> names, string namesKey)
         {
             var d = new ReplayData { File = path, Size = new FileInfo(path).Length };
             using (var f = File.OpenRead(path))
@@ -55,8 +63,10 @@ namespace SkinManager.Core
                 // per port, the bytes we follow (XOR state)
                 var state = new Dictionary<int, byte[]>();
                 var percent = new List<float>[4]; var stocks = new List<int>[4]; var move = new List<int>[4];
-                for (int i = 0; i < 4; i++) { percent[i] = new List<float>(); stocks[i] = new List<int>(); move[i] = new List<int>(); }
-                int[] watch = { OwnerPercent, OwnerPercent + 1, OwnerPercent + 2, OwnerPercent + 3, OwnerStocks, MotionSub, MotionSub + 1 };
+                var px = new List<float>[4]; var py = new List<float>[4]; var face = new List<sbyte>[4]; var sit = new List<byte>[4];
+                for (int i = 0; i < 4; i++) { percent[i] = new List<float>(); stocks[i] = new List<int>(); move[i] = new List<int>(); px[i] = new List<float>(); py[i] = new List<float>(); face[i] = new List<sbyte>(); sit[i] = new List<byte>(); }
+                int[] watch = { OwnerPercent, OwnerPercent + 1, OwnerPercent + 2, OwnerPercent + 3, OwnerStocks, MotionSub, MotionSub + 1,
+                                PostureX, PostureX + 1, PostureX + 2, PostureX + 3, PostureY, PostureY + 1, PostureY + 2, PostureY + 3, PostureFacing, Situation + 3 };
                 while (f.Position + 20 <= f.Length)
                 {
                     string name = Encoding.ASCII.GetString(r.ReadBytes(4));
@@ -100,6 +110,10 @@ namespace SkinManager.Core
                                 percent[k].Add(BitConverter.ToSingle(new[] { st[3], st[2], st[1], st[0] }, 0));
                                 stocks[k].Add(st[4]);
                                 move[k].Add(st[5] << 8 | st[6]);
+                                px[k].Add(BitConverter.ToSingle(new[] { st[10], st[9], st[8], st[7] }, 0));
+                                py[k].Add(BitConverter.ToSingle(new[] { st[14], st[13], st[12], st[11] }, 0));
+                                face[k].Add((sbyte)((st[15] & 0x80) != 0 ? -1 : 1));   // the float's sign: -1 or 1
+                                sit[k].Add(st[16]);
                             }
                         }
                     }
@@ -107,7 +121,22 @@ namespace SkinManager.Core
                 int players = Math.Min(d.Characters.Count, state.Count);
                 if (players < 2) throw new InvalidDataException("This replay has no fighter data.");
                 d.Frames = percent[0].Count;
-                Events(d, players, percent, stocks, move);
+                // the stage: as far as anyone stood on the ground
+                float left = 0, right = 0;
+                for (int k = 0; k < players; k++)
+                    for (int i = 0; i < px[k].Count; i++)
+                        if (sit[k][i] == 0 && !float.IsNaN(px[k][i]) && Math.Abs(px[k][i]) < 400) { left = Math.Min(left, px[k][i]); right = Math.Max(right, px[k][i]); }
+                d.StageLeft = left; d.StageRight = right;
+                Events(d, players, percent, stocks, move, px, py);
+                if (names != null)
+                {
+                    d.NamesKey = namesKey;
+                    for (int k = 0; k < players; k++)
+                    {
+                        var n = names(d.Characters[k]);
+                        d.Habits.Add(n == null ? new PlayerHabits() : Habits.Read(k, players, n, move, px, py, face, sit, d));
+                    }
+                }
             }
             return d;
         }
@@ -124,7 +153,7 @@ namespace SkinManager.Core
         }
 
         /// <summary>Hits (percent going up), deaths (a stock lost), and openings (a run of hits by one player).</summary>
-        static void Events(ReplayData d, int players, List<float>[] percent, List<int>[] stocks, List<int>[] move)
+        static void Events(ReplayData d, int players, List<float>[] percent, List<int>[] stocks, List<int>[] move, List<float>[] px, List<float>[] py)
         {
             int frames = percent.Take(players).Min(p => p.Count);
             for (int v = 0; v < players; v++)
@@ -136,10 +165,14 @@ namespace SkinManager.Core
                     {
                         // 1 on 1: the other player (in doubles: the opponent doing an attack, or the first one)
                         int a = players == 2 ? 1 - v : Enumerable.Range(0, players).Where(x => x != v).OrderBy(x => IsAttack(move[x][i]) ? 0 : 1).First();
-                        d.Hits.Add(new ReplayHit { Frame = i, Attacker = a, Victim = v, Move = move[a][i], Damage = now - before, Before = before });
+                        d.Hits.Add(new ReplayHit { Frame = i, Attacker = a, Victim = v, Move = move[a][i], Damage = now - before, Before = before, X = px[v][i], Y = py[v][i] });
                     }
                     if (stocks[v][i] < stocks[v][i - 1] && stocks[v][i - 1] <= 99)
-                        d.Deaths.Add(new ReplayDeath { Frame = i, Victim = v, Percent = before > 0.01f ? before : percent[v][Math.Max(0, i - 2)] });
+                        {
+                        // the percent they died at: the most they had in the last half second (it can reset a frame early)
+                        float most = 0; for (int k = Math.Max(1, i - 30); k < i; k++) if (!float.IsNaN(percent[v][k]) && percent[v][k] < 1000) most = Math.Max(most, percent[v][k]);
+                        d.Deaths.Add(new ReplayDeath { Frame = i, Victim = v, Percent = most });
+                    }
                 }
             d.Hits.Sort((x, y) => x.Frame.CompareTo(y.Frame));
             // openings: hits in a row on one player by one player, until the one hit has been free to act (not in hitstun,
@@ -184,7 +217,10 @@ namespace SkinManager.Core
         }
 
         /// <summary>A replay's events, read once and kept in the cache folder.</summary>
-        public static ReplayData Cached(string path, string cacheFolder)
+        public static ReplayData Cached(string path, string cacheFolder) => Cached(path, cacheFolder, null, null);
+
+        /// <summary>The same, with each player's habits (read again if the names have changed since).</summary>
+        public static ReplayData Cached(string path, string cacheFolder, Func<int, MoveTable> names, string namesKey)
         {
             var info = new FileInfo(path);
             string key = Convert.ToBase64String(System.Security.Cryptography.SHA1.Create().ComputeHash(Encoding.UTF8.GetBytes(path.ToLowerInvariant() + "|" + info.Length))).Replace('/', '_').Replace('+', '-').TrimEnd('=');
@@ -192,10 +228,10 @@ namespace SkinManager.Core
             var ser = new DataContractJsonSerializer(typeof(ReplayData));
             try
             {
-                if (File.Exists(file)) using (var s = File.OpenRead(file)) { var old = (ReplayData)ser.ReadObject(s); if (old.Version == ReplayData.CurrentVersion && old.Size == info.Length) return old; }
+                if (File.Exists(file)) using (var s = File.OpenRead(file)) { var old = (ReplayData)ser.ReadObject(s); if (old.Version == ReplayData.CurrentVersion && old.Size == info.Length && (names == null || old.NamesKey == namesKey)) return old; }
             }
             catch { }
-            var d = Read(path);
+            var d = Read(path, names, namesKey);
             try { Directory.CreateDirectory(cacheFolder); using (var s = File.Create(file)) ser.WriteObject(s, d); } catch { }
             return d;
         }

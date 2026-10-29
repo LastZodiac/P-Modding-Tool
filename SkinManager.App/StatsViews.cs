@@ -129,6 +129,8 @@ namespace SkinManager.App
         public Func<int?, Image> Head = _ => null, Portrait = _ => null, Stage = _ => null;
         public Func<int, int, string> MoveName = (c, s) => null;
         public bool ReplaysLoading; public int ReplaysRead, ReplaysTotal;
+        public Career Career;                       // progress over all your games (not just the filter's)
+        public PlayerHabits Typical; public int TypicalGames;   // everyone you've played, added up
         public List<GameSmash> SmashGames => Games.Select(g => Smash.TryGetValue(g.Game.Id, out var s) ? s : null).Where(s => s != null).ToList();
         /// <summary>Counted move names, without the ones that only fill lists up (pummels, "other").</summary>
         public List<(string Name, int Count)> Moves(IEnumerable<(int Character, int Sub)> moves) =>
@@ -223,6 +225,60 @@ namespace SkinManager.App
             }
             y += (tiles.Count + cols - 1) / cols * (th + 12) + 4;
 
+            // ---- habits: what you do with your hands (and what others could read on you)
+            var mineH = new PlayerHabits(); int hGames = 0;
+            foreach (var g2 in sm) if (g2.MyHabits != null && g2.MyHabits.Known) { mineH.Add(g2.MyHabits); hGames++; }
+            if (hGames > 0)
+            {
+                Caps(g, $"Your habits · from {hGames} replays", 2, y, 400); y += 22;
+                var typ = Data.Typical; int tg = Math.Max(1, Data.TypicalGames);
+                string Rate(int a, int b) => b == 0 ? "–" : $"{100.0 * a / b:0}%";
+                var hTiles = new List<(string Title, string Value, string Sub, (string, int, Color)[] Split)>
+                {
+                    ("Tech rate", Rate(mineH.Techs, mineH.TechChances), $"opponents {Rate(typ.Techs, typ.TechChances)}",
+                        new[] { ("in place", mineH.TechInPlace, Theme.Accent), ("in", mineH.TechToward, Theme.Good), ("away", mineH.TechAway, Them), ("missed", mineH.MissedTech, Theme.Bad) }),
+                    ("Off the ledge", mineH.LedgeOptions == 0 ? "–" : new[] { ("getup", mineH.LedgeGetup), ("roll", mineH.LedgeRoll), ("attack", mineH.LedgeAttack), ("jump", mineH.LedgeJump), ("drop", mineH.LedgeDrop) }.OrderByDescending(v => v.Item2).First().Item1,
+                        $"most of the time ({mineH.LedgeOptions} times)",
+                        new[] { ("getup", mineH.LedgeGetup, Theme.Accent), ("roll", mineH.LedgeRoll, Them), ("attack", mineH.LedgeAttack, Theme.Bad), ("jump", mineH.LedgeJump, Theme.Good), ("drop", mineH.LedgeDrop, Theme.Muted) }),
+                    ("L-cancels", Rate(mineH.LCancels, mineH.AerialLandings), $"of {mineH.AerialLandings} aerial landings · opponents {Rate(typ.LCancels, typ.AerialLandings)}", null),
+                    ("Movement", $"{(double)mineH.Wavedashes / hGames:0.#} wavedashes", $"a game · {Rate(mineH.FramesCenter, mineH.FramesAlive)} of the time mid-stage, {Rate(mineH.FramesOffstage, mineH.FramesAlive)} off it", null),
+                    ("Defense, a game", $"{(double)mineH.Shields / hGames:0} shields", $"{(double)(mineH.RollsToward + mineH.RollsAway) / hGames:0.#} rolls ({Rate(mineH.RollsAway, mineH.RollsToward + mineH.RollsAway)} away) · {(double)mineH.SpotDodges / hGames:0.#} spot dodges · {(double)mineH.AirDodges / hGames:0.#} air dodges", null),
+                    ("Grabs", Rate(mineH.Grabs, mineH.GrabTries), $"of {mineH.GrabTries} grabs land · throws most: " + (mineH.Throws == 0 ? "–" : new[] { ("forward", mineH.ThrowF), ("back", mineH.ThrowB), ("up", mineH.ThrowUp), ("down", mineH.ThrowDown) }.OrderByDescending(v => v.Item2).First().Item1), null),
+                };
+                for (int i = 0; i < hTiles.Count; i++)
+                {
+                    var r = new RectangleF(i % cols * (tw + 12), y + i / cols * (106 + 12), tw, 106);
+                    var t = hTiles[i];
+                    Card(g, r);
+                    Caps(g, t.Title, r.X + 14, r.Y + 10, r.Width - 28);
+                    Text(g, t.Value, Theme.Bold(17f), Theme.Text, new RectangleF(r.X + 13, r.Y + 28, r.Width - 26, 30));
+                    Text(g, t.Sub, Theme.Small, Theme.Muted, new RectangleF(r.X + 14, r.Y + 56, r.Width - 28, 18));
+                    if (t.Split != null)
+                    {
+                        int total = t.Split.Sum(v => v.Item2); float bx = r.X + 14, bw = r.Width - 28;
+                        if (total > 0)
+                            foreach (var v in t.Split)
+                            {
+                                float sw = bw * v.Item2 / total; if (sw < 1) continue;
+                                using (var b = new SolidBrush(v.Item3)) g.FillRectangle(b, bx, r.Y + 78, sw - 1, 6);
+                                if (sw > 40) Text(g, v.Item1, Theme.Small, v.Item3, new RectangleF(bx, r.Y + 86, sw, 16));
+                                bx += sw;
+                            }
+                    }
+                }
+                y += (hTiles.Count + cols - 1) / cols * (106 + 12) + 4;
+                var read = Scouting.Lines(mineH, hGames, Data.Typical, Data.TypicalGames, 4);
+                if (read.Count > 0)
+                {
+                    var r = new RectangleF(0, y, w, 34 + read.Count * 22);
+                    Card(g, r);
+                    Caps(g, "What opponents could read on you", 14, y + 10, w - 28, Theme.Accent);
+                    float yy = y + 32;
+                    foreach (var l in read) { Text(g, "• " + l.Habit, Theme.Body, Theme.Text, new RectangleF(14, yy, w - 28, 20)); yy += 22; }
+                    y += (int)r.Height + 14;
+                }
+            }
+
             // ---- signatures: your moves, and what beats you
             Caps(g, "Your game in a few lines", 2, y, 400); y += 22;
             var picks = new List<(string Title, string Big, string Small, int? Char)>();
@@ -282,6 +338,7 @@ namespace SkinManager.App
         public StatsData Data;
         public int? Selected;
         public event Action<int> Picked;
+        static readonly Color Learning = Color.FromArgb(96, 182, 255);
         readonly List<(int Char, RectangleF Box)> _spots = new List<(int, RectangleF)>();
         int? _hover;
 
@@ -303,27 +360,52 @@ namespace SkinManager.App
             using (var b = new SolidBrush(Color.FromArgb(215, 26, 28, 36))) using (var p = StatsArt.Round(box, 8)) g.FillPath(b, p);
             _spots.Clear();
             if (Data == null) return;
-            var chars = Data.Games.GroupBy(x => x.Me.Character).Select(x => (Char: x.Key, Rec: MatchHistory.Count(x))).ToList();
-            using (var t = new SolidBrush(Theme.Muted)) g.DrawString("YOUR CHARACTERS · GAMES PLAYED → · WIN RATE ↑", Theme.Small, t, 14, 10);
+            // how well you play each one: the average score of its games (a score already compares a game with your own
+            // usual, so a strong opponent or a loss you played well in doesn't sink it), pulled towards your overall
+            // average when there are few games. Win rate only when the scores aren't known yet.
+            var career = Data.Career;
+            double Score(GameRecord gr) => career != null && career.Games.TryGetValue(gr.Id, out var p) ? p.Score : double.NaN;
+            var allScores = Data.Games.Select(x => Score(x.Game)).Where(v => !double.IsNaN(v)).ToList();
+            bool scored = allScores.Count > 0;
+            double usual = scored ? allScores.Average() : MatchHistory.Count(Data.Games).Rate * 100;
+            const double prior = 5;
+            var chars = Data.Games.GroupBy(x => x.Me.Character).Select(x =>
+            {
+                var list = x.OrderBy(v => v.Game.Start).ToList();
+                var sc = list.Select(v => Score(v.Game)).Where(v => !double.IsNaN(v)).ToList();
+                var rec = MatchHistory.Count(list);
+                double raw = scored && sc.Count > 0 ? sc.Average() : rec.Rate * 100;
+                int n = scored ? sc.Count : rec.Games;
+                double value = (raw * n + usual * prior) / (n + prior);
+                // getting better: its last 8 games against the ones before (10+ games)
+                bool better = sc.Count >= 10 && sc.Skip(sc.Count - 8).Average() > sc.Take(sc.Count - 8).Average() + 4;
+                return (Char: x.Key, Rec: rec, Value: value, Raw: raw, Better: better);
+            }).ToList();
+            using (var t = new SolidBrush(Theme.Muted)) g.DrawString(scored ? "YOUR CHARACTERS · GAMES PLAYED → · HOW WELL YOU PLAY THEM ↑" : "YOUR CHARACTERS · GAMES PLAYED → · WIN RATE ↑", Theme.Small, t, 14, 10);
             if (chars.Count == 0) return;
-            var plot = new RectangleF(72, 80, Width - 104, Height - 152);
+            var plot = new RectangleF(92, 80, Width - 124, Height - 200);
             int most = Math.Max(4, chars.Max(c => c.Rec.Games));
             float X(int games) => plot.X + plot.Width * (float)(Math.Log(games) / Math.Log(most * 1.15));
-            float Y(double rate) => plot.Bottom - (float)rate * plot.Height;
+            // the middle is your own usual; the scale fits your characters (at least 15 points each way)
+            double spread = Math.Max(6, chars.Max(c => Math.Abs(c.Value - usual)) * 1.15);
+            float Y(double v) => plot.Bottom - (float)((v - usual + spread) / (2 * spread)) * plot.Height;
             // the four corners
             var sorted = chars.Select(c => c.Rec.Games).OrderBy(n => n).ToList();
             int split = Math.Max(3, sorted[sorted.Count / 2]);
-            float sx = X(split), sy = Y(0.5);
+            float sx = X(split), sy = Y(usual);
             using (var pen = new Pen(Color.FromArgb(70, 255, 255, 255)) { DashStyle = DashStyle.Dash }) { g.DrawLine(pen, sx, plot.Y, sx, plot.Bottom); g.DrawLine(pen, plot.X, sy, plot.Right, sy); }
             using (var pen = new Pen(Color.FromArgb(45, 255, 255, 255))) g.DrawRectangle(pen, plot.X, plot.Y, plot.Width, plot.Height);
-            void Corner(string s, float x, float y, bool right, Color c) { using (var b = new SolidBrush(Color.FromArgb(150, c))) g.DrawString(s, Theme.Small, b, new RectangleF(right ? x - 160 : x, y, 160, 18), new StringFormat { Alignment = right ? StringAlignment.Far : StringAlignment.Near }); }
-            Corner("COMFORT PICKS", plot.Right, plot.Y - 46, true, Theme.Good);
-            Corner("TRAPS", plot.Right, plot.Bottom + 46, true, Theme.Bad);
+            void Corner(string s, float x, float y, bool right, Color c) { using (var b = new SolidBrush(Color.FromArgb(170, c))) g.DrawString(s, Theme.Small, b, new RectangleF(right ? x - 200 : x, y, 200, 18), new StringFormat { Alignment = right ? StringAlignment.Far : StringAlignment.Near }); }
+            Corner("YOUR MAINS", plot.Right, plot.Y - 46, true, Theme.Good);
+            Corner("PUTTING IN THE WORK", plot.Right, plot.Bottom + 46, true, Learning);
             Corner("HIDDEN GEMS", plot.X, plot.Y - 46, false, Theme.Accent);
-            Corner("STILL LEARNING", plot.X, plot.Bottom + 46, false, Theme.Muted);
+            Corner("STILL NEW", plot.X, plot.Bottom + 46, false, Theme.Muted);
             using (var m = new SolidBrush(Theme.Muted))
             {
-                foreach (var p in new[] { 0, 50, 100 }) g.DrawString(p + "%", Theme.Small, m, new RectangleF(2, Y(p / 100.0) - 9, 40, 18), new StringFormat { Alignment = StringAlignment.Far });
+                var right = new StringFormat { Alignment = StringAlignment.Far };
+                g.DrawString("better", Theme.Small, m, new RectangleF(0, plot.Y - 9, 80, 18), right);
+                g.DrawString("your usual", Theme.Small, m, new RectangleF(0, sy - 9, 80, 18), right);
+                g.DrawString("tougher", Theme.Small, m, new RectangleF(0, plot.Bottom - 9, 80, 18), right);
                 foreach (var n in new[] { 1, 3, 10, 30, 100, 300 }.Where(n => n <= most * 1.15)) g.DrawString(n.ToString(), Theme.Small, m, X(n), plot.Bottom + 26, new StringFormat { Alignment = StringAlignment.Center });
                 g.DrawString("games played", Theme.Small, m, new RectangleF(plot.X, plot.Bottom + 46, plot.Width, 18), new StringFormat { Alignment = StringAlignment.Center });
             }
@@ -331,10 +413,11 @@ namespace SkinManager.App
             foreach (var c in chars.OrderBy(c => c.Rec.Games))
             {
                 float size = 30 + Math.Min(14, c.Rec.Games / 4f);
-                var r = new RectangleF(X(c.Rec.Games) - size / 2, Y(c.Rec.Rate) - size / 2, size, size);
+                var r = new RectangleF(X(c.Rec.Games) - size / 2, Y(c.Value) - size / 2, size, size);
                 r.X = Math.Max(plot.X - size / 2, Math.Min(plot.Right - size / 2, r.X)); r.Y = Math.Max(plot.Y - size / 2, Math.Min(plot.Bottom - size / 2, r.Y));
                 bool on = c.Char == Selected || c.Char == _hover;
-                var ring = RecordTable.RateColor(c.Rec.Rate);
+                // above your usual green, around it gold, below it blue (still learning, not bad)
+                var ring = c.Value >= usual + 4 ? Theme.Good : c.Value <= usual - 4 ? Learning : Theme.Accent;
                 using (var bg = new SolidBrush(Color.FromArgb(230, 30, 32, 40))) g.FillEllipse(bg, r);
                 var img = Data.Head(c.Char);
                 if (img != null)
@@ -345,13 +428,17 @@ namespace SkinManager.App
                     g.Restore(state);
                 }
                 using (var pen = new Pen(on ? Theme.Text : ring, on ? 3 : 2)) g.DrawEllipse(pen, r);
+                if (c.Better) using (var b = new SolidBrush(Theme.Good)) g.FillPolygon(b, new[] { new PointF(r.Right - 2, r.Y - 4), new PointF(r.Right + 5, r.Y + 6), new PointF(r.Right - 9, r.Y + 6) });
                 _spots.Add((c.Char, r));
             }
+            using (var m = new SolidBrush(Color.FromArgb(150, Theme.Muted)))
+                g.DrawString(scored ? "Height: the average grade score of its games. Scores compare each game with your own usual, so tough opponents and close losses don't sink a character. ▲ = getting better lately." : "Height: win rate (grades show once your replays are read).",
+                    Theme.Small, m, new RectangleF(14, Height - 38, Width - 28, 36), new StringFormat { Trimming = StringTrimming.EllipsisWord });
             if (_hover != null)
             {
                 var c = chars.First(x => x.Char == _hover);
                 var s = _spots.First(x => x.Char == _hover).Box;
-                string tip = $"{Fighters.Name(c.Char)} · {c.Rec} ({c.Rec.Percent}) · {c.Rec.Games} games";
+                string tip = $"{Fighters.Name(c.Char)} · {c.Rec.Games} games · {c.Rec}" + (scored ? $" · average grade {Progress.GradeOf((int)Math.Round(c.Raw))} ({c.Raw:0})" : "") + (c.Better ? " · getting better" : "");
                 var size = g.MeasureString(tip, Theme.Small);
                 var tr = new RectangleF(Math.Min(Width - size.Width - 18, Math.Max(4, s.X + s.Width / 2 - size.Width / 2 - 6)), s.Y > 40 ? s.Y - 26 : s.Bottom + 4, size.Width + 12, 22);
                 using (var b = new SolidBrush(Color.FromArgb(240, 12, 13, 18))) using (var p = StatsArt.Round(tr, 5)) g.FillPath(b, p);
@@ -381,9 +468,11 @@ namespace SkinManager.App
             if (por != null) { StatsArt.Cover(g, por, new RectangleF(w - 130, 2, 128, 108), 8, false, 0.5f, 0.1f); using (var p = StatsArt.Round(top, 8)) { g.SetClip(p); StatsArt.Shade(g, new RectangleF(w - 170, 0, 90, 112), 215, 0, LinearGradientMode.Horizontal); g.ResetClip(); } }
             Caps(g, "Your character", 16, 12, 200);
             Text(g, Fighters.Name(c), Theme.Bold(18f), Theme.Text, new RectangleF(15, 28, w - 160, 34));
-            Text(g, $"{rec}  ·  {rec.Percent}", Theme.Bold(12f), RecordTable.RateColor(rec.Rate), new RectangleF(16, 62, w - 160, 22));
+            Text(g, $"{rec}  ·  {rec.Percent}", Theme.Bold(12f), Theme.Text, new RectangleF(16, 62, w - 160, 22));
             var lastPlayed = games.Count > 0 ? games.Last().Game.Start : DateTime.MinValue;
-            Text(g, $"{rec.Games} games" + (games.Count > 0 ? $" · last played {lastPlayed.ToLocalTime():MMM d}" : ""), Theme.Small, Theme.Muted, new RectangleF(16, 86, w - 160, 18));
+            var scores = Data.Career == null ? new List<int>() : games.Select(v => Data.Career.Games.TryGetValue(v.Game.Id, out var gp) ? gp.Score : -1).Where(v => v >= 0).ToList();
+            string avg = scores.Count > 0 ? $" · average grade {Progress.GradeOf((int)Math.Round(scores.Average()))}" : "";
+            Text(g, $"{rec.Games} games" + avg + (games.Count > 0 ? $" · last played {lastPlayed.ToLocalTime():MMM d}" : ""), Theme.Small, Theme.Muted, new RectangleF(16, 86, w - 160, 18));
             y = 124;
 
             // smash stats as this character vs your overall
@@ -398,6 +487,8 @@ namespace SkinManager.App
                 ("Average kill %", mine.AvgKill, usual.AvgKill, "%", false, "0"),
                 ("Average death %", mine.AvgDeath, usual.AvgDeath, "%", true, "0"),
                 ("Kills per game", mine.KillsPerGame, usual.KillsPerGame, "", true, "0.0"),
+                ("L-cancels", HabitRate(sm.Where(x => x.MyCharacter == c), h => h.LCancels, h => h.AerialLandings), HabitRate(sm, h => h.LCancels, h => h.AerialLandings), "%", true, "0"),
+                ("Tech rate", HabitRate(sm.Where(x => x.MyCharacter == c), h => h.Techs, h => h.TechChances), HabitRate(sm, h => h.Techs, h => h.TechChances), "%", true, "0"),
             };
             var stats = new RectangleF(0, y, w, rows.Length * 30 + 16);
             Card(g, stats);
@@ -443,6 +534,13 @@ namespace SkinManager.App
             Matchups(g, "Toughest matchups", worst, new RectangleF(half + 12, y, half, muH));
             y += (int)muH;
             ContentHeight = y + 8;
+        }
+
+        static double HabitRate(IEnumerable<GameSmash> games, Func<PlayerHabits, int> part, Func<PlayerHabits, int> of)
+        {
+            int a = 0, b = 0;
+            foreach (var x in games) if (x.MyHabits != null && x.MyHabits.Known) { a += part(x.MyHabits); b += of(x.MyHabits); }
+            return b == 0 ? double.NaN : 100.0 * a / b;
         }
 
         void MoveList(Graphics g, string title, List<(string Name, int Count)> moves, RectangleF r, string unit)
@@ -583,6 +681,7 @@ namespace SkinManager.App
             Text(g, $"{Data.History.StageName(x.Game.Stage)} · {(int)time.TotalMinutes}:{time.Seconds:00}", Theme.Small, Theme.Text, new RectangleF(120, 76, w - 240, 18), Center);
             Text(g, x.Game.Start.ToLocalTime().ToString("MMM d, h:mm tt") + (x.Game.Ranked ? " · Ranked" : " · Unranked") + $" · game {x.Game.GameNumber}", Theme.Small, Theme.Muted, new RectangleF(120, 96, w - 240, 18), Center);
             int y = 142;
+            if (Data.Career != null && Data.Career.Games.TryGetValue(x.Game.Id, out var gp)) y = DrawReport(g, w, y, gp, s);
             if (s == null)
             {
                 Card(g, new RectangleF(0, y, w, 60));
@@ -660,6 +759,84 @@ namespace SkinManager.App
             Card(g, _replayButton, Color.FromArgb(230, 44, 48, 60));
             Text(g, "Show the replay file", Theme.BodyBold, Theme.Text, new RectangleF(_replayButton.X, y + 7, _replayButton.Width, 20), Center);
             ContentHeight = y + 40;
+        }
+
+        /// <summary>The game's report: grade, XP, levels, badges, bests, how it compares with your usual, your best combo
+        /// and your habits in it.</summary>
+        int DrawReport(Graphics g, int w, int y, GameProgress p, GameSmash s)
+        {
+            int top = y;
+            var gc = ReportArt.GradeColor(p.Grade);
+            // the grade and the XP
+            int h1 = 128;
+            Card(g, new RectangleF(0, y, w, h1));
+            ReportArt.Grade(g, p.Grade, p.Score, new RectangleF(12, y + 12, 74, 74));
+            Text(g, $"Score {p.Score}", Theme.Bold(13f), gc, new RectangleF(96, y + 12, w - 110, 24));
+            Text(g, $"better than {p.Percentile}% of your games before it" + (p.WinStreak >= 2 ? $" · {p.WinStreak} wins in a row" : ""), Theme.Small, Theme.Muted, new RectangleF(96, y + 36, w - 110, 18));
+            Text(g, $"+{p.Xp} XP: " + string.Join(", ", p.XpParts.Select(v => $"{v.Why} {v.Xp}")), Theme.Small, Theme.Text, new RectangleF(96, y + 56, w - 110, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+            ReportArt.XpBar(g, "Level", p.XpBefore, p.Xp, new RectangleF(14, y + 90, w / 2f - 22, 34), 1, Theme.Accent);
+            ReportArt.XpBar(g, Fighters.Name(p.Character), p.CharXpBefore, p.Xp, new RectangleF(w / 2f + 8, y + 90, w / 2f - 22, 34), 1, Them);
+            y += h1 + 12;
+            // badges and bests
+            if (p.NewBadges.Count > 0 || p.NewBests.Count > 0)
+            {
+                int rows = p.NewBadges.Count > 0 ? 1 : 0;
+                int h2 = 32 + rows * 66 + p.NewBests.Count * 20;
+                Card(g, new RectangleF(0, y, w, h2));
+                Caps(g, "Earned this game", 14, y + 10, w - 28, Theme.Accent);
+                float yy = y + 32;
+                if (p.NewBadges.Count > 0)
+                {
+                    int n = Math.Min(p.NewBadges.Count, Math.Max(1, (w - 20) / 86));
+                    for (int i = 0; i < n; i++)
+                    {
+                        var b = p.NewBadges[i]; float bx = 14 + i * 86;
+                        ReportArt.Medal(g, b, new RectangleF(bx + 23, yy, 36, 36));
+                        Text(g, b.Tier > 0 ? $"{b.Name} {Badge.Tiers[b.Tier]}" : b.Name, Theme.Small, Theme.Text, new RectangleF(bx - 4, yy + 38, 90, 18), Center);
+                    }
+                    if (p.NewBadges.Count > n) Text(g, $"+{p.NewBadges.Count - n}", Theme.Small, Theme.Muted, new RectangleF(w - 50, yy + 10, 40, 18), Right);
+                    yy += 66;
+                }
+                foreach (var b in p.NewBests) { Text(g, $"★ NEW BEST · {b.Name}: {b.Text}" + (b.Detail != null ? $" ({b.Detail})" : ""), Theme.BodyBold, Theme.Accent, new RectangleF(14, yy, w - 28, 20)); yy += 20; }
+                y += h2 + 12;
+            }
+            // compared with your usual, your best combo, your habits
+            if (s != null)
+            {
+                var rows = p.VsUsual.Where(v => !double.IsNaN(v.Value)).ToList();
+                var hb = s.MyHabits;
+                bool habits = hb != null && hb.Known;
+                int h3 = 34 + rows.Count * 22 + (s.BestComboHits >= 2 ? 44 : 0) + (habits ? 44 : 0);
+                Card(g, new RectangleF(0, y, w, h3));
+                Caps(g, "Compared with your usual", 14, y + 10, w - 28);
+                float yy = y + 32;
+                foreach (var v in rows)
+                {
+                    string fmt = v.Format;
+                    Text(g, v.Name, Theme.Body, Theme.Muted, new RectangleF(14, yy, w * 0.45f, 20));
+                    Text(g, v.Value.ToString(fmt), Theme.BodyBold, Theme.Text, new RectangleF(w * 0.46f, yy, w * 0.2f, 20));
+                    if (!double.IsNaN(v.Usual))
+                    {
+                        double d = v.Value - v.Usual; bool better = (d > 0) == v.HigherBetter; bool same = Math.Abs(d) < Math.Abs(v.Usual) * 0.05;
+                        Text(g, same ? "about usual" : $"{(d > 0 ? "▲" : "▼")} usual {v.Usual.ToString(fmt)}", Theme.Small, same ? Theme.Muted : better ? Theme.Good : Theme.Bad, new RectangleF(w * 0.66f, yy + 2, w * 0.34f - 10, 18));
+                    }
+                    yy += 22;
+                }
+                if (s.BestComboHits >= 2)
+                {
+                    Text(g, $"Best combo: {s.BestComboDamage:0}% in {s.BestComboHits} hits (from {s.BestComboStart:0}%)", Theme.BodyBold, Theme.Text, new RectangleF(14, yy + 4, w - 28, 20));
+                    Text(g, ReportArt.Combo(s, Data.MoveName), Theme.Small, Theme.Muted, new RectangleF(14, yy + 24, w - 28, 18));
+                    yy += 44;
+                }
+                if (habits)
+                {
+                    string Of(int a, int b) => b == 0 ? "–" : $"{a}/{b}";
+                    Text(g, $"L-cancels {Of(hb.LCancels, hb.AerialLandings)} · techs {Of(hb.Techs, hb.TechChances)} · wavedashes {hb.Wavedashes} · grabs {Of(hb.Grabs, hb.GrabTries)}", Theme.Small, Theme.Text, new RectangleF(14, yy + 4, w - 28, 18));
+                    Text(g, $"ledge: {hb.LedgeGetup} getups, {hb.LedgeRoll} rolls, {hb.LedgeJump} jumps, {hb.LedgeAttack} attacks, {hb.LedgeDrop} drops · {Pct((double)hb.FramesCenter / Math.Max(1, hb.FramesAlive))} of the game mid-stage", Theme.Small, Theme.Muted, new RectangleF(14, yy + 22, w - 28, 18));
+                }
+                y += h3 + 12;
+            }
+            return y;
         }
 
         /// <summary>A player's percent through the game: up at each hit, back to 0 at each stock lost.</summary>

@@ -224,8 +224,9 @@ namespace SkinManager.Core
             return null;
         }
 
-        /// <summary>A fighter's subaction (animation) names by number, from its moveset only (quick: no animations read).</summary>
-        public static List<string> SubactionNames(Fat32Image card, Character c)
+        /// <summary>A fighter's subaction (animation) names by number and its aerials' landing lag, from its moveset only
+        /// (quick: no animations read).</summary>
+        public static MoveTable MoveTable(Fat32Image card, Character c)
         {
             var dir = c.FighterFolderPath + "/";
             var names = card.ListFolder(dir).Select(e => e.Name).ToList();
@@ -239,7 +240,10 @@ namespace SkinManager.Core
                     var src = root.Children[0].WorkingUncompressed;
                     var bytes = new byte[src.Length];
                     System.Runtime.InteropServices.Marshal.Copy((IntPtr)src.Address, bytes, 0, src.Length);
-                    return new Moveset(bytes).Subactions.Select(s => s.Animation).ToList();
+                    var m = new Moveset(bytes);
+                    var t = new MoveTable { Names = m.Subactions.Select(s => s.Animation).ToList() };
+                    for (int i = 0; i < 5; i++) t.LandingLag[i] = (int)Math.Round(m.Attr(0x140 + 4 * i));
+                    return t;
                 }
         }
 
