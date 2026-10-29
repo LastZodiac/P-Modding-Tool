@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The Setup program people download: one exe with the app inside (payload.zip, made by the release script). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <AssemblyName>Setup</AssemblyName>
+    <RootNamespace>SkinManager.Setup</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>P+ Modding Tool Setup</Product>
+    <Company>Last Zodiac</Company>
+    <Authors>Last Zodiac</Authors>
+    <Copyright>Copyright (c) 2026 Last Zodiac. Licensed under the GNU GPL v3.0.</Copyright>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <PayloadPath Condition="'$(PayloadPath)' == ''">payload.zip</PayloadPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="app.ico" LogicalName="app.ico" />
+    <EmbeddedResource Include="$(PayloadPath)" LogicalName="payload.zip" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+</Project>

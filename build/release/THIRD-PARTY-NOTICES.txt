@@ -1,0 +1,33 @@
+P+ Modding Tool itself: Copyright (c) 2026 Last Zodiac, licensed under the GNU GPL v3.0 (GPL-3.0.txt).
+
+P+ Modding Tool uses these libraries. They are shipped in the "lib" folder.
+
+BrawlLib (lib\BrawlLib.dll)
+  From BrawlCrate: https://github.com/soopercool101/BrawlCrate
+  License: GNU Lesser General Public License, version 3 (BrawlLib-LGPL-3.0.txt, which builds on GPL-3.0.txt).
+  The copy shipped here has small changes (so it builds without Windows' designer tools). Its full source with
+  those changes is published with every release of P+ Modding Tool as "BrawlLib-source-<version>.zip".
+  You may replace lib\BrawlLib.dll with your own build of BrawlLib.
+
+OpenTK (lib\OpenTK.dll)
+  https://opentk.net
+  Copyright (c) 2006 - 2010 the Open Toolkit library.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+  to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions
+  of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+  THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+  CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  DEALINGS IN THE SOFTWARE.
+
+NLayer (built into the app: reads MP3 files for "Add your own music")
+  https://github.com/naudio/NLayer (version 2.0.1)
+  Copyright (c) 2018 Mark Heath, Andrew Ward & Contributors. License: MIT (the same text as OpenTK's above,
+  with this copyright line).
