@@ -1,0 +1,20 @@
+# Keeps editors from reformatting files: only what the code already does.
+root = true
+
+[*]
+end_of_line = lf
+# Left off on purpose: changing them would touch lines nobody edited.
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+[*.{csproj,config,manifest,xml}]
+indent_style = space
+indent_size = 2
+
+[*.sh]
+indent_style = space
+indent_size = 2
