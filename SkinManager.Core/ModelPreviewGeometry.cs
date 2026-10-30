@@ -41,6 +41,28 @@ namespace SkinManager.Core
                     var g = r.Multiply(new Vector3(x / NZ(s._x), y / NZ(s._y), z / NZ(s._z)));
                     return Yaw(new Vector3(bp._x + g._x, bp._y + g._y, bp._z + g._z));
                 }
+                // a hitbox on a held thing (ZSS's whip): the thing's model, posed by its own animation, hanging off the fighter's bone
+                var artModels = mroot.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                Vector3? ArticlePlace(Hitbox h)
+                {
+                    if (!artModels.TryGetValue(h.ArticleModel, out var am)) return null;
+                    anims.TryGetValue(h.ArticleAnim ?? "", out var aa);
+                    am.ApplyCHR(aa, aa == null ? 0 : Math.Max(1, Math.Min(h.ArticleFrame, aa.FrameCount)));
+                    var abs = am._linker?.BoneCache;
+                    var ab = abs != null && h.Bone >= 0 && h.Bone < abs.Length ? abs[h.Bone] as MDL0BoneNode : null;
+                    var fb = BoneAt(h.AttachBone);
+                    if (ab == null || fb == null) return null;
+                    var bp = ab._frameMatrix.GetPoint(); var r = ab._frameMatrix.GetRotationMatrix(); var sc = Scale(ab);
+                    var g = r.Multiply(new Vector3(h.X / NZ(sc._x), h.Y / NZ(sc._y), h.Z / NZ(sc._z)));
+                    var local = new Vector3(bp._x + g._x, bp._y + g._y, bp._z + g._z);
+                    // its animation is made around the fighter: its own "HaveN" follows the hand. Line that up with the fighter's
+                    // hand (RHaveN/LHaveN) so the thing sits in the hand it's held in.
+                    string handName = fb.Name.Length > 1 && (fb.Name[0] == 'R' || fb.Name[0] == 'L') ? fb.Name.Substring(1) : fb.Name;
+                    var hand = abs.OfType<MDL0BoneNode>().FirstOrDefault(x => string.Equals(x.Name, handName, StringComparison.OrdinalIgnoreCase));
+                    if (hand != null) local = fb._frameMatrix * (hand._frameMatrix.Invert() * local);
+                    else local = fb._frameMatrix * local;
+                    return Yaw(local);
+                }
                 // standing body: the hurtboxes in the default pose
                 model.ApplyCHR(null, 0);
                 float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
@@ -65,6 +87,12 @@ namespace SkinManager.Core
                             if (tb != null) { var t = Yaw(tb._frameMatrix.GetPoint()); fp.RootX = t._x * size; fp.RootY = t._y * size; }
                             foreach (var h in f.Hitboxes)
                             {
+                                if (h.ArticleModel != null)
+                                {
+                                    var ap = ArticlePlace(h); if (ap == null) continue;
+                                    fp.Hits.Add((h, ap.Value._x * size, ap.Value._y * size, h.Size * size));
+                                    continue;
+                                }
                                 var b = BoneAt(h.Bone); if (b == null) continue;
                                 var p = Place(b, h.X, h.Y, h.Z);
                                 fp.Hits.Add((h, p._x * size, p._y * size, h.Size * size));

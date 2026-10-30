@@ -128,6 +128,7 @@ namespace SkinManager.App
         public Dictionary<long, GameSmash> Smash = new Dictionary<long, GameSmash>();
         public Func<int?, Image> Head = _ => null, Portrait = _ => null, Stage = _ => null;
         public Func<int, int, string> MoveName = (c, s) => null;
+        public Func<long, GameCoach> Coach = _ => null;      // DI tips, fun facts, a combo idea (null while being worked out)
         public bool ReplaysLoading; public int ReplaysRead, ReplaysTotal;
         public Career Career;                       // progress over all your games (not just the filter's)
         public PlayerHabits Typical; public int TypicalGames;   // everyone you've played, added up
@@ -231,7 +232,7 @@ namespace SkinManager.App
             if (hGames > 0)
             {
                 Caps(g, $"Your habits · from {hGames} replays", 2, y, 400); y += 22;
-                var typ = Data.Typical; int tg = Math.Max(1, Data.TypicalGames);
+                var typ = Data.Typical ?? new PlayerHabits(); int tg = Math.Max(1, Data.TypicalGames);
                 string Rate(int a, int b) => b == 0 ? "–" : $"{100.0 * a / b:0}%";
                 var hTiles = new List<(string Title, string Value, string Sub, (string, int, Color)[] Split)>
                 {
@@ -799,6 +800,31 @@ namespace SkinManager.App
                 }
                 foreach (var b in p.NewBests) { Text(g, $"★ NEW BEST · {b.Name}: {b.Text}" + (b.Detail != null ? $" ({b.Detail})" : ""), Theme.BodyBold, Theme.Accent, new RectangleF(14, yy, w - 28, 20)); yy += 20; }
                 y += h2 + 12;
+            }
+            // the coach
+            if (s != null)
+            {
+                var coach = Data.Coach(p.GameId);
+                if (coach == null || coach.Any)
+                {
+                    int h4 = 34 + (coach == null ? 22 : coach.Tips.Count * 48 + coach.Facts.Count * 36 + (coach.Combo != null ? 40 : 0));
+                    Card(g, new RectangleF(0, y, w, h4));
+                    Caps(g, "Coach's notes", 14, y + 10, w - 28, Theme.Accent);
+                    float yy = y + 32;
+                    if (coach == null) Text(g, "Working out how you lost your stocks…", Theme.Small, Theme.Muted, new RectangleF(14, yy, w - 28, 20));
+                    else
+                    {
+                        foreach (var t in coach.Tips)
+                        {
+                            ReportArt.Stick(g, t, new RectangleF(14, yy + 2, 40, 40));
+                            Text(g, DeathCoach.Say(t), Theme.Small, t.Saved ? Theme.Text : Theme.Muted, new RectangleF(62, yy + 2, w - 76, 40), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+                            yy += 48;
+                        }
+                        foreach (var f in coach.Facts) { Text(g, "★ " + f, Theme.Small, Theme.Text, new RectangleF(14, yy, w - 28, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord }); yy += 36; }
+                        if (coach.Combo != null) Text(g, coach.Combo, Theme.Small, Theme.Accent, new RectangleF(14, yy, w - 28, 38), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+                    }
+                    y += h4 + 12;
+                }
             }
             // compared with your usual, your best combo, your habits
             if (s != null)

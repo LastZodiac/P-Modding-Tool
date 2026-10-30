@@ -4,28 +4,91 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 using System.Text;
 
 namespace SkinManager.Core
 {
+    [DataContract]
     public sealed class GamePlayer
     {
-        public string UserId, Name, Code;
-        public int Character;     // the game's character number (Fighters.Name gives the name)
-        public bool? Won;
+        [DataMember] public string UserId, Name, Code;
+        [DataMember] public int Character;     // the game's character number (Fighters.Name gives the name)
+        [DataMember] public bool? Won;
     }
 
+    [DataContract]
     public sealed class GameRecord
     {
-        public long Id;
-        public DateTime Start;    // UTC
-        public int Stage;         // stage slot (0x21 = Smashville)
-        public bool Ranked, Teams;
-        public int Frames;        // length (60 a second)
-        public string Session;    // the set it belongs to
-        public int GameNumber;
-        public string File;       // the replay (full path, as Brawl Online saved it)
-        public List<GamePlayer> Players = new List<GamePlayer>();
+        [DataMember] public long Id;           // our own: the same for a game however it was read (see Key)
+        [DataMember] public DateTime Start;    // UTC
+        [DataMember] public int Stage;         // stage slot (0x21 = Smashville)
+        [DataMember] public bool Ranked, Teams;
+        [DataMember] public int Frames;        // length (60 a second)
+        [DataMember] public string Session;    // the set it belongs to
+        [DataMember] public int GameNumber;
+        [DataMember] public string File;       // the replay (full path, as Brawl Online saved it)
+        [DataMember] public List<GamePlayer> Players = new List<GamePlayer>();
+
+        /// <summary>What makes a game the same game: when it started, which game of the set, and who played.</summary>
+        public string Key => $"{Start.Ticks}|{GameNumber}|{string.Join(",", Players.Select(p => p.UserId ?? p.Code).OrderBy(x => x, StringComparer.Ordinal))}";
+
+        public static long IdOf(string key)
+        {
+            using (var sha = System.Security.Cryptography.SHA1.Create())
+                return BitConverter.ToInt64(sha.ComputeHash(Encoding.UTF8.GetBytes(key)), 0) & long.MaxValue;
+        }
+    }
+
+    /// <summary>Every game the app has ever read, kept in its own file: Brawl Online's history and replays can be
+    /// cleared or deleted (to make room), but what was read from them stays.</summary>
+    public static class MatchArchive
+    {
+        static readonly object Gate = new object();
+        static string FileIn(string folder) => Path.Combine(folder, "games.json");
+
+        public static List<GameRecord> Read(string folder)
+        {
+            lock (Gate)
+            {
+                try
+                {
+                    var f = FileIn(folder);
+                    if (!File.Exists(f)) return new List<GameRecord>();
+                    using (var s = File.OpenRead(f)) return (List<GameRecord>)new DataContractJsonSerializer(typeof(List<GameRecord>)).ReadObject(s) ?? new List<GameRecord>();
+                }
+                catch { return new List<GameRecord>(); }
+            }
+        }
+
+        /// <summary>Adds the games Brawl Online knows to the kept ones (its newer copy wins), saves them if anything
+        /// was new, and returns them all.</summary>
+        public static List<GameRecord> Merge(IEnumerable<GameRecord> fromBrawlOnline, string folder)
+        {
+            lock (Gate)
+            {
+                var kept = Read(folder).Where(g => g.Players.Count >= 2).ToDictionary(g => g.Key);
+                bool changed = false;
+                foreach (var g in fromBrawlOnline)
+                {
+                    if (!kept.TryGetValue(g.Key, out var old)) changed = true;
+                    else if (old.File != g.File || old.Frames != g.Frames || old.Players.Zip(g.Players, (a, b) => a.Won != b.Won || a.Character != b.Character).Any(x => x)) changed = true;
+                    kept[g.Key] = g;
+                }
+                var all = kept.Values.OrderBy(g => g.Start).ToList();
+                if (changed)
+                    try
+                    {
+                        Directory.CreateDirectory(folder);
+                        var f = FileIn(folder); var tmp = f + ".tmp";
+                        using (var s = File.Create(tmp)) new DataContractJsonSerializer(typeof(List<GameRecord>)).WriteObject(s, all);
+                        if (File.Exists(f)) File.Replace(tmp, f, null); else File.Move(tmp, f);
+                    }
+                    catch { }
+                return all;
+            }
+        }
     }
 
     /// <summary>A win-loss record.</summary>
@@ -70,11 +133,35 @@ namespace SkinManager.Core
         /// <summary>Brawl Online's folder (…\AppData\Roaming\Brawl Online) from its netplay folder.</summary>
         public static string DatabasePath(BrawlOnlineInstall install) => Path.Combine(Path.GetDirectoryName(install.NetplayFolder.TrimEnd('\\', '/')), "replays.sqlite");
 
-        public static MatchHistory Load(string databasePath, Dictionary<int, string> stageNames = null)
+        /// <summary>Your games: Brawl Online's history (if it's there) and every game read before (archiveFolder: kept
+        /// there, so deleting replays or the history doesn't lose them).</summary>
+        public static MatchHistory Load(string databasePath, Dictionary<int, string> stageNames = null, string archiveFolder = null)
+        {
+            var h = new MatchHistory { Source = databasePath, StageNames = stageNames ?? new Dictionary<int, string>() };
+            var fromDb = File.Exists(databasePath) ? FromDatabase(databasePath) : new List<GameRecord>();
+            // Brawl Online adds games to its list only now and then (when it looks through its replays), but writes each
+            // game's replay as soon as it ends: games newer than its list are read from their replays, so they count
+            // right away (with the same record Brawl Online makes later, so they're never counted twice)
+            try
+            {
+                var kept = archiveFolder != null ? MatchArchive.Read(archiveFolder) : new List<GameRecord>();
+                fromDb.AddRange(FromNewReplays(fromDb.Concat(kept).ToList()));
+            }
+            catch { }
+            h.Games = archiveFolder != null ? MatchArchive.Merge(fromDb, archiveFolder) : fromDb;
+            foreach (var g in h.Games) g.Id = GameRecord.IdOf(g.Key);
+            // you: whoever plays in (nearly) every game
+            var me = h.Games.SelectMany(g => g.Players.Select(p => p.UserId)).Where(u => !string.IsNullOrEmpty(u)).GroupBy(u => u).OrderByDescending(x => x.Count()).FirstOrDefault();
+            h.Me = me?.Key;
+            var mine = h.Games.SelectMany(g => g.Players).LastOrDefault(p => p.UserId == h.Me);
+            h.MyName = mine?.Name; h.MyCode = mine?.Code;
+            return h;
+        }
+
+        static List<GameRecord> FromDatabase(string databasePath)
         {
             var db = SqliteReader.Open(databasePath);
-            var h = new MatchHistory { Source = databasePath, StageNames = stageNames ?? new Dictionary<int, string>() };
-            if (!db.HasTable("game") || !db.HasTable("player")) return h;
+            if (!db.HasTable("game") || !db.HasTable("player")) return new List<GameRecord>();
             var files = db.HasTable("file") ? db.Table("file").ToDictionary(r => L(r, "_id"), r => S(r, "folder") is string dir && S(r, "name") is string n ? Path.Combine(dir, n) : S(r, "name")) : new Dictionary<long, string>();
             var games = new Dictionary<long, GameRecord>();
             foreach (var r in db.Table("game"))
@@ -94,13 +181,90 @@ namespace SkinManager.Core
                 var won = r.TryGetValue("is_winner", out var w) && w is long wl ? (bool?)(wl == 1) : null;
                 g.Players.Add(new GamePlayer { UserId = S(r, "user_id"), Name = S(r, "display_name"), Code = S(r, "connect_code"), Character = Fighters.Same((int)L(r, "character_id")), Won = won });
             }
-            h.Games = games.Values.Where(g => g.Players.Count >= 2).OrderBy(g => g.Start).ToList();
-            // you: whoever plays in (nearly) every game
-            var me = h.Games.SelectMany(g => g.Players.Select(p => p.UserId)).Where(u => !string.IsNullOrEmpty(u)).GroupBy(u => u).OrderByDescending(x => x.Count()).FirstOrDefault();
-            h.Me = me?.Key;
-            var mine = h.Games.SelectMany(g => g.Players).LastOrDefault(p => p.UserId == h.Me);
-            h.MyName = mine?.Name; h.MyCode = mine?.Code;
-            return h;
+            foreach (var g in games.Values) g.Players = g.Players.OrderBy(p => p.UserId, StringComparer.Ordinal).ToList();
+            return games.Values.Where(g => g.Players.Count >= 2).OrderBy(g => g.Start).ToList();
+        }
+
+        /// <summary>Games whose replays are newer than every game known so far (read from the replays' own headers).</summary>
+        static List<GameRecord> FromNewReplays(List<GameRecord> known)
+        {
+            var result = new List<GameRecord>();
+            var withFiles = known.Where(g => !string.IsNullOrEmpty(g.File)).ToList();
+            var names = new HashSet<string>(withFiles.Select(g => Path.GetFileName(g.File)), StringComparer.OrdinalIgnoreCase);
+            var keys = new HashSet<string>(known.Select(g => g.Key));
+            DateTime since = known.Count > 0 ? known.Max(g => g.Start).AddHours(-6) : DateTime.UtcNow.AddDays(-2);
+            // where the replays are: next to the newest known ones (a folder per month), else Documents\Brawl Online
+            var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in withFiles.OrderByDescending(g => g.Start).Take(20))
+                try { var month = Path.GetDirectoryName(g.File); var root = Path.GetDirectoryName(month); if (Directory.Exists(root)) roots.Add(root); } catch { }
+            try { var docs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Brawl Online"); if (Directory.Exists(docs)) roots.Add(docs); } catch { }
+            foreach (var root in roots)
+            {
+                var folders = new List<string> { root };
+                try { folders.AddRange(Directory.GetDirectories(root).Where(d => Directory.GetLastWriteTimeUtc(d) > since.AddDays(-1))); } catch { }
+                foreach (var folder in folders)
+                {
+                    string[] files;
+                    try { files = Directory.GetFiles(folder, "*.brep"); } catch { continue; }
+                    foreach (var file in files)
+                    {
+                        if (names.Contains(Path.GetFileName(file))) continue;
+                        try
+                        {
+                            if (File.GetLastWriteTimeUtc(file) < since) continue;
+                            var g = ReplayHeader(file);
+                            if (g == null || !keys.Add(g.Key)) continue;
+                            names.Add(Path.GetFileName(file));
+                            result.Add(g);
+                        }
+                        catch { }
+                    }
+                }
+            }
+            return result;
+        }
+
+        /// <summary>A game's record from its replay's header and ending (null if the game hasn't finished).</summary>
+        public static GameRecord ReplayHeader(string path)
+        {
+            object info = null, end = null;
+            using (var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var r = new BinaryReader(f))
+            {
+                var magic = r.ReadBytes(8);
+                if (magic.Length < 8 || magic[1] != 'B' || magic[2] != 'R' || magic[3] != 'P') return null;
+                f.Position = 0x20;
+                while (f.Position + 20 <= f.Length)
+                {
+                    string name = System.Text.Encoding.ASCII.GetString(r.ReadBytes(4));
+                    r.ReadUInt32(); uint packed = r.ReadUInt32(); uint size = r.ReadUInt32(); r.ReadUInt32();
+                    if (f.Position + packed > f.Length) break;
+                    if (name != "INFO" && name != "ENDG") { f.Position += packed; continue; }
+                    var raw = r.ReadBytes((int)packed);
+                    var data = raw.Length >= 2 && raw[0] == 0x78 ? Replays.Inflate(raw, (int)size) : raw;
+                    var obj = Json.Parse(System.Text.Encoding.UTF8.GetString(data));
+                    if (name == "INFO") info = obj; else end = obj;
+                }
+            }
+            if (info == null || end == null) return null;
+            var g = new GameRecord
+            {
+                File = path, Stage = (int)Json.Num(info, "stageId"), Ranked = Json.Str(info, "mode") == "ranked", Teams = Json.Bool(info, "isTeams"),
+                GameNumber = (int)Json.Num(info, "gameIndex"), Session = Json.Str(info, "matchId"),
+                Frames = (int)Json.Num(end, "lastFrame"),
+            };
+            if (!DateTime.TryParse(Json.Str(info, "startTime"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var t)) return null;
+            g.Start = t;
+            var won = new Dictionary<long, bool>();
+            foreach (var p in Json.Arr(end, "players")) won[Json.Num(p, "port")] = Json.Bool(p, "isWinner");
+            foreach (var p in Json.Arr(info, "players"))
+                g.Players.Add(new GamePlayer
+                {
+                    UserId = Json.Str(p, "uid"), Name = Json.Str(p, "displayName"), Code = Json.Str(p, "connectCode"), Character = Fighters.Same((int)Json.Num(p, "characterId")),
+                    Won = won.TryGetValue(Json.Num(p, "port"), out var w) ? (bool?)w : null,
+                });
+            g.Players = g.Players.OrderBy(p => p.UserId, StringComparer.Ordinal).ToList();
+            return g.Players.Count >= 2 ? g : null;
         }
 
         static long L(Dictionary<string, object> r, string c) => r.TryGetValue(c, out var v) && v is long l ? l : 0;

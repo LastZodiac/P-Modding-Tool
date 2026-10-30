@@ -180,12 +180,54 @@ namespace SkinManager.Core
                 var art = arts[index];
                 var withHits = art.Subactions.Where(s => s.Main.Any(x => x.Id == 0x06000D00 || x.Id == 0x06150F00)).ToList();
                 if (withHits.Count == 0) continue;
-                var pick = withHits.FirstOrDefault(s => (s.Animation ?? "").Contains("Air") == air) ?? withHits[0];
+                // the article's script for this very move if it has one (the whip's "AttackHi4" for up smash), else by ground/air
+                var pick = withHits.FirstOrDefault(s => e.Parts.Any(pt => string.Equals(pt, s.Animation, StringComparison.OrdinalIgnoreCase)))
+                           ?? withHits.FirstOrDefault(s => (s.Animation ?? "").Contains("Air") == air) ?? withHits[0];
                 var d = FrameData.Run(b.Moves, pick.Animation, new[] { pick }, _ => 0);
                 if (d.Hits.Count == 0) continue;
                 string kind = art.Subactions.Any(s => Regex.IsMatch(s.Animation ?? "", "Fly|Shoot|Bullet|Arrow|Throw|Move|Roll|Fall", RegexOptions.IgnoreCase)) ? "Projectile" : "Spawned hitbox";
-                e.Data.Projectiles.Add(new Projectile { Name = $"{kind} ({Regex.Replace(pick.Animation ?? "?", "([a-z])([A-Z])", "$1 $2").ToLowerInvariant()})", Frame = frame, Article = art, Data = d });
+                var p = new Projectile { Name = $"{kind} ({Regex.Replace(pick.Animation ?? "?", "([a-z])([A-Z])", "$1 $2").ToLowerInvariant()})", Frame = frame, Article = art, Data = d };
+                if (!Attach(b, e, p, pick.Animation)) e.Data.Projectiles.Add(p);
             }
+            // a held thing that plays along with the move without being made by it (ZSS's whip in her up B is out from the
+            // start): its script for this move has hitboxes, so they're the move's too
+            foreach (var art in arts.Where(x => x.Bone > 0))
+            {
+                if (e.Data.Hits.Any(h => h.ArticleModel != null)) break;
+                var own = art.Subactions.FirstOrDefault(s => e.Parts.Any(pt => string.Equals(pt, s.Animation, StringComparison.OrdinalIgnoreCase)) && s.Main.Any(x => x.Id == 0x06000D00 || x.Id == 0x06150F00));
+                if (own == null) continue;
+                var d = FrameData.Run(b.Moves, own.Animation, new[] { own }, _ => 0);
+                if (d.Hits.Count == 0) continue;
+                Attach(b, e, new Projectile { Name = "Held", Frame = 1, Article = art, Data = d }, own.Animation);
+            }
+        }
+
+        /// <summary>A thing the fighter holds while the move plays (ZSS's whip in her neutral air): its hitboxes become the
+        /// move's own, drawn where the thing is (its model, posed by its animation for this move, hanging off the fighter's
+        /// bone). True when it was such a thing.</summary>
+        static bool Attach(FighterBook b, MoveEntry e, Projectile p, string anim)
+        {
+            if (string.IsNullOrEmpty(anim) || p.Article.Bone <= 0) return false;
+            // its animation for this move: "Wpn<Model>[C05]<Anim>" in the motion file
+            var chr = b.Lengths.Keys.FirstOrDefault(k => k.StartsWith("Wpn", StringComparison.OrdinalIgnoreCase) && k.EndsWith(anim, StringComparison.OrdinalIgnoreCase));
+            if (chr == null) return false;
+            var model = Regex.Replace(chr.Substring(0, chr.Length - anim.Length), "[A-Z][0-9]{2}$", "");
+            if (model.Length <= 3) return false;
+            var md = e.Data;
+            foreach (var f in p.Data.Frames)
+            {
+                int at = p.Frame + f.Frame - 1;
+                var target = md.Frames.FirstOrDefault(x => x.Frame == at);
+                if (target == null) continue;
+                foreach (var h in f.Hitboxes)
+                {
+                    var c = h.Copy(); c.ArticleModel = model; c.ArticleAnim = chr; c.AttachBone = p.Article.Bone; c.ArticleFrame = f.AnimFrame > 0 ? f.AnimFrame : f.Frame;
+                    target.Hitboxes.Add(c);
+                    if (!md.Hits.Any(x => x.Id == c.Id && x.Bone == c.Bone && x.ArticleModel == c.ArticleModel)) md.Hits.Add(c);
+                }
+            }
+            FrameData.Windows(md);
+            return true;
         }
 
         static string Signature(MoveData d) =>

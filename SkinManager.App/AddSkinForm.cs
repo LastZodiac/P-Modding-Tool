@@ -206,8 +206,9 @@ namespace SkinManager.App
                     {
                         fits++;
                         tile.Dimmed = false;
-                        tile.Badge = mine != null ? "Fits • turns off your " + mine.Name : "Fits";
-                        tile.BadgeColor = Theme.Good;
+                        var byHand = mine == null ? HandMods.Last?.Costume(c, kv.Key.Index) : null;
+                        tile.Badge = mine != null ? "Fits • turns off your " + mine.Name : byHand != null ? "Fits • replaces your own costume (kept)" : "Fits";
+                        tile.BadgeColor = byHand != null ? Theme.Warn : Theme.Good;
                         var slot = kv.Key;
                         tile.Click += (s, e) => { _slot = slot; foreach (var x in tiles.Values) x.Selected = x == tile; grid.Invalidate(true); _next.Enabled = true; };
                         tile.DoubleClick += (s, e) => { _slot = slot; Next(); };

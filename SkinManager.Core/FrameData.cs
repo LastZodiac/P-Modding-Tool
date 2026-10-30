@@ -15,6 +15,9 @@ namespace SkinManager.Core
         public int Angle, Bkb, Kbg, Wkb, ShieldDamage, Trip, Flags, SpecialFlags;
         public float Hitlag, Sdi;
         public bool Special, Grab, Throw;
+        // a hitbox on a thing the fighter holds (ZSS's whip...): its Bone is that thing's bone; it hangs off the fighter's AttachBone,
+        // posed by the thing's own animation (ArticleAnim, frame ArticleFrame) on its model (ArticleModel, in the motion file)
+        public string ArticleModel, ArticleAnim; public int AttachBone = -1; public float ArticleFrame;
         public Hitbox Copy() => (Hitbox)MemberwiseClone();
         public string DamageText => float.IsNaN(Damage) ? "?" : Damage.ToString("0.#") + "%";
         public string Summary => Grab ? $"grab {Size:0.#}" : $"{DamageText} {Angle}° BKB {Bkb} KBG {Kbg}" + (Wkb > 0 ? $" WKB {Wkb}" : "");
@@ -102,6 +105,8 @@ namespace SkinManager.Core
                 }
                 void Snap(int frame, float at)
                 {
+                    // a looping animation (subaction flag 0x02: rapid jabs, grab holds...) starts over at its end
+                    if ((s.Flags & 0x02) != 0 && animLen > 1 && at > animLen) at = (at - 1) % animLen + 1;
                     md.Frames.Add(new FrameState { Frame = frame, AnimFrame = at, Animation = s.Animation, Body = body, Hidden = hidden.ToArray(), Hitboxes = active.Values.Select(h => h.Copy()).ToList() });
                 }
 
@@ -185,7 +190,14 @@ namespace SkinManager.Core
             }
             md.Lingers = md.Frames.Count > 0 && md.Frames[md.Frames.Count - 1].Hitboxes.Count > 0;
             md.Total = (int)Math.Ceiling(real - 1e-3f);
-            // collect windows
+            Windows(md);
+            return md;
+        }
+
+        /// <summary>Works out when a move's hitboxes are out and when it's intangible, from its frames.</summary>
+        public static void Windows(MoveData md)
+        {
+            md.Active.Clear(); md.Intangible.Clear();
             int start = 0, istart = 0;
             for (int k = 0; k <= md.Frames.Count; k++)
             {
@@ -197,7 +209,6 @@ namespace SkinManager.Core
                 if (inv && istart == 0) istart = f.Frame;
                 if (!inv && istart > 0) { md.Intangible.Add((istart, md.Frames[k - 1].Frame)); istart = 0; }
             }
-            return md;
         }
     }
 }

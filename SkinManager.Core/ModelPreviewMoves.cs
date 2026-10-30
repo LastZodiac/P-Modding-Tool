@@ -51,7 +51,37 @@ namespace SkinManager.Core
                     var g = r.Multiply(new Vector3(x / NZ(s._x), y / NZ(s._y), z / NZ(s._z)));
                     return Yaw(new Vector3(bp._x + g._x, bp._y + g._y, bp._z + g._z));
                 }
+                // a hitbox on a held thing (ZSS's whip): the thing's model, posed by its own animation, hanging off the fighter's bone
+                var artModels = mroot.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                Vector3? ArticlePlace(Hitbox h)
+                {
+                    if (!artModels.TryGetValue(h.ArticleModel, out var am)) return null;
+                    anims.TryGetValue(h.ArticleAnim ?? "", out var aa);
+                    am.ApplyCHR(aa, aa == null ? 0 : Math.Max(1, Math.Min(h.ArticleFrame, aa.FrameCount)));
+                    var abs = am._linker?.BoneCache;
+                    var ab = abs != null && h.Bone >= 0 && h.Bone < abs.Length ? abs[h.Bone] as MDL0BoneNode : null;
+                    var fb = BoneAt(h.AttachBone);
+                    if (ab == null || fb == null) return null;
+                    var bp = ab._frameMatrix.GetPoint(); var r = ab._frameMatrix.GetRotationMatrix(); var sc = Scale(ab);
+                    var g = r.Multiply(new Vector3(h.X / NZ(sc._x), h.Y / NZ(sc._y), h.Z / NZ(sc._z)));
+                    var local = new Vector3(bp._x + g._x, bp._y + g._y, bp._z + g._z);
+                    // its animation is made around the fighter: its own "HaveN" follows the hand. Line that up with the fighter's
+                    // hand (RHaveN/LHaveN) so the thing sits in the hand it's held in.
+                    string handName = fb.Name.Length > 1 && (fb.Name[0] == 'R' || fb.Name[0] == 'L') ? fb.Name.Substring(1) : fb.Name;
+                    var hand = abs.OfType<MDL0BoneNode>().FirstOrDefault(x => string.Equals(x.Name, handName, StringComparison.OrdinalIgnoreCase));
+                    if (hand != null) local = fb._frameMatrix * (hand._frameMatrix.Invert() * local);
+                    else local = fb._frameMatrix * local;
+                    return Yaw(local);
+                }
                 var texCache = new Dictionary<string, Tex>(StringComparer.OrdinalIgnoreCase);
+                var origins = new Dictionary<Projectile, Vector3>();
+                Vector3 Origin(Projectile p)
+                {
+                    var b = p.Article?.Bone >= 0 ? BoneAt(p.Article.Bone) : null;
+                    if (b == null) b = bones.OfType<MDL0BoneNode>().Where(x => x.Name.EndsWith("HaveN", StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => Yaw(x._frameMatrix.GetPoint())._x).FirstOrDefault();
+                    if (b == null) b = BoneAt(0);
+                    return b == null ? new Vector3() : Yaw(b._frameMatrix.GetPoint());
+                }
                 foreach (var f in move.Frames)
                 {
                     if (cancelled?.Invoke() == true) return new List<Bitmap>();
@@ -63,8 +93,28 @@ namespace SkinManager.Core
                     var shot = new Shot { Shift = shift, Tris = Gather(root, new[] { model }, 90, texCache, new HashSet<string>(f.Hidden.Where(i => i >= 0 && i < bones.Length).Select(i => bones[i].Name))), Body = f.Body };
                     foreach (var h in f.Hitboxes)
                     {
+                        if (h.ArticleModel != null)
+                        {
+                            var ap = ArticlePlace(h); if (ap == null) continue;
+                            shot.Hits.Add((ap.Value, h.Size, HitColors[h.Id % HitColors.Length])); shot.HitOf.Add(h);
+                            continue;
+                        }
                         var b = BoneAt(h.Bone); if (b == null) continue;
                         shot.Hits.Add((Place(b, h.X, h.Y, h.Z), h.Size, h.Grab ? Color.FromArgb(170, 80, 255) : HitColors[h.Id % HitColors.Length])); shot.HitOf.Add(h);
+                    }
+                    // what the move shoots or puts out (Fox's laser, ZSS's paralyzer shot...): where it comes out (the bone it's
+                    // made at, or the hand in front), facing the way the fighter faces; it stays where it came out (how far it
+                    // flies isn't in the move's files)
+                    foreach (var p in move.Projectiles)
+                    {
+                        int k = f.Frame - p.Frame + 1; if (k < 1) continue;
+                        if (!origins.TryGetValue(p, out var o)) origins[p] = o = Origin(p);
+                        var pf = p.Data.Frames.FirstOrDefault(x => x.Frame == k); if (pf == null) continue;
+                        foreach (var h in pf.Hitboxes)
+                        {
+                            if (h.Grab) continue;
+                            shot.Hits.Add((new Vector3(o._x + h.Z, o._y + h.Y, o._z + h.X), h.Size, HitColors[h.Id % HitColors.Length])); shot.HitOf.Add(h);
+                        }
                     }
                     if (hurtboxes)
                         foreach (var hb in moves.HurtBoxes)

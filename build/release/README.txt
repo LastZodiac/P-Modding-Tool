@@ -3,11 +3,12 @@ P+ Modding Tool, by Last Zodiac
 Everything for Project+ on Brawl Online in one app:
   - Mods: costumes (skins), stages, music and texture packs, from a file or straight from the Mod Store
     (GameBanana). Every stage is checked so you stay in sync online. Turn mods on and off any time.
+    Your own P+ Dolphin works too: Settings > SD card > "Use my own Dolphin's SD card".
   - Your own music: MP3 or WAV files made into songs the game plays, with your own loop point and volume.
   - Model Swapper (beta): put a 3D model from another game or program on a P+ character.
   - Stat Tracker: a report after every game (grade, XP and levels, badges, personal bests), your form, Smash
     stats and habits (techs, ledge, L-cancels...), each character you play, a simple match list with every
-    game's report, records by matchup, stage and opponent, and what your opponents tend to do, all from Brawl
+    game's report and coach's notes (how to DI the hits that took your stocks, combo ideas), records by matchup, stage and opponent, and what your opponents tend to do, all from Brawl
     Online's own game history and replays. Plus an in-game overlay with your opponent's info.
   - Frame Data: every fighter's moves with their hitboxes frame by frame, projectiles, launch angles,
     true combos, and how to DI each hit (drag yourself onto the move), read straight from P+'s own files.

@@ -23,6 +23,15 @@ namespace SkinManager.App
         public bool Tours { get => ToursOff != true; set => ToursOff = value ? (bool?)null : true; }
         [DataMember] public System.Collections.Generic.List<string> ToursSeen = new System.Collections.Generic.List<string>();
         [DataMember] public string Hotkey;                    // the full overlay's hotkey (null: Alt+T)
+        [DataMember] public bool? OverlayLeft;
+        [DataMember] public bool? CardOpen;
+        [DataMember] public string OverlayTheme;              // the look over the game: a theme id, "custom" (null: seasonal)
+        [DataMember] public int? OverlayColor;                // "custom": its color
+        [DataMember] public bool? OverlayEffectsOff;          // no snow, bats or stars
+        public void ApplyOverlay() { OverlayLook.Choice = OverlayTheme ?? OverlayLook.Seasonal; OverlayLook.CustomAccent = OverlayColor != null ? (Color?)Color.FromArgb(OverlayColor.Value) : null; OverlayLook.Effects = OverlayEffectsOff != true; }                   // the opponent card opened up all the way (null: the small one)                // the opponent card in the top-left corner (null: top right)
+        [DataMember] public int? Glow, Glow2;                 // the built-in background's two glows (ARGB; null: gold and blue)
+        public static readonly Color GlowGold = Color.FromArgb(255, 176, 46), GlowBlue = Color.FromArgb(90, 110, 255);
+        [DataMember] public string CardFile;                  // your own Dolphin's sd.raw (or its folder) to mod instead of Brawl Online's (null: Brawl Online's)
         public string HotkeyText { get => string.IsNullOrEmpty(Hotkey) ? "Alt+T" : Hotkey; set => Hotkey = value == "Alt+T" ? null : value; }
 
         static string FilePath => Path.Combine(Program.DataFolder, "look.json");
@@ -92,14 +101,16 @@ namespace SkinManager.App
                 {
                     var glow = new Rectangle(size.Width - size.Width * 2 / 3, -size.Height / 3, size.Width, size.Height);
                     path.AddEllipse(glow);
-                    using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(70, 255, 176, 46), SurroundColors = new[] { Color.FromArgb(0, 255, 176, 46) } })
+                    var c1 = _look.Glow != null ? Color.FromArgb(_look.Glow.Value) : LookSettings.GlowGold;
+                    using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(70, c1), SurroundColors = new[] { Color.FromArgb(0, c1) } })
                         g.FillRectangle(pb, all);
                 }
                 using (var path = new GraphicsPath())
                 {
                     var glow = new Rectangle(-size.Width / 3, size.Height / 2, size.Width * 2 / 3, size.Height);
                     path.AddEllipse(glow);
-                    using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(55, 90, 110, 255), SurroundColors = new[] { Color.FromArgb(0, 90, 110, 255) } })
+                    var c2 = _look.Glow2 != null ? Color.FromArgb(_look.Glow2.Value) : LookSettings.GlowBlue;
+                    using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(55, c2), SurroundColors = new[] { Color.FromArgb(0, c2) } })
                         g.FillRectangle(pb, all);
                 }
             }
@@ -147,6 +158,7 @@ namespace SkinManager.App
     {
         public string Icon;     // a glyph from the Windows icon font
         public bool Selected;
+        public bool Live;       // a red "recording" dot that pulses (Live Match, while a game is on)
         bool _hover;
         static readonly Font IconFont = MakeIconFont();
 
@@ -184,6 +196,11 @@ namespace SkinManager.App
                 x += 34;
             }
             TextRenderer.DrawText(g, Text, Selected ? Theme.BodyBold : Theme.Body, new Rectangle(x, 0, Width - x, Height), Selected ? Theme.Text : Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+            if (Live)
+            {
+                double pulse = 0.5 + 0.5 * Math.Sin(DateTime.Now.TimeOfDay.TotalSeconds * 4);
+                using (var b = new SolidBrush(Color.FromArgb((int)(130 + 125 * pulse), 235, 64, 52))) g.FillEllipse(b, Width - 24, Height / 2 - 6, 12, 12);
+            }
         }
     }
 }

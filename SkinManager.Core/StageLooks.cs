@@ -34,11 +34,11 @@ namespace SkinManager.Core
             if (Differ("collision"))
             {
                 var fit = HowFarOff(map, original);
-                if (fit.Floors == float.MaxValue) lines.Add("Floors and platforms: completely different. One of the two only has floors that move (like Corneria's Great Fox), so they can't be lined up.");
+                if (fit.Floors >= 1e6f || float.IsNaN(fit.Floors)) lines.Add("Floors and platforms: completely different. One of the two only has floors that move (like Corneria's Great Fox), so they can't be lined up.");
                 else if (fit.Exact) lines.Add("Floors and platforms: same shape, but some edges are a different kind (a ledge you can or can't grab, a platform you can or can't drop through, or a wall).");
                 else
                 {
-                    string w = fit.Width > 0 ? $" (the stage is {fit.Width:0} wide)" : "";
+                    string w = fit.Width >= 1 ? $" (the stage is {fit.Width:0} wide)" : "";
                     if (fit.Floors >= 0.5f) lines.Add($"Floors and platforms: where you stand is off by up to {Units(fit.Floors)}{w}.");
                     if (fit.Rest >= 0.5f) lines.Add($"Sides and underside of the stage: off by up to {Units(fit.Rest)}{w}.");
                     if (fit.Floors < 0.5f && fit.Rest < 0.5f) lines.Add("Floors and platforms: a moving part's floor is different.");

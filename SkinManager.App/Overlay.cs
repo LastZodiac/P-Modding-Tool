@@ -53,19 +53,183 @@ namespace SkinManager.App
     }
 
     /// <summary>A window over the game: see-through, clicks go to the game, never takes focus.</summary>
+    /// <summary>The look of everything shown over the game: a theme (its colors, and a few little touches drawn in it:
+    /// snow, bats, stars...), picked in Settings. "Seasonal" follows the calendar: Halloween in October, Christmas in December.</summary>
+    static class OverlayLook
+    {
+        public sealed class Look
+        {
+            public string Id, Name; public Color Accent, Accent2, Back, Back2; public string Deco;
+        }
+        public static readonly Look[] Looks =
+        {
+            new Look { Id = "classic", Name = "Classic gold", Accent = Color.FromArgb(255, 176, 46), Accent2 = Color.FromArgb(96, 182, 255), Back = Color.FromArgb(14, 15, 20), Back2 = Color.FromArgb(24, 22, 30) },
+            new Look { Id = "halloween", Name = "Halloween", Accent = Color.FromArgb(255, 132, 24), Accent2 = Color.FromArgb(170, 110, 255), Back = Color.FromArgb(18, 10, 24), Back2 = Color.FromArgb(40, 18, 44), Deco = "bats" },
+            new Look { Id = "christmas", Name = "Christmas", Accent = Color.FromArgb(235, 70, 70), Accent2 = Color.FromArgb(80, 210, 120), Back = Color.FromArgb(10, 22, 18), Back2 = Color.FromArgb(18, 38, 30), Deco = "snow" },
+            new Look { Id = "midnight", Name = "Midnight blue", Accent = Color.FromArgb(110, 190, 255), Accent2 = Color.FromArgb(200, 160, 255), Back = Color.FromArgb(8, 12, 26), Back2 = Color.FromArgb(16, 26, 50), Deco = "stars" },
+            new Look { Id = "neon", Name = "Neon", Accent = Color.FromArgb(255, 80, 200), Accent2 = Color.FromArgb(60, 230, 255), Back = Color.FromArgb(14, 8, 22), Back2 = Color.FromArgb(30, 12, 40) },
+            new Look { Id = "mono", Name = "Clean white", Accent = Color.FromArgb(235, 238, 245), Accent2 = Color.FromArgb(150, 160, 180), Back = Color.FromArgb(18, 19, 24), Back2 = Color.FromArgb(28, 30, 36) },
+        };
+        public const string Seasonal = "seasonal";
+
+        public static string Choice = Seasonal;     // a Look id, "seasonal", or "custom"
+        public static Color? CustomAccent;
+        public static bool Effects = true;
+
+        public static Look Current
+        {
+            get
+            {
+                string id = Choice ?? Seasonal;
+                if (id == Seasonal) id = DateTime.Now.Month == 10 ? "halloween" : DateTime.Now.Month == 12 ? "christmas" : "classic";
+                if (id == "custom")
+                {
+                    var c = CustomAccent ?? Looks[0].Accent;
+                    return new Look { Id = "custom", Name = "Your color", Accent = c, Accent2 = Color.FromArgb(c.B, c.R, c.G), Back = Looks[0].Back, Back2 = Color.FromArgb(Math.Min(255, 14 + c.R / 12), Math.Min(255, 15 + c.G / 12), Math.Min(255, 20 + c.B / 12)) };
+                }
+                return Looks.FirstOrDefault(l => l.Id == id) ?? Looks[0];
+            }
+        }
+        public static Color Accent => Current.Accent;
+        public static bool Moving => Effects && Current.Deco != null;
+
+        /// <summary>The background: a soft diagonal gradient in the theme's colors.</summary>
+        public static void PaintBack(Graphics g, Rectangle r)
+        {
+            var l = Current;
+            if (r.Width <= 0 || r.Height <= 0) return;
+            using (var b = new LinearGradientBrush(r, l.Back, l.Back2, 25f)) g.FillRectangle(b, r);
+        }
+
+        /// <summary>The theme's little touches, drawn over everything (faint, so the text stays easy to read).</summary>
+        public static void Decorate(Graphics g, Rectangle r)
+        {
+            var l = Current;
+            if (!Effects || l.Deco == null || r.Width < 40) return;
+            double t = DateTime.Now.TimeOfDay.TotalSeconds;
+            var state = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var rnd = new Random(r.Width * 31 + r.Height);
+            if (l.Deco == "snow")
+            {
+                // falling snow, and a string of little lights along the top
+                for (int i = 0; i < 26; i++)
+                {
+                    double speed = 10 + rnd.NextDouble() * 18, sway = rnd.NextDouble() * 6.28;
+                    float x = (float)((rnd.NextDouble() * r.Width + Math.Sin(t * 0.8 + sway) * 6) % r.Width);
+                    float y = (float)((rnd.NextDouble() * r.Height + t * speed) % (r.Height + 6)) - 3;
+                    float sz = 1.5f + (float)rnd.NextDouble() * 2.2f;
+                    using (var b = new SolidBrush(Color.FromArgb(120, 255, 255, 255))) g.FillEllipse(b, x, y, sz, sz);
+                }
+                Color[] bulbs = { l.Accent, l.Accent2, Color.FromArgb(255, 210, 80), Color.FromArgb(90, 170, 255) };
+                for (int i = 0, n = Math.Max(4, r.Width / 34); i < n; i++)
+                {
+                    float x = 10 + i * (r.Width - 20f) / Math.Max(1, n - 1), y = 3 + (i % 2) * 2;
+                    bool on = ((int)(t * 2) + i) % 3 != 0;
+                    using (var b = new SolidBrush(Color.FromArgb(on ? 220 : 70, bulbs[i % bulbs.Length]))) g.FillEllipse(b, x - 2.5f, y, 5, 6);
+                }
+            }
+            else if (l.Deco == "bats")
+            {
+                // a couple of bats flapping across, and a little pumpkin in the corner
+                for (int i = 0; i < 3; i++)
+                {
+                    double speed = 22 + i * 9, phase = rnd.NextDouble() * 500;
+                    float x = (float)((t * speed + phase) % (r.Width + 60)) - 30;
+                    float y = 10 + (float)(rnd.NextDouble() * Math.Max(10, r.Height - 30)) + (float)Math.Sin(t * 2 + i) * 4;
+                    float flap = (float)Math.Sin(t * 12 + i * 2) * 4;
+                    var pts = new[] { new PointF(x, y), new PointF(x - 5, y - 3 - flap), new PointF(x - 9, y - 1 - flap), new PointF(x - 6, y + 1), new PointF(x, y + 3), new PointF(x + 6, y + 1), new PointF(x + 9, y - 1 - flap), new PointF(x + 5, y - 3 - flap) };
+                    using (var b = new SolidBrush(Color.FromArgb(150, 8, 4, 12))) g.FillPolygon(b, pts);
+                    using (var pen = new Pen(Color.FromArgb(170, l.Accent2), 1.2f)) g.DrawPolygon(pen, pts);
+                }
+                float px = 6, py = r.Height - 18, glow = 0.6f + 0.4f * (float)Math.Sin(t * 3);
+                using (var b = new SolidBrush(Color.FromArgb(150, l.Accent))) { g.FillEllipse(b, px, py, 10, 12); g.FillEllipse(b, px + 5, py, 10, 12); g.FillEllipse(b, px + 2.5f, py, 10, 12); }
+                using (var b = new SolidBrush(Color.FromArgb(150, 60, 140, 60))) g.FillRectangle(b, px + 7, py - 3, 2.5f, 4);
+                using (var b = new SolidBrush(Color.FromArgb((int)(220 * glow), 255, 230, 120)))
+                {
+                    g.FillPolygon(b, new[] { new PointF(px + 5, py + 4), new PointF(px + 7, py + 4), new PointF(px + 6, py + 6) });
+                    g.FillPolygon(b, new[] { new PointF(px + 11, py + 4), new PointF(px + 13, py + 4), new PointF(px + 12, py + 6) });
+                    g.FillRectangle(b, px + 6, py + 8, 7, 1.5f);
+                }
+            }
+            else if (l.Deco == "stars")
+            {
+                for (int i = 0; i < 18; i++)
+                {
+                    float x = (float)(rnd.NextDouble() * r.Width), y = (float)(rnd.NextDouble() * r.Height);
+                    double tw = 0.5 + 0.5 * Math.Sin(t * (1.5 + rnd.NextDouble() * 2) + i);
+                    float sz = 1 + (float)tw * 1.8f;
+                    using (var b = new SolidBrush(Color.FromArgb((int)(40 + 110 * tw), 220, 230, 255))) g.FillEllipse(b, x - sz / 2, y - sz / 2, sz, sz);
+                }
+            }
+            g.Restore(state);
+        }
+    }
+
     class OverlayForm : Form
     {
+        public double BaseOpacity = 0.86;   // how see-through it is when fully in
+        double _fade = 1; int _dir;         // fading in (1) or out (-1)
+        readonly Timer _fader = new Timer { Interval = 15 };
+        static readonly Timer Effects = new Timer { Interval = 50 };
+        static readonly System.Collections.Generic.List<OverlayForm> Open = new System.Collections.Generic.List<OverlayForm>();
+
+        static OverlayForm()
+        {
+            Effects.Tick += (s, e) => { if (!OverlayLook.Moving) return; foreach (var f in Open.ToArray()) if (f.Visible && f._fade > 0) f.Invalidate(); };
+            Effects.Start();
+        }
+
         public OverlayForm()
         {
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
-            BackColor = Color.FromArgb(14, 15, 20); DoubleBuffered = true; Opacity = 0.86;
+            BackColor = Color.FromArgb(14, 15, 20); DoubleBuffered = true; Opacity = BaseOpacity;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
+            _fader.Tick += (s, e) =>
+            {
+                _fade = Math.Max(0, Math.Min(1, _fade + _dir * 0.09));
+                ApplyOpacity();
+                if (_dir < 0 && _fade <= 0) { _fader.Stop(); base.Hide(); }
+                else if (_dir > 0 && _fade >= 1) _fader.Stop();
+            };
+            Open.Add(this);
+            Disposed += (s, e) => Open.Remove(this);
         }
+
+        /// <summary>The see-through amount it settles at (applied smoothly while fading).</summary>
+        public void SetOpacity(double o) { BaseOpacity = o; ApplyOpacity(); }
+        void ApplyOpacity() { double e = 1 - (1 - _fade) * (1 - _fade); double o = BaseOpacity * e; if (Math.Abs(Opacity - o) > 0.002) Opacity = o; }
+
+        /// <summary>Shows it, fading in.</summary>
+        public void Appear()
+        {
+            if (Visible && _dir >= 0) return;
+            if (!Visible) { _fade = 0; ApplyOpacity(); base.Show(); }
+            _dir = 1; _fader.Start();
+        }
+
+        /// <summary>Hides it, fading out.</summary>
+        public void Disappear()
+        {
+            if (!Visible || _dir < 0) return;
+            _dir = -1; _fader.Start();
+        }
+
+        public bool Fading => _dir < 0;
+
         protected override bool ShowWithoutActivation => true;
         protected override CreateParams CreateParams
         {
             // no activation, tool window, topmost, layered + transparent to the mouse
             get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80 | 0x8 | 0x80000 | 0x20; return cp; }
         }
+        protected override void OnPaintBackground(PaintEventArgs e) => OverlayLook.PaintBack(e.Graphics, ClientRectangle);
+        protected sealed override void OnPaint(PaintEventArgs e)
+        {
+            PaintContent(e);
+            OverlayLook.Decorate(e.Graphics, ClientRectangle);
+        }
+        protected virtual void PaintContent(PaintEventArgs e) { }
         protected static void Text(Graphics g, string t, Font f, Color c, RectangleF r, bool center = false)
         {
             using (var b = new SolidBrush(c)) g.DrawString(t ?? "", f, b, r, new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap, Alignment = center ? StringAlignment.Center : StringAlignment.Near });
@@ -109,12 +273,12 @@ namespace SkinManager.App
             y += 36;
         }
 
-        void Heading(Graphics g, ref float y, float x, float w, string t) { Text(g, t.ToUpperInvariant(), Theme.Small, Theme.Accent, new RectangleF(x, y, w, 18)); y += 22; }
+        void Heading(Graphics g, ref float y, float x, float w, string t) { Text(g, t.ToUpperInvariant(), Theme.Small, OverlayLook.Accent, new RectangleF(x, y, w, 18)); y += 22; }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void PaintContent(PaintEventArgs e)
         {
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-            using (var border = new Pen(Theme.Accent, 2)) g.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
+            using (var border = new Pen(OverlayLook.Accent, 2)) g.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
             var h = History; var s = State;
             Text(g, $"Press {Hotkey} to close", Theme.Small, Theme.Muted, new RectangleF(Width - 200, Height - 24, 186, 18));
             if (h == null) { Text(g, "Reading your match history…", Theme.Heading, Theme.Text, new RectangleF(20, 20, Width - 40, 30)); return; }
@@ -166,7 +330,7 @@ namespace SkinManager.App
                 {
                     if (y > Height - 60) break;
                     Text(g, l.Habit, Theme.Small, Theme.Text, new RectangleF(x, y, colW, 18));
-                    Text(g, "→ " + l.Tip, Theme.Small, Theme.Accent, new RectangleF(x, y + 16, colW, 18));
+                    Text(g, "→ " + l.Tip, Theme.Small, OverlayLook.Accent, new RectangleF(x, y + 16, colW, 18));
                     y += 38;
                 }
             }

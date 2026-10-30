@@ -151,7 +151,7 @@ namespace SkinManager.Core
                             card.WriteFile(kv.Key, data); written++;
                         }
                         // files P+ took out (an old plugin, say) go too, unless they're ours
-                        foreach (var path in AllFiles(card, "/Project+/pf").Where(p => !release.Files.ContainsKey(p) && !ours.Contains(p) && !current.Exists(p)).ToList())
+                        foreach (var path in AllFiles(card, Build.Pf).Where(p => !release.Files.ContainsKey(p) && !ours.Contains(p) && !current.Exists(p)).ToList())
                             if (card.DeleteFile(path)) removed++;
                         notes.Insert(0, $"The {Label(parkedName).ToLowerInvariant()} missed a P+ update while it was put away: {written} of P+'s files were brought up to date" + (removed > 0 ? $" and {removed} old ones removed." : "."));
                     }

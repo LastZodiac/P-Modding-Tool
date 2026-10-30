@@ -22,7 +22,13 @@ namespace SkinManager.Core
         public int MyWins, TheirWins;
         public bool? LastGameWon;
         public List<int> LegalStages = new List<int>();
-        public LiveState Copy() { var c = (LiveState)MemberwiseClone(); c.LegalStages = new List<int>(LegalStages); return c; }
+        public int StocksTaken, StocksLost;    // this game, as they happen
+        public DateTime LastKo; public bool LastKoMine;   // the latest stock lost or taken (LastKoMine: you took it)
+        public List<(int Frame, bool Mine)> Kos = new List<(int, bool)>();   // this game's stocks, in order (Mine: you took it)
+        public int Frame;                      // the game's frame, as last reported (60 a second)
+        public double Ping = -1, Jitter, Rollbacks = -1;   // the connection (ms; % of frames re-run), every 10 seconds
+        public int? EndStocksMine, EndStocksTheirs; public double? EndDamageMine, EndDamageTheirs;   // how the last game ended
+        public LiveState Copy() { var c = (LiveState)MemberwiseClone(); c.LegalStages = new List<int>(LegalStages); c.Kos = new List<(int, bool)>(Kos); return c; }
     }
 
     public sealed class LiveMatch
@@ -36,9 +42,22 @@ namespace SkinManager.Core
         static readonly Regex Winner = new Regex(@"gprb lobby: game (\d+) winner (\d+)");
         static readonly Regex LockIn = new Regex(@"gprb lobby: local lock-in ready for game (\d+) \(char 0x([0-9a-fA-F]+)/");
         static readonly Regex Stages = new Regex(@"Stages from the server: ([\d,]+)");
+        // a stock lost: the game reports it with the player's place (0 = P1) and the frame (rollbacks can repeat it)
+        static readonly Regex Dead = new Regex(@"notifyEventDead _nSleepFrame\[(\d+)\] = (\d+)");
+        static readonly Regex Net = new Regex(@"gprb net: frames \d+-(\d+):.*?rollbacks \d+ \(([\d.]+)%\).*?ping (\d+) ms \(avg [\d.]+, jitter ([\d.]+)\)");
+        static readonly Regex End = new Regex(@"stocks/damage: P1 (\d+)/([\d.]+) P2 (\d+)/([\d.]+)");
+
+        /// <summary>What happened, in words, newest last (for the Live Match page).</summary>
+        public readonly List<(DateTime When, string Text, int Kind)> Events = new List<(DateTime, string, int)>();   // Kind: 0 info, 1 good, 2 bad
+        void Say(string text, int kind = 0) { Events.Add((DateTime.Now, text, kind)); if (Events.Count > 300) Events.RemoveAt(0); }
+        static string Clock(int frame) { var t = TimeSpan.FromSeconds(frame / 60.0); return $"{(int)t.TotalMinutes}:{t.Seconds:00}"; }
+        readonly HashSet<string> _deaths = new HashSet<string>();
 
         public LiveState State = new LiveState();
         bool _inSession;
+        // the last game that ended (in a room every game is its own match: the score carries over while it's the same person)
+        string _lastOpp; int _lastWins, _lastTheirs, _lastGame; DateTime _lastAt;
+        static string Mode(string m) => m == "ranked" ? "Ranked" : m == "unranked" ? "Unranked" : m == "direct" ? "Direct" : m;
 
         /// <summary>Reads one log line; true when it changed what's known.</summary>
         public bool Feed(string line)
@@ -48,8 +67,11 @@ namespace SkinManager.Core
             if ((m = LockIn.Match(line)).Success)
             {
                 int c = Fighters.Same(Convert.ToInt32(m.Groups[2].Value, 16));
-                if (int.Parse(m.Groups[1].Value) <= 1) _inSession = false;   // "game 1": searching for a new set (later games of a set say 2, 3...)
-                if (!_inSession) { State = new LiveState { Phase = MatchPhase.Searching, MyChar = c, LegalStages = s.LegalStages }; return true; }
+                // "game 1" outside a set: searching for a new one (later games of a set say 2, 3...; inside a set the lobby
+                // repeats its own game number while it loads)
+                bool inSet = _inSession && (s.Phase == MatchPhase.Loading || s.Phase == MatchPhase.Playing || s.Phase == MatchPhase.GameOver);
+                if (int.Parse(m.Groups[1].Value) <= 1 && !inSet) _inSession = false;
+                if (!_inSession) { if (s.Phase != MatchPhase.Searching && s.Mode != "room") Say("Looking for a match as " + Fighters.Name(c)); State = new LiveState { Phase = MatchPhase.Searching, MyChar = c, LegalStages = s.LegalStages }; return true; }
                 if (s.MyChar != c) { s.MyChar = c; return true; }
                 return false;
             }
@@ -61,8 +83,12 @@ namespace SkinManager.Core
             }
             if ((m = Peer.Match(line)).Success && (s.Phase == MatchPhase.Found || s.Phase == MatchPhase.Searching))
             {
+                bool again = s.OpponentCode == m.Groups[3].Value;
                 s.OpponentName = m.Groups[2].Value; s.OpponentCode = m.Groups[3].Value; s.TheirPort = int.Parse(m.Groups[1].Value);
+                if (s.Mode == "room" && s.MyWins + s.TheirWins == 0 && _lastOpp == s.OpponentCode && (DateTime.Now - _lastAt).TotalMinutes < 30)
+                { s.MyWins = _lastWins; s.TheirWins = _lastTheirs; s.Game = _lastGame; }
                 s.Phase = MatchPhase.Found;
+                if (!again && !(s.Mode == "room" && _lastOpp == s.OpponentCode && (DateTime.Now - _lastAt).TotalMinutes < 30)) Say($"Match found: {s.OpponentName} ({s.OpponentCode})" + (s.Mode != null ? " · " + Mode(s.Mode) : ""), 1);
                 return true;
             }
             if ((m = Stages.Match(line)).Success)
@@ -76,13 +102,23 @@ namespace SkinManager.Core
                 s.MyPort = int.Parse(m.Groups[2].Value);
                 if (s.TheirPort == 0) s.TheirPort = s.MyPort == 1 ? 2 : 1;
                 s.Phase = MatchPhase.Loading;
+                Say($"Connected. You're player {s.MyPort}");
                 return true;
             }
             if (!_inSession) return false;
+            if ((m = Net.Match(line)).Success)
+            {
+                s.Frame = int.Parse(m.Groups[1].Value);
+                s.Rollbacks = double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                s.Ping = int.Parse(m.Groups[3].Value);
+                s.Jitter = double.Parse(m.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture);
+                return true;
+            }
             if ((m = Setup.Match(line)).Success)
             {
                 int g = int.Parse(m.Groups[1].Value);
-                if (g != s.Game) { s.Game = g; s.TheirChar = null; }
+                if (s.Mode == "room") { if (s.Phase != MatchPhase.Loading) s.TheirChar = null; }   // a room counts its games itself: the score carries over (see Peer)
+                else if (g != s.Game) { s.Game = g; s.TheirChar = null; }
                 s.Stage = Convert.ToInt32(m.Groups[2].Value, 16);
                 if (m.Groups[3].Success && m.Groups[4].Success)   // the host's line names both characters too
                 {
@@ -92,20 +128,46 @@ namespace SkinManager.Core
                 s.Phase = MatchPhase.Loading;
                 return true;
             }
+            if ((m = Dead.Match(line)).Success)
+            {
+                if (s.Phase != MatchPhase.Playing || !_deaths.Add(s.Game + ":" + m.Value)) return false;
+                int port = int.Parse(m.Groups[1].Value) + 1;
+                int frame = int.Parse(m.Groups[2].Value);
+                if (port == s.MyPort) { s.StocksLost++; s.LastKoMine = false; }
+                else if (port == s.TheirPort) { s.StocksTaken++; s.LastKoMine = true; }
+                else return false;
+                s.LastKo = DateTime.Now; s.Kos.Add((frame, s.LastKoMine)); s.Frame = Math.Max(s.Frame, frame);
+                Say(s.LastKoMine ? $"Stock taken at {Clock(frame)} (KOs {s.StocksTaken}–{s.StocksLost})" : $"Stock lost at {Clock(frame)} (KOs {s.StocksTaken}–{s.StocksLost})", s.LastKoMine ? 1 : 2);
+                return true;
+            }
             if ((m = Fighter.Match(line)).Success)
             {
                 int port = int.Parse(m.Groups[2].Value) + 1, c = Fighters.Same(int.Parse(m.Groups[1].Value));
                 if (port == s.MyPort) s.MyChar = c; else if (port == s.TheirPort) s.TheirChar = c; else return false;
                 if (s.Phase == MatchPhase.GameOver) { s.Phase = MatchPhase.Loading; }
-                if (s.MyChar != null && s.TheirChar != null && s.Phase == MatchPhase.Loading) s.Phase = MatchPhase.Playing;
+                if (s.MyChar != null && s.TheirChar != null && s.Phase == MatchPhase.Loading)
+                {
+                    s.Phase = MatchPhase.Playing; s.StocksTaken = s.StocksLost = 0; s.LastKo = default; s.Kos.Clear(); s.Frame = 0;
+                    Say($"Game {s.Game} started: {Fighters.Name(s.MyChar.Value)} vs {Fighters.Name(s.TheirChar.Value)}", 1);
+                }
                 return true;
             }
             if ((m = Winner.Match(line)).Success)
             {
-                int winner = int.Parse(m.Groups[2].Value) + 1;
+                int winner = int.Parse(m.Groups[2].Value) + 1, gameNo = int.Parse(m.Groups[1].Value);
                 s.LastGameWon = winner == s.MyPort;
+                if ((m = End.Match(line)).Success)
+                {
+                    var inv = System.Globalization.CultureInfo.InvariantCulture;
+                    int p1s = int.Parse(m.Groups[1].Value), p2s = int.Parse(m.Groups[3].Value);
+                    double p1d = double.Parse(m.Groups[2].Value, inv), p2d = double.Parse(m.Groups[4].Value, inv);
+                    bool p2 = s.MyPort == 2;
+                    s.EndStocksMine = p2 ? p2s : p1s; s.EndStocksTheirs = p2 ? p1s : p2s; s.EndDamageMine = p2 ? p2d : p1d; s.EndDamageTheirs = p2 ? p1d : p2d;
+                }
+                Say($"Game {(s.Mode == "room" ? s.Game : gameNo)}: you {(s.LastGameWon == true ? "won" : "lost")}" + (s.EndStocksMine != null ? $" ({(s.LastGameWon == true ? s.EndStocksMine : s.EndStocksTheirs)} stock{((s.LastGameWon == true ? s.EndStocksMine : s.EndStocksTheirs) == 1 ? "" : "s")} left)" : ""), s.LastGameWon == true ? 1 : 2);
                 if (s.LastGameWon == true) s.MyWins++; else s.TheirWins++;
-                s.Game = int.Parse(m.Groups[1].Value) + 1;
+                s.Game = Math.Max(gameNo, s.Game) + 1;
+                _lastOpp = s.OpponentCode; _lastWins = s.MyWins; _lastTheirs = s.TheirWins; _lastGame = s.Game; _lastAt = DateTime.Now;
                 s.Stage = null;
                 s.Phase = MatchPhase.GameOver;
                 return true;

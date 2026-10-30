@@ -15,6 +15,7 @@ namespace SkinManager.Core
         public Character Character;
         public CostumeSlot Slot;
         public List<KeyValuePair<string, byte[]>> Files = new List<KeyValuePair<string, byte[]>>();   // card path -> bytes
+        public Dictionary<string, byte[]> Originals = new Dictionary<string, byte[]>();   // card path -> the file as it came, when it was made smaller
         public Dictionary<PictureKind, Bitmap> Pictures = new Dictionary<PictureKind, Bitmap>();
         public List<CheckResult> Checks = new List<CheckResult>();
         public SkinSource Source;
@@ -108,6 +109,166 @@ namespace SkinManager.Core
             return hb;
         }
 
+        readonly Dictionary<int, long> _budgets = new Dictionary<int, long>();
+
+        /// <summary>The most a costume of this character may unpack to. The game unpacks the costume into one block of
+        /// memory per player (5.33 MB) next to the character's moves and animations, and builds the 3D model in what's
+        /// left; with too little left the match crashes as it starts. Measured on Brawl Online: games with 268 KB or
+        /// more left loaded, 205 KB and less crashed (Lucario's own Brawl costume leaves 239 KB). So a costume may fill
+        /// the block up to 240 KB from the top, and never has to be smaller than the biggest costume the game itself uses
+        /// for that character.</summary>
+        public long MemoryBudget(Fat32Image card, Character c, CostumeSlot slot)
+        {
+            if (!_budgets.TryGetValue(c.SlotListId, out long shipped))
+            {
+                shipped = 0;
+                foreach (var s in PPlusCard.ReadSlots(card, c))
+                {
+                    string path = s.CostumePath(c);
+                    try
+                    {
+                        byte[] b = null;
+                        if (_lib.HasOriginalFile(path)) b = _lib.OriginalFile(path);
+                        else if (card.Exists(path)) b = card.ReadFile(path);
+                        if (b == null)
+                        {
+                            string disc = Path.Combine(_lib.DiscCacheFolder, $"Fit{c.FilePrefix}{s.FileNumber:00}.pac");
+                            if (File.Exists(disc)) b = File.ReadAllBytes(disc);
+                        }
+                        if (b != null) shipped = Math.Max(shipped, CostumeMemory.Unpacked(b));
+                    }
+                    catch { }
+                }
+                _budgets[c.SlotListId] = shipped;
+            }
+            long own = 0;
+            try { var o = OriginalCostume(card, c, slot, out _); if (o != null) own = CostumeMemory.Unpacked(o); } catch { }
+            long resident = Resident(card, c, slot);
+            long room = resident > 0 ? CostumeMemory.FighterBlock - CostumeMemory.Headroom - resident : 0;
+            return Math.Max(Math.Max(shipped, own), room);
+        }
+
+        /// <summary>What else the game keeps in the character's memory block: its moves and animations (and the
+        /// costume's extra file, for characters that have one).</summary>
+        long Resident(Fat32Image card, Character c, CostumeSlot slot)
+        {
+            long Size(string name)
+            {
+                string path = c.FighterFolderPath + "/" + name;
+                try
+                {
+                    if (_lib.HasOriginalFile(path)) return CostumeMemory.Unpacked(_lib.OriginalFile(path));
+                    return card.Exists(path) ? CostumeMemory.Unpacked(card.ReadFile(path)) : -1;
+                }
+                catch { return -1; }
+            }
+            long motionEtc = Size($"Fit{c.FilePrefix}MotionEtc.pac");
+            if (motionEtc > 0) return motionEtc;
+            long motion = Size($"Fit{c.FilePrefix}Motion.pac");
+            if (motion <= 0) return 0;
+            long etc = Size($"Fit{c.FilePrefix}Etc{slot.FileNumber:00}.pac");
+            if (etc < 0) etc = Size($"Fit{c.FilePrefix}Etc.pac");
+            return motion + Math.Max(0, etc);
+        }
+
+        /// <summary>Checks that a costume fits in the game's memory, making it smaller if it doesn't. Returns the
+        /// bytes to use (the same ones when it already fits) and the check to show.</summary>
+        public byte[] FitMemory(Fat32Image card, Character c, CostumeSlot slot, string fileName, byte[] costume, out CheckResult check)
+        {
+            long budget = MemoryBudget(card, c, slot), size = CostumeMemory.Unpacked(costume);
+            if (budget <= 0 || size <= budget)
+            {
+                check = new CheckResult { Passed = true, Title = "Fits in the game's memory",
+                    Detail = budget <= 0 ? "There was nothing of " + c.Name + "'s to compare with." : $"{fileName} unpacks to {CostumeMemory.Kb(size)} in the game; up to {CostumeMemory.Kb(budget)} fits for {c.Name}." };
+                return costume;
+            }
+            CostumeMemory.Shrunk r;
+            try { r = CostumeMemory.Shrink(costume, budget); }
+            catch { r = new CostumeMemory.Shrunk { Before = size, After = size }; }
+            if (r.Bytes == null)
+            {
+                check = new CheckResult { Passed = false, Title = "Too big for the game's memory",
+                    Detail = $"{fileName} unpacks to {CostumeMemory.Kb(size)} in the game, but only {CostumeMemory.Kb(budget)} fits for {c.Name}. " +
+                             "A costume this big crashes the game as the match starts, and it couldn't be made small enough." };
+                return null;
+            }
+            check = new CheckResult { Passed = true, Title = "Made smaller to fit the game's memory",
+                Detail = $"{fileName} unpacked to {CostumeMemory.Kb(size)}, but only {CostumeMemory.Kb(budget)} fits for {c.Name}: that crashes the game as the match starts. " +
+                         $"Only its pictures were changed (the model is untouched) and it now unpacks to {CostumeMemory.Kb(r.After)}: " + string.Join("; ", r.Pictures) + "." };
+            return r.Bytes;
+        }
+
+        /// <summary>A skin's main costume file as it came (kept beside the copy when the copy was made smaller).</summary>
+        static string OriginalCopy(string copy) => copy + ".original";
+
+        (CostumeSlot Slot, InstalledFile File, string Copy) MainCopy(Fat32Image card, InstalledSkin s)
+        {
+            var c = s.Character;
+            var slot = PPlusCard.ReadSlots(card, c).FirstOrDefault(x => x.Index == s.SlotIndex);
+            if (slot == null) return (null, null, null);
+            var f = s.Files.FirstOrDefault(x => string.Equals(x.CardPath, slot.CostumePath(c), StringComparison.OrdinalIgnoreCase));
+            if (f == null) return (slot, null, null);
+            string copy = Path.Combine(_lib.SkinFolder(s.Id), Path.GetFileName(f.CardPath));
+            return File.Exists(copy) ? (slot, f, copy) : (slot, f, null);
+        }
+
+        /// <summary>Costumes that are on and need fitting: too big for the game's memory (they crash the match), or made
+        /// smaller earlier when the way as it came fits after all (they go back to how they came).</summary>
+        public List<InstalledSkin> TooBig(Fat32Image card) => NeedsRefit(card).Where(x => x.Value).Select(x => x.Key).ToList();
+        public List<InstalledSkin> ShrunkForNothing(Fat32Image card) => NeedsRefit(card).Where(x => !x.Value).Select(x => x.Key).ToList();
+
+        List<KeyValuePair<InstalledSkin, bool>> NeedsRefit(Fat32Image card)
+        {
+            var result = new List<KeyValuePair<InstalledSkin, bool>>();
+            foreach (var s in _lib.Skins.Where(x => x.Enabled))
+            {
+                try
+                {
+                    var (slot, f, copy) = MainCopy(card, s);
+                    if (copy == null) continue;
+                    long budget = MemoryBudget(card, s.Character, slot);
+                    if (budget <= 0) continue;
+                    long now = CostumeMemory.Unpacked(Head(copy));
+                    string orig = OriginalCopy(copy);
+                    if (now > budget) result.Add(new KeyValuePair<InstalledSkin, bool>(s, true));
+                    else if (File.Exists(orig) && CostumeMemory.Unpacked(Head(orig)) <= budget) result.Add(new KeyValuePair<InstalledSkin, bool>(s, false));
+                }
+                catch { }
+            }
+            return result;
+        }
+
+        static byte[] Head(string file)
+        {
+            var head = new byte[8];
+            using (var fs = File.OpenRead(file)) fs.Read(head, 0, 8);
+            return head;
+        }
+
+        /// <summary>Fits a skin's saved costume to the game's memory, starting from the costume as it came: made smaller
+        /// if needed, or put back as it came when that fits. Returns the card paths it changed.</summary>
+        HashSet<string> RefitCopy(Fat32Image card, InstalledSkin skin)
+        {
+            var changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var (slot, f, copy) = MainCopy(card, skin);
+            if (copy == null) return changed;
+            string orig = OriginalCopy(copy);
+            var source = File.ReadAllBytes(File.Exists(orig) ? orig : copy);
+            var fitted = FitMemory(card, skin.Character, slot, Path.GetFileName(f.CardPath), source, out var check);
+            if (fitted == null) throw new InvalidOperationException(check.Detail);
+            if (!ReferenceEquals(fitted, source) && !File.Exists(orig)) File.WriteAllBytes(orig, source);   // keep it as it came
+            string sha = Library.Sha256(fitted);
+            if (sha == f.Sha256) return changed;
+            File.WriteAllBytes(copy, fitted);
+            if (ReferenceEquals(fitted, source) && File.Exists(orig)) File.Delete(orig);
+            f.Sha256 = sha;
+            changed.Add(f.CardPath);
+            Notes.Add(ReferenceEquals(fitted, source)
+                ? $"{skin.Name} is back exactly as it came (it fits in the game's memory after all)."
+                : $"{skin.Name} was made smaller to fit the game's memory (only its pictures; it crashed the match before).");
+            return changed;
+        }
+
         /// <summary>Whether a skin's model fits a slot (its gameplay bones match that slot's original).</summary>
         public CheckResult SkeletonFits(Fat32Image card, SkinCheck.Skeleton skin, Character c, CostumeSlot slot)
         {
@@ -143,6 +304,19 @@ namespace SkinManager.Core
             }
             var main = plan.Files.FirstOrDefault(kv => Path.GetFileName(kv.Key).Equals($"Fit{c.FilePrefix}{slot.FileNumber:00}.pac", StringComparison.OrdinalIgnoreCase));
             if (main.Value != null) plan.Checks.Add(SkeletonFits(card, SkinCheck.ReadSkeleton(main.Value), c, slot));
+            if (main.Value != null)
+            {
+                var fitted = FitMemory(card, c, slot, Path.GetFileName(main.Key), main.Value, out var memCheck);
+                plan.Checks.Add(memCheck);
+                if (fitted != null && !ReferenceEquals(fitted, main.Value))
+                {
+                    int at = plan.Files.FindIndex(kv => kv.Key == main.Key);
+                    plan.Files[at] = new KeyValuePair<string, byte[]>(main.Key, fitted);
+                    plan.Originals[main.Key] = main.Value;
+                    var sizeCheck = plan.Checks.FirstOrDefault(x => x.Title == "Too big for online play" && x.Detail.StartsWith(Path.GetFileName(main.Key)));
+                    if (sizeCheck != null) plan.Checks[plan.Checks.IndexOf(sizeCheck)] = SkinCheck.Size(Path.GetFileName(main.Key), fitted.Length, SkinCheck.LimitFor(""));
+                }
+            }
             foreach (var kv in pictureFiles.Where(p => p.Value != null))
             {
                 try { using (var img = Image.FromFile(kv.Value)) plan.Pictures[kv.Key] = new Bitmap(img); }
@@ -158,6 +332,7 @@ namespace SkinManager.Core
             public List<SkinPlan> Install = new List<SkinPlan>();
             public List<InstalledSkin> Remove = new List<InstalledSkin>();
             public List<InstalledSkin> Reapply = new List<InstalledSkin>();
+            public List<InstalledSkin> Refit = new List<InstalledSkin>();      // too big for the game's memory: make smaller
             public List<InstalledSkin> Enable = new List<InstalledSkin>();    // turn back on (kept in My Mods)
             public List<InstalledSkin> Disable = new List<InstalledSkin>();   // turn off, keep in My Mods
             public List<StagePlan> StageInstall = new List<StagePlan>();
@@ -165,7 +340,7 @@ namespace SkinManager.Core
             public List<InstalledStage> StageEnable = new List<InstalledStage>();
             public List<InstalledStage> StageDisable = new List<InstalledStage>();
             public List<InstalledStage> StageReapply = new List<InstalledStage>();
-            public bool IsEmpty => Install.Count + Remove.Count + Reapply.Count + Enable.Count + Disable.Count
+            public bool IsEmpty => Install.Count + Remove.Count + Reapply.Count + Refit.Count + Enable.Count + Disable.Count
                 + StageInstall.Count + StageRemove.Count + StageEnable.Count + StageDisable.Count + StageReapply.Count == 0;
         }
 
@@ -273,7 +448,7 @@ namespace SkinManager.Core
                 if (!WorkInPlace) CopyWithProgress(cardPath, newPath, p => progress?.Invoke("Making a safe copy of the SD card", p));
                 using (var card = new Fat32Image(newPath, true))
                 {
-                    int step = 0, steps = change.Remove.Count + change.Install.Count + change.Reapply.Count + change.Enable.Count + change.Disable.Count;
+                    int step = 0, steps = change.Remove.Count + change.Install.Count + change.Reapply.Count + change.Refit.Count + change.Enable.Count + change.Disable.Count;
                     foreach (var asked in change.Disable)
                     {
                         var skin = Mine(asked);
@@ -297,6 +472,27 @@ namespace SkinManager.Core
                         progress?.Invoke($"Putting {skin.Name} back", 100 * step++ / Math.Max(1, steps));
                         Reapply(card, skin, expected);
                     }
+                    foreach (var asked in change.Refit)
+                    {
+                        var skin = Mine(asked);
+                        if (skin == null || skin.Disabled) continue;
+                        progress?.Invoke($"Making {skin.Name} fit", 100 * step++ / Math.Max(1, steps));
+                        try
+                        {
+                            foreach (var path in RefitCopy(card, skin))
+                            {
+                                var mine = File.ReadAllBytes(Path.Combine(_lib.SkinFolder(skin.Id), Path.GetFileName(path)));
+                                card.WriteFile(path, mine);
+                                expected[path] = mine;
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            Restore(card, skin, expected);
+                            skin.Disabled = true;
+                            Notes.Add($"{skin.Name} was turned off: {e.Message}");
+                        }
+                    }
                     foreach (var asked in change.Enable)
                     {
                         var skin = Mine(asked);
@@ -312,6 +508,8 @@ namespace SkinManager.Core
                             Notes.Add($"{skin.Name} stayed off: {why}. Online that could make games go out of sync.");
                             continue;
                         }
+                        try { RefitCopy(card, skin); }
+                        catch (Exception e) { Notes.Add($"{skin.Name} stayed off: {e.Message}"); continue; }
                         EnableSkin(card, skin, expected);
                         skin.Disabled = false;
                     }
@@ -339,7 +537,7 @@ namespace SkinManager.Core
                         if (kv.Value == null) { if (check.Exists(kv.Key)) throw new IOException("Check failed: " + kv.Key + " is still on the card."); }
                         else if (!check.ReadFile(kv.Key).SequenceEqual(kv.Value)) throw new IOException("Check failed: " + kv.Key + " did not read back the same.");
                     }
-                    check.ListFolder("/Project+/pf/fighter");
+                    check.ListFolder(Build.Pf + "/fighter");
                 }
 
                 progress?.Invoke("Swapping in the new SD card", 98);
@@ -403,7 +601,8 @@ namespace SkinManager.Core
             };
             foreach (var kv in plan.Files)
             {
-                _lib.SaveOriginalFile(kv.Key, card.Exists(kv.Key) ? card.ReadFile(kv.Key) : null);
+                // what's there now is kept, to put back when this skin goes off: P+'s file, or a costume put on by hand
+                RefreshOriginal(card, kv.Key);
                 card.WriteFile(kv.Key, kv.Value);
                 expected[kv.Key] = kv.Value;
                 record.Files.Add(new InstalledFile { CardPath = kv.Key, Sha256 = Library.Sha256(kv.Value) });
@@ -759,8 +958,7 @@ namespace SkinManager.Core
                     Kind = plan.Kind, TargetLabel = plan.Kind != null ? plan.Target.StageName : null,
                     TrackList = plan.TrackList, SongTitle = plan.SongTitle, LooksOnly = plan.Looks != null,
                 };
-                byte[] now = card.Exists(record.CardPath) ? card.ReadFile(record.CardPath) : null;
-                _lib.SaveOriginalFile(record.CardPath, now);   // P+'s file, kept the first time only
+                RefreshOriginal(card, record.CardPath);   // what's there now (P+'s, or a stage or song put on by hand) comes back when it's off
                 card.WriteFile(record.CardPath, plan.Bytes);
                 expected[record.CardPath] = plan.Bytes;
                 stages.Add(record);
@@ -772,7 +970,7 @@ namespace SkinManager.Core
             RebuildSelectPictures(card, stages, expected);
         }
 
-        const string NetListFolder = "/Project+/pf/sound/netplaylist/", ListFolder = "/Project+/pf/sound/tracklist/";
+        static string NetListFolder => Build.Pf + "/sound/netplaylist/"; static string ListFolder => Build.Pf + "/sound/tracklist/";
 
         readonly Dictionary<string, Dictionary<string, byte[]>> _newSelectPictures = new Dictionary<string, Dictionary<string, byte[]>>();
 
@@ -959,6 +1157,7 @@ namespace SkinManager.Core
             string folder = _lib.SkinFolder(id);
             Directory.CreateDirectory(folder);
             foreach (var kv in plan.Files) File.WriteAllBytes(Path.Combine(folder, Path.GetFileName(kv.Key)), kv.Value);
+            foreach (var kv in plan.Originals) File.WriteAllBytes(OriginalCopy(Path.Combine(folder, Path.GetFileName(kv.Key))), kv.Value);
             foreach (var kv in plan.Pictures) kv.Value.Save(Path.Combine(folder, kv.Key + ".png"), ImageFormat.Png);
         }
 

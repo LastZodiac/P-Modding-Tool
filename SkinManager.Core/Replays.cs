@@ -141,7 +141,7 @@ namespace SkinManager.Core
             return d;
         }
 
-        static byte[] Inflate(byte[] z, int size)
+        internal static byte[] Inflate(byte[] z, int size)
         {
             using (var ms = new MemoryStream(z, 2, z.Length - 2))
             using (var ds = new DeflateStream(ms, CompressionMode.Decompress))
@@ -214,6 +214,29 @@ namespace SkinManager.Core
             int run = 0, best = 0;
             for (int i = from + 1; i < to && i < move.Count; i++) { if (Stuck(move[i])) run = 0; else best = Math.Max(best, ++run); }
             return best;
+        }
+
+        /// <summary>A game's replay data, kept for good in a folder (by the game's id): read from the replay when it's
+        /// there and has changed (or the move names have), and from what was kept when the replay is gone.</summary>
+        public static ReplayData Kept(long gameId, string path, string folder, Func<int, MoveTable> names, string namesKey)
+        {
+            string file = Path.Combine(folder, gameId.ToString("x16") + ".json");
+            var ser = new DataContractJsonSerializer(typeof(ReplayData));
+            ReplayData old = null;
+            try { if (File.Exists(file)) using (var s = File.OpenRead(file)) old = (ReplayData)ser.ReadObject(s); } catch { old = null; }
+            if (path == null || !File.Exists(path)) return old;   // the replay was deleted or moved: what was read from it
+            long size = new FileInfo(path).Length;
+            if (old != null && old.Version == ReplayData.CurrentVersion && old.Size == size && (names == null || old.NamesKey == namesKey)) return old;
+            var d = Read(path, names, namesKey);
+            try
+            {
+                Directory.CreateDirectory(folder);
+                var tmp = file + ".tmp";
+                using (var s = File.Create(tmp)) ser.WriteObject(s, d);
+                if (File.Exists(file)) File.Replace(tmp, file, null); else File.Move(tmp, file);
+            }
+            catch { }
+            return d;
         }
 
         /// <summary>A replay's events, read once and kept in the cache folder.</summary>

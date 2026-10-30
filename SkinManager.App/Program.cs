@@ -55,6 +55,22 @@ namespace SkinManager.App
             try { Directory.CreateDirectory(DataFolder); File.AppendAllText(Path.Combine(DataFolder, "errors.log"), $"{DateTime.Now:u} ({what})\r\n{e}\r\n\r\n"); } catch { }
         }
 
+        /// <summary>What went wrong, with a button that copies the details (to paste in a message to the app's maker).</summary>
+        /// <summary>What went wrong, with the way to report it (filled in for you).</summary>
+        static void ShowCrash(Exception e)
+        {
+            using (var f = new Form { Text = "P+ Modding Tool", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterScreen, ClientSize = new System.Drawing.Size(520, 210), BackColor = Theme.Back, ForeColor = Theme.Text, Font = Theme.Body, TopMost = true })
+            {
+                var text = new Label { AutoSize = false, Location = new System.Drawing.Point(18, 16), Size = new System.Drawing.Size(484, 120), ForeColor = Theme.Text,
+                    Text = "Something went wrong:\r\n\r\n" + e?.Message + "\r\n\r\nYour SD card was not changed. Reporting it gets it fixed: it takes a few seconds." };
+                var report = Theme.Primary("Report it"); report.Location = new System.Drawing.Point(18, 156);
+                var ok = Theme.Secondary("Close"); ok.Location = new System.Drawing.Point(410, 156); ok.DialogResult = DialogResult.OK;
+                report.Click += (s, a2) => { f.Hide(); BugReport.Show(null, e); f.Close(); };
+                f.Controls.AddRange(new Control[] { text, report, ok }); f.AcceptButton = ok; f.CancelButton = ok;
+                f.ShowDialog();
+            }
+        }
+
         static void Crash(Exception e)
         {
             Trace("crash: " + e);
@@ -64,8 +80,12 @@ namespace SkinManager.App
                 File.AppendAllText(Path.Combine(DataFolder, "errors.log"), $"{DateTime.Now:u}\r\n{e}\r\n\r\n");
             }
             catch { }
-            MessageBox.Show("Something went wrong:\r\n\r\n" + e?.Message + "\r\n\r\nYour SD card was not changed. The details were saved to Data\\errors.log.",
-                "P+ Modding Tool", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            try { ShowCrash(e); }
+            catch
+            {
+                MessageBox.Show("Something went wrong:\r\n\r\n" + e?.Message + "\r\n\r\nYour SD card was not changed. The details were saved to Data\\errors.log.",
+                    "P+ Modding Tool", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 }

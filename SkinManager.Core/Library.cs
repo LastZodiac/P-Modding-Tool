@@ -112,6 +112,7 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public List<InstalledStage> Stages = new List<InstalledStage>();
         [DataMember(EmitDefaultValue = false)] public List<Profile> Profiles = new List<Profile>();
         [DataMember(EmitDefaultValue = false)] public string ActiveProfile;
+        [DataMember(EmitDefaultValue = false)] public bool ProfilesMade;   // the first "Main" was made (so deleting every profile sticks)
     }
 
     public sealed class Library
@@ -123,6 +124,7 @@ namespace SkinManager.Core
         /// <summary>The profile in use. Null means "P+ as it comes" (no mods on).</summary>
         public string ActiveProfile { get; set; }
         public const string DefaultName = "P+ as it comes (no mods)";
+        public bool ProfilesMade { get; set; }
 
         /// <summary>The ids of everything that is on right now.</summary>
         public List<string> OnNow() => Skins.Where(s => s.Enabled).Select(s => s.Id).Concat(Stages.Where(s => s.Enabled).Select(s => s.Id)).ToList();
@@ -164,6 +166,7 @@ namespace SkinManager.Core
                     Stages = f.Stages ?? new List<InstalledStage>();
                     Profiles = f.Profiles ?? new List<Profile>();
                     ActiveProfile = f.ActiveProfile;
+                    ProfilesMade = f.ProfilesMade || Profiles.Count > 0;
                     foreach (var w in f.Written ?? new List<WrittenFile>()) Written[w.CardPath] = w.Sha256;
                 }
             }
@@ -172,8 +175,9 @@ namespace SkinManager.Core
         /// <summary>Makes sure there's at least one profile (a "Main" one with whatever is on).</summary>
         public void EnsureProfiles()
         {
-            if (Profiles.Count == 0)
+            if (Profiles.Count == 0 && !ProfilesMade)
             {
+                ProfilesMade = true;
                 Profiles.Add(new Profile { Name = "Main", On = OnNow() });
                 if (ActiveProfile == null && (Skins.Count > 0 || Stages.Count > 0)) ActiveProfile = "Main";
                 else if (ActiveProfile == null) ActiveProfile = "Main";
@@ -191,6 +195,7 @@ namespace SkinManager.Core
                     Stages = Stages,
                     Profiles = Profiles,
                     ActiveProfile = ActiveProfile,
+                    ProfilesMade = ProfilesMade,
                     Written = Written.Select(kv => new WrittenFile { CardPath = kv.Key, Sha256 = kv.Value }).ToList(),
                 });
             if (File.Exists(RecordsPath)) File.Replace(tmp, RecordsPath, null); else File.Move(tmp, RecordsPath);

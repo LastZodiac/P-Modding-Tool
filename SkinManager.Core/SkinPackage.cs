@@ -19,7 +19,7 @@ namespace SkinManager.Core
             return $"Fit{c.FilePrefix}{Kind}{fileNumber:00}.pac";
         }
         public string TargetFolder(Character c) =>
-            Kind == "Nana" ? "/Project+/pf/fighter/" + c.PartnerPrefixes[0] : c.FighterFolderPath;
+            Kind == "Nana" ? Build.Pf + "/fighter/" + c.PartnerPrefixes[0] : c.FighterFolderPath;
     }
 
     public sealed class PackageCostume

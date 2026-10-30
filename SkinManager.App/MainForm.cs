@@ -34,6 +34,8 @@ namespace SkinManager.App
         readonly Button _launchClean = Theme.Secondary("Launch unmodded");
         Action _placeHeader = () => { };
         List<InstalledSkin> _overwritten = new List<InstalledSkin>();
+        List<InstalledSkin> _tooBig = new List<InstalledSkin>();
+        Button _putBack;
         List<InstalledStage> _overwrittenStages = new List<InstalledStage>();
         bool _busy;
         readonly string _openOnStart;   // a skin dropped on the app's icon
@@ -47,6 +49,7 @@ namespace SkinManager.App
         StatsPanel _stats;
         FrameDataPanel _frameData;
         LiveCard _card;
+        LiveMatchPanel _livePage;
         LogFollower _log;
         LiveMatch _live = new LiveMatch();
         MatchHistory _cardHistory;
@@ -73,11 +76,31 @@ namespace SkinManager.App
                 if (!(_look.Stats && _look.Card) && !test) return;
                 if (_report == null) _report = new ReportCard();
                 _report.Game = _game ?? (_install != null ? GameWindow.Find(_install) : null);
-                _report.Show(p, smash, x.Me, x.Them, d.History.StageName(x.Game.Stage), d.MoveName, StatsArt.Cached);
+                _report.Left = _look.OverlayLeft == true;
+                var coach = _stats.Coach(gameId, c =>
+                {
+                    _lastCoach = Line(c);
+                    if (_card != null && _card.Visible && _card.State?.Phase == MatchPhase.GameOver) { _card.CoachLine = _lastCoach; _card.Refresh2(); }
+                    if (_report != null && _report.Visible && _report.GameId == gameId) _report.SetCoach(c);
+                });
+                _lastCoach = Line(coach);
+                _report.Show(p, smash, x.Me, x.Them, d.History.StageName(x.Game.Stage), d.MoveName, StatsArt.Cached, coach);
+                PlaceReport();
             }
             catch (Exception e) { Program.Log("after-game report", e); }
         }
-        DateTime _pillAt = DateTime.MaxValue, _gameLookAt;
+        /// <summary>The after-game report sits right under the opponent card.</summary>
+        void PlaceReport()
+        {
+            if (_report == null || !_report.Visible) return;
+            _report.Place(_card != null && _card.Visible ? _card.Bounds : Rectangle.Empty);
+        }
+
+        string _lastCoach;
+        /// <summary>The coach's main note on a game, for the card between games.</summary>
+        static string Line(GameCoach c) => c == null ? null : c.Tips.Count > 0 ? DeathCoach.Say(c.Tips.FirstOrDefault(t => t.Saved) ?? c.Tips[0]) : c.Facts.FirstOrDefault();
+        DateTime _pillAt = DateTime.MaxValue, _gameLookAt, _hideCardAt = DateTime.MaxValue;
+        string _cardSig; MatchPhase _cardPhase;
         Rectangle? _game;
 
         /// <summary>Reads what the game wrote since last time and shows, updates or hides the overlay.</summary>
@@ -85,11 +108,13 @@ namespace SkinManager.App
         {
             try
             {
-                if (!_look.Stats || !_look.Card || _install == null) { _card?.Hide(); _full?.Hide(); return; }
+                if (!_look.Stats || _install == null) { _card?.Hide(); _full?.Hide(); UpdateLivePage(false); return; }
                 if (_log == null) _log = new LogFollower(LogFollower.LogPath(_install));
                 bool changed = false;
                 foreach (var line in _log.NewLines()) changed |= _live.Feed(line);
                 var s = _live.State;
+                UpdateLivePage(true);
+                if (!_look.Card) { _card?.Hide(); _full?.Hide(); if (changed && s.Phase == MatchPhase.GameOver) _reloadAt = DateTime.Now.AddSeconds(4); if (DateTime.Now >= _reloadAt) { _reloadAt = DateTime.MaxValue; _stats.CheckNewGame(); } return; }
                 if (DateTime.Now >= _reloadAt) { _reloadAt = DateTime.MaxValue; _cardHistory = null; changed = true; _stats.CheckNewGame(); _checkAgainAt = DateTime.Now.AddSeconds(12); }
                 if (DateTime.Now >= _checkAgainAt) { _checkAgainAt = DateTime.MaxValue; _stats.CheckNewGame(); }   // in case the game was saved late
                 // where the game is (it can be moved or resized): checked every 2 seconds
@@ -97,32 +122,61 @@ namespace SkinManager.App
                 {
                     _gameLookAt = DateTime.Now.AddSeconds(2);
                     var g = GameWindow.Find(_install);
-                    if (g != _game) { _game = g; if (_card != null) { _card.Game = g; if (_card.Visible) _card.Place(); } if (_full != null && _full.Visible) _full.Place(g); }
+                    if (g != _game) { _game = g; if (_card != null) { _card.Game = g; if (_card.Visible) _card.Place(); } if (_full != null && _full.Visible) _full.Place(g); if (_report != null) { _report.Game = g; PlaceReport(); } }
                 }
                 if (changed)
                 {
                     if (_cardHistory == null && !_historyLoading) LoadCardHistory();
-                    if (s.Phase == MatchPhase.Playing) _pillAt = DateTime.Now.AddSeconds(12);       // the slim bar soon after the fight starts
+                    if (s.Phase == MatchPhase.Playing) { if (_cardPhase != MatchPhase.Playing) _pillAt = DateTime.Now.AddSeconds(12); }   // the slim bar soon after the fight starts
                     else _pillAt = DateTime.MaxValue;
-                    if (s.Phase == MatchPhase.GameOver) _reloadAt = DateTime.Now.AddSeconds(4);       // Brawl Online has saved the game by then
+                    _cardPhase = s.Phase;
+                    if (s.Phase == MatchPhase.GameOver) { _reloadAt = DateTime.Now.AddSeconds(4); _lastCoach = null; }   // Brawl Online has saved the game by then
                     bool show = s.Phase == MatchPhase.Found || s.Phase == MatchPhase.Loading || s.Phase == MatchPhase.Playing || s.Phase == MatchPhase.GameOver;
                     if (show && s.OpponentName != null)
                     {
-                        if (_card == null) _card = new LiveCard { Scout = id => _stats.Scout(id, 2) };
-                        _card.Game = _game;
-                        if (s.Phase != MatchPhase.Playing) _card.Pill = false;
-                        _card.State = s.Copy(); _card.History = _cardHistory; if (_card.Art == null) _card.Art = StatsArt.Cached;
-                        _card.Refresh2(); if (!_card.Visible) _card.Show();
+                        _hideCardAt = DateTime.MaxValue;
+                        if (_card == null)
+                        {
+                            _card = new LiveCard { Scout = id => _stats.Scout(id, 2), Expanded = _look.CardOpen == true };
+                            _card.ExpandedChanged += open => { _look.CardOpen = open ? (bool?)true : null; _look.Save(); PlaceReport(); };
+                            _card.VisibleChanged += (o, e) => PlaceReport();
+                        }
+                        // only redraw the card when something it shows changed (the log says a lot; redrawing it all the time flickers)
+                        string sig = $"{s.Phase}|{s.OpponentCode}|{s.MyChar}|{s.TheirChar}|{s.Stage}|{s.Game}|{s.MyWins}|{s.TheirWins}|{s.StocksTaken}|{s.StocksLost}|{_cardHistory?.Games.Count}|{_lastCoach}|{_look.OverlayLeft}";
+                        if (sig != _cardSig || !_card.Visible)
+                        {
+                            _cardSig = sig;
+                            _card.Game = _game; _card.Left = _look.OverlayLeft == true; _card.CoachLine = s.Phase == MatchPhase.GameOver ? _lastCoach : null;
+                            if (s.Phase != MatchPhase.Playing) _card.Pill = false;
+                            _card.State = s.Copy(); _card.History = _cardHistory; if (_card.Art == null) _card.Art = StatsArt.Cached;
+                            _card.Refresh2(); if (!_card.Visible || _card.Fading) _card.Appear();
+                            PlaceReport();
+                        }
                     }
-                    else _card?.Hide();
-                    if (s.Phase == MatchPhase.Found || s.Phase == MatchPhase.Loading) _report?.Hide();   // on to the next game
+                    else if (_card != null && _card.Visible && _hideCardAt == DateTime.MaxValue) _hideCardAt = DateTime.Now.AddSeconds(8);   // a room between games, a retry: don't blink
+                    if ((s.Phase == MatchPhase.Found || s.Phase == MatchPhase.Loading) && Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") == null) _report?.Disappear();   // on to the next game
                     if (_full != null && _full.Visible) { _full.State = s.Copy(); _full.History = _cardHistory; _full.Invalidate(); }
                 }
+                if (_card != null && _card.Visible && DateTime.Now >= _hideCardAt) { _hideCardAt = DateTime.MaxValue; _card.Disappear(); _cardSig = null; }
                 if (_card != null && _card.Visible && DateTime.Now >= _pillAt) { _pillAt = DateTime.MaxValue; _card.Pill = true; _card.Refresh2(); }
                 var flag = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_FULL_FLAG");   // UI tests: the hotkey, by a file
                 if (flag != null && System.IO.File.Exists(flag) != (_full != null && _full.Visible)) ToggleFull();
             }
             catch (Exception e) { Program.Log("overlay", e); }
+        }
+
+        /// <summary>The Live Match page (when on show) and the recording dot by its name in the menu.</summary>
+        void UpdateLivePage(bool following)
+        {
+            if (_livePage == null) return;
+            var s = _live.State;
+            bool rec = following && s.Phase == MatchPhase.Playing;
+            if (_nav.TryGetValue(_livePage, out var nb) && (nb.Live != rec || rec)) { nb.Live = rec; nb.Invalidate(); }
+            if (_livePage.Visible)
+            {
+                if (_cardHistory == null && !_historyLoading && following) LoadCardHistory();
+                _livePage.Show(s, _live.Events, _cardHistory, following);
+            }
         }
 
         /// <summary>The hotkey: shows or hides the full overlay over the game.</summary>
@@ -161,7 +215,7 @@ namespace SkinManager.App
                     Dictionary<int, string> names;
                     try { using (var card = installer?.OpenCard()) names = card != null ? StageSelect.SlotListNames(card) : new Dictionary<int, string>(); } catch { names = new Dictionary<int, string>(); }
                     var path = MatchHistory.DatabasePath(install);
-                    return System.IO.File.Exists(path) ? MatchHistory.Load(path, names) : null;
+                    return MatchHistory.Load(path, names, StatsPanel.KeptFolder);
                 });
                 var art = await System.Threading.Tasks.Task.Run(() => StatsArt.Get(() => _installer));
                 if (_card != null) { _card.History = _cardHistory; _card.Art = art; _card.Refresh2(); }
@@ -241,7 +295,17 @@ namespace SkinManager.App
             _bannerText.Location = new Point(18, 12);
             var putBack = new Button { Text = "Put them back", FlatStyle = FlatStyle.Flat, BackColor = Theme.AccentText, ForeColor = Theme.Accent, Font = Theme.BodyBold, AutoSize = true, Cursor = Cursors.Hand };
             putBack.FlatAppearance.BorderSize = 0;
-            putBack.Click += (s, e) => { var c = new Installer.Change { Reapply = _overwritten.ToList() }; c.StageReapply.AddRange(_overwrittenStages); Run(c, "Your mods were checked against the updated P+ and put back where they still fit."); };
+            putBack.Click += (s, e) =>
+            {
+                if (_overwritten.Count + _overwrittenStages.Count > 0)
+                {
+                    var c = new Installer.Change { Reapply = _overwritten.ToList() }; c.StageReapply.AddRange(_overwrittenStages);
+                    Run(c, "Your mods were checked against the updated P+ and put back where they still fit.");
+                }
+                else if (_tooBig.Count > 0)
+                    Run(new Installer.Change { Refit = _tooBig.ToList() }, "Your costumes now fit in the game's memory (only pictures are ever made smaller, never models).");
+            };
+            _putBack = putBack;
             _banner.Controls.Add(_bannerText); _banner.Controls.Add(putBack);
             _banner.Resize += (s, e) => putBack.Location = new Point(_banner.Width - putBack.Width - 18, (_banner.Height - putBack.Height) / 2);
 
@@ -299,12 +363,14 @@ namespace SkinManager.App
             _store.TurnOffRequested += skin => Run(new Installer.Change { Disable = { skin } }, $"Turned off. {skin.Character.Name}'s costume {skin.SlotIndex + 1} is P+'s again ({skin.Name} stays in My Mods).");
             BuildSlotsPage();
             _swap = new SwapPanel(() => _installer, folder => AddSkin(folder)) { Visible = false };
-            _settings = new SettingsPanel(_look, () => { _backdrop.Apply(_look); _statsToggle?.Invoke(); ApplyHotkey(); Invalidate(true); }) { Visible = false };
+            _look.ApplyOverlay();
+            _settings = new SettingsPanel(_look, () => { _look.ApplyOverlay(); _card?.Invalidate(); _report?.Invalidate(); _full?.Invalidate(); _backdrop.Apply(_look); _statsToggle?.Invoke(); ApplyHotkey(); Invalidate(true); }) { Visible = false };
             _content.Controls.Add(_library); _content.Controls.Add(_store); _content.Controls.Add(_slotsPage); _content.Controls.Add(_swap); _content.Controls.Add(_settings);
             _credits = new CreditsPanel { Visible = false }; _content.Controls.Add(_credits);
             _stats = new StatsPanel(() => _install, () => _installer) { Visible = false }; _content.Controls.Add(_stats);
             _stats.NewGame += ShowReport;
             _frameData = new FrameDataPanel(() => _installer) { Visible = false }; _content.Controls.Add(_frameData);
+            _livePage = new LiveMatchPanel { Visible = false }; _content.Controls.Add(_livePage);
 
             // sidebar
             var side = new GlassPanel { Dock = DockStyle.Left, Width = 208, Tint = 170 };
@@ -329,7 +395,8 @@ namespace SkinManager.App
             var playLabel = Theme.Label("PLAY", Theme.Small, Theme.Muted); playLabel.Location = new Point(22, y); side.Controls.Add(playLabel); y += 24;
             Nav("Frame Data", "\uE916", _frameData);
             Nav("Stat Tracker", "\uE9D2", _stats);
-            void StatsShown() { _nav[_stats].Visible = _look.Stats; if (!_look.Stats && _stats.Visible) ShowPage(_library); }
+            Nav("Live Match", "\uE7C8", _livePage);
+            void StatsShown() { _nav[_stats].Visible = _look.Stats; _nav[_livePage].Visible = _look.Stats; if (!_look.Stats && (_stats.Visible || _livePage.Visible)) ShowPage(_library); }
             _statsToggle = StatsShown; StatsShown();
             // the opponent card: follows the game's log while the app is open
             var liveTimer = new Timer { Interval = 500 };
@@ -373,7 +440,7 @@ namespace SkinManager.App
         Control _header;
         string PageName(Control page) =>
             page == _library ? "My Mods" : page == _store ? "Mod Store" : page == _slotsPage ? "Costume Slots" : page == _swap ? "Model Swapper"
-            : page == _settings ? "Settings" : page == _frameData ? "Frame Data" : page == _stats ? "Stat Tracker" : page == _credits ? "Credits" : null;
+            : page == _settings ? "Settings" : page == _frameData ? "Frame Data" : page == _stats ? "Stat Tracker" : page == _credits ? "Credits" : page == _livePage ? "Live Match" : null;
 
         /// <summary>The tour of the page on show (asked: with the "?" button; otherwise the first time).</summary>
         void ShowTour(bool asked)
@@ -443,16 +510,35 @@ namespace SkinManager.App
             Program.Trace("startup");
             _install = BrawlOnlineInstall.Find();
             Program.Trace("brawl online: " + (_install?.NetplayFolder ?? "not found"));
+            // your own Dolphin's SD card instead (picked in Settings)
+            if (!string.IsNullOrEmpty(_look.CardFile))
+            {
+                var other = OtherCards.Find(_look.CardFile);
+                if (other.Problem == null)
+                {
+                    if (_install == null) _install = new BrawlOnlineInstall { NetplayFolder = other.Dolphin };
+                    _install.CardOverride = other.Card; _install.OtherDolphin = other.Dolphin;
+                    Build.Root = other.Root ?? Build.PPlusRoot;
+                    Program.Trace("using another card: " + other.Card);
+                }
+                else BeginInvoke((Action)(() => MessageBox.Show(this, "The app was set to use your own Dolphin's SD card, but it can't right now:\r\n\r\n" + other.Problem +
+                    "\r\n\r\nIt's using Brawl Online's card instead. You can pick it again in Settings.", "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning)));
+            }
             if (_install == null)
             {
                 _status.Text = "Brawl Online was not found on this PC.";
                 _status.ForeColor = Theme.Bad;
                 _addButton.Enabled = false;
-                MessageBox.Show(this, "Brawl Online isn't set up on this PC yet.\r\n\r\nOpen Brawl Online once and let it finish setting up Project+, then open this app again.",
-                    "P+ Modding Tool", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (MessageBox.Show(this, "Brawl Online isn't set up on this PC.\r\n\r\nPlay P+ (or a mod built on it) in your own Dolphin instead? Click Yes and pick that Dolphin's folder: " +
+                        "the app then puts mods on its SD card, and Frame Data reads its characters.\r\n\r\n(For Brawl Online: click No, open Brawl Online once and let it finish setting up Project+, then open this app again.)",
+                        "P+ Modding Tool", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    BeginInvoke((Action)(() => { ShowPage(_settings); _settings.PickDolphin(); }));
                 return;
             }
-            _cards = new Cards(_install, Program.DataFolder);
+            _cards = new Cards(_install, CardData);
+            _lastSave = new LastSave(CardData);
+            _launchClean.Visible = _install.OwnCard;
+            if (!_install.OwnCard) _launchModded.Text = "Open my Dolphin";
             _textures = new TexturePacks(_install, Program.DataFolder);
             LastSave.RemoveOldBackup(_install.CardPath);   // older versions kept a 2 GB copy next to the card
             _lib = new Library(_cards.LibraryFolder(_cards.Active));
@@ -471,10 +557,13 @@ namespace SkinManager.App
             CheckOverwritten();
             CheckVersions();
             CheckModUpdates();
+            RescanHand();
             CheckAppUpdate(false);
             BeginInvoke((Action)(() => SelfUpdate.OfferShortcuts(this)));
             if (_openOnStart != null) BeginInvoke((Action)(() => AddSkin(_openOnStart)));
         }
+
+        string CardName => _install != null && !_install.OwnCard ? "Your Dolphin's SD card (not used online)" : _cards?.HasBig == true ? Cards.Label(_cards.Active) : "Your P+ SD card";
 
         void UpdateStatus()
         {
@@ -483,8 +572,8 @@ namespace SkinManager.App
                 using (var card = _installer.OpenCard()) _space = SkinManager.Core.Space.Measure(card, _lib);
                 bool running = _install.IsRunning(out string what);
                 _library.ShowSpace(_space);
-                if (_updateNote != null && !running) { _status.Text = $"{(_cards?.HasBig == true ? Cards.Label(_cards.Active) : "Your P+ SD card")}: {SkinManager.Core.Space.MB(_space.Usable)} free for mods   •   {_updateNote}"; _status.ForeColor = Theme.Warn; return; }
-                _status.Text = $"{(_cards?.HasBig == true ? Cards.Label(_cards.Active) : "Your P+ SD card")}: {SkinManager.Core.Space.MB(_space.Usable)} free for mods   •   " +
+                if (_updateNote != null && !running) { _status.Text = $"{CardName}: {SkinManager.Core.Space.MB(_space.Usable)} free for mods   •   {_updateNote}"; _status.ForeColor = Theme.Warn; return; }
+                _status.Text = $"{CardName}: {SkinManager.Core.Space.MB(_space.Usable)} free for mods   •   " +
                     (running ? $"Close {what} to change skins" : "Ready");
                 _status.ForeColor = running ? Theme.Warn : Theme.Muted;
             }
@@ -552,16 +641,36 @@ namespace SkinManager.App
         {
             CheckUnsafe();
             if (_lib.Skins.Count == 0 && _lib.Stages.Count == 0) { _banner.Visible = false; return; }
-            Task.Run(() => { using (var card = _installer.OpenCard()) return (_installer.Overwritten(card), _installer.OverwrittenStages(card)); })
+            Task.Run(() => { using (var card = _installer.OpenCard()) return (_installer.Overwritten(card), _installer.OverwrittenStages(card), _installer.TooBig(card), _installer.ShrunkForNothing(card)); })
                 .ContinueWith(t =>
                 {
                     if (t.IsFaulted) return;
                     _overwritten = t.Result.Item1; _overwrittenStages = t.Result.Item2;
+                    _tooBig = t.Result.Item3.Concat(t.Result.Item4).Where(x => !_overwritten.Contains(x)).ToList();
+                    var shrunk = t.Result.Item4.Where(x => !_overwritten.Contains(x)).ToList();
                     int n = _overwritten.Count + _overwrittenStages.Count;
-                    _banner.Visible = n > 0;
-                    _bannerText.Text = n == 1
-                        ? "A P+ update replaced one of your mods (" + (_overwritten.FirstOrDefault()?.Name ?? _overwrittenStages[0].Name) + ")."
-                        : $"A P+ update replaced {n} of your mods.";
+                    _banner.Visible = n > 0 || _tooBig.Count > 0;
+                    if (n > 0)
+                    {
+                        _bannerText.Text = n == 1
+                            ? "A P+ update replaced one of your mods (" + (_overwritten.FirstOrDefault()?.Name ?? _overwrittenStages[0].Name) + ")."
+                            : $"A P+ update replaced {n} of your mods.";
+                        _putBack.Text = "Put them back";
+                    }
+                    else if (_tooBig.Count > shrunk.Count)
+                    {
+                        var big = _tooBig.Where(x => !shrunk.Contains(x)).ToList();
+                        _bannerText.Text = (big.Count == 1 ? big[0].Name + " is" : $"{big.Count} of your costumes ({big[0].Name}...) are") +
+                            " too big for the game's memory and crash the match when picked." + (shrunk.Count > 0 ? $" ({shrunk.Count} made smaller before can go back as they came.)" : "");
+                        _putBack.Text = "Make them fit";
+                    }
+                    else if (shrunk.Count > 0)
+                    {
+                        _bannerText.Text = (shrunk.Count == 1 ? shrunk[0].Name + " was" : $"{shrunk.Count} of your costumes were") +
+                            " made smaller than needed. They fit in the game's memory as they came.";
+                        _putBack.Text = "Put them back as they came";
+                    }
+                    _putBack.Location = new Point(_banner.Width - _putBack.Width - 18, (_banner.Height - _putBack.Height) / 2);
                 }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
@@ -594,20 +703,11 @@ namespace SkinManager.App
             var add = new ToolStripMenuItem("New profile...") { ForeColor = Theme.Accent };
             add.Click += (s, e) => NewProfile();
             menu.Items.Add(add);
-            if (_lib.Active != null)
-            {
-                var rename = new ToolStripMenuItem($"Rename \"{_lib.ActiveProfile}\"...") { ForeColor = Theme.Text };
-                rename.Click += (s, e) => RenameProfile();
-                menu.Items.Add(rename);
-                if (_lib.Profiles.Count > 1)
-                {
-                    var del = new ToolStripMenuItem($"Delete \"{_lib.ActiveProfile}\"") { ForeColor = Theme.Bad };
-                    del.Click += (s, e) => DeleteProfile();
-                    menu.Items.Add(del);
-                }
-            }
+            var manage = new ToolStripMenuItem("Manage profiles (rename, copy, delete)...") { ForeColor = Theme.Text };
+            manage.Click += (s, e) => ManageProfiles();
+            menu.Items.Add(manage);
             // the SD cards
-            if (_cards != null)
+            if (_cards != null && _install.OwnCard)
             {
                 menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add(new ToolStripMenuItem("SD CARD") { Enabled = false, ForeColor = Theme.Muted });
@@ -665,6 +765,7 @@ namespace SkinManager.App
         {
             VersionInfo v;
             try { v = Versions.Read(_install); } catch { return; }
+            if (string.IsNullOrEmpty(v.Launcher) && string.IsNullOrEmpty(v.PPlus)) return;   // no Brawl Online (your own Dolphin only): nothing to compare
             string before = null;
             try { if (File.Exists(VersionsFile)) before = File.ReadAllText(VersionsFile).Trim(); } catch { }
             try { File.WriteAllText(VersionsFile, v.Key); } catch { }
@@ -682,7 +783,7 @@ namespace SkinManager.App
             {
                 var notes = new List<string>();
                 var release = Versions.Release(_install, v.PPlus);
-                try { using (var card = _installer.OpenCard()) if (release != null && !Versions.IsOn(card, release)) notes.Add($"this card isn't on P+ {v.PPlus}: open Brawl Online once so it updates it"); } catch { }
+                try { using (var card = _installer.OpenCard()) if (_install.OwnCard && release != null && !Versions.IsOn(card, release)) notes.Add($"this card isn't on P+ {v.PPlus}: open Brawl Online once so it updates it"); } catch { }
                 if (v.NewestPPlus != null && Versions.Newer(v.NewestPPlus, v.PPlus)) notes.Add($"P+ {v.NewestPPlus} is out: open Brawl Online to get it");
                 string latest = Versions.LatestLauncherOnline();
                 if (latest != null && v.Launcher != null && Versions.Newer(latest, v.Launcher)) notes.Add($"Brawl Online {latest} is out: open Brawl Online to get it");
@@ -814,7 +915,10 @@ namespace SkinManager.App
 
         // ----- SD cards -----
 
-        readonly LastSave _lastSave = new LastSave(Program.DataFolder);
+        LastSave _lastSave = new LastSave(Program.DataFolder);
+        /// <summary>Where this card's mods lists are kept: the Data folder for Brawl Online's card, a folder of its own for
+        /// another Dolphin's (so the two never mix).</summary>
+        string CardData => _install == null || _install.OwnCard ? Program.DataFolder : OtherCards.DataFolderFor(Program.DataFolder, _install.CardPath);
         Installer NewInstaller() => new Installer(_install, _lib) { Undo = _lastSave, CardName = _cards?.Active ?? Cards.Normal };
 
         void UndoLastSave()
@@ -962,6 +1066,16 @@ namespace SkinManager.App
                 MessageBox.Show(this, $"{what} is already open.\r\n\r\nClose it first, then click Launch again: the SD card can only be swapped while it's closed.", "Already open", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            if (!_install.OwnCard)
+            {
+                // your own Dolphin: save, then open it (it reads its card when it starts)
+                if (!SavePending()) return;
+                var dolphin = new[] { Path.Combine(_install.OtherDolphin, "Dolphin.exe"), Path.Combine(Path.GetDirectoryName(_install.OtherDolphin) ?? "", "Dolphin.exe") }.FirstOrDefault(File.Exists);
+                if (dolphin == null) { MessageBox.Show(this, "Your mods are saved on your Dolphin's SD card. Open your Dolphin as usual to play with them.", "Your Dolphin", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dolphin) { WorkingDirectory = Path.GetDirectoryName(dolphin), UseShellExecute = true }); }
+                catch (Exception e) { MessageBox.Show(this, "Couldn't open your Dolphin: " + e.Message, "Your Dolphin", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                return;
+            }
             string exe = FindLauncher();
             if (exe == null) return;
             if (modded)
@@ -1040,6 +1154,58 @@ namespace SkinManager.App
             _store.RefreshInstalled();
             UpdateStatus();
             CheckOverwritten();
+            RescanHand();
+        }
+
+        // ----- mods put on by hand -----
+
+        bool _handScanning;
+        /// <summary>Looks through the card in place for mods put on by hand (in the background; quick after the first time).</summary>
+        async void RescanHand()
+        {
+            if (_install == null || _cards == null || _handScanning) return;
+            _handScanning = true;
+            try
+            {
+                var install = _install; string cardName = _cards.Active;
+                var libs = new List<Library> { new Library(_cards.LibraryFolder(Cards.Normal)) };
+                if (System.IO.Directory.Exists(_cards.LibraryFolder(Cards.Big))) libs.Add(new Library(_cards.LibraryFolder(Cards.Big)));
+                string cache = System.IO.Path.Combine(CardData, "Cache", "card-files-" + cardName + ".json");
+                string data = CardData;
+                var scan = await Task.Run(() =>
+                {
+                    using (var card = new Fat32Image(install.CardPath, false)) return HandMods.Scan(card, CardBaseline.For(card, install, data, libs), libs, cache);
+                });
+                if (_cards.Active != cardName) return;
+                HandMods.Last = scan;
+                Program.Trace($"put on by hand: {scan.Mods.Count}");
+                _library.ShowHand(scan);
+            }
+            catch (Exception e) { Program.Log("looking for mods put on by hand", e); }
+            finally { _handScanning = false; }
+        }
+
+        public HandScan Hand => HandMods.Last;
+
+        public void ShowHandMods()
+        {
+            using (var f = new HandModsForm(HandMods.Last, fresh =>
+            {
+                try
+                {
+                    var libs = new List<Library> { new Library(_cards.LibraryFolder(Cards.Normal)) };
+                    if (System.IO.Directory.Exists(_cards.LibraryFolder(Cards.Big))) libs.Add(new Library(_cards.LibraryFolder(Cards.Big)));
+                    using (var card = new Fat32Image(_install.CardPath, false))
+                    {
+                        var release = fresh ? CardBaseline.Make(card, CardData, libs) : CardBaseline.For(card, _install, CardData, libs);
+                        HandMods.Last = HandMods.Scan(card, release, libs, System.IO.Path.Combine(CardData, "Cache", "card-files-" + _cards.Active + ".json"));
+                    }
+                    _library.ShowHand(HandMods.Last);
+                }
+                catch (Exception e) { Program.Log("looking for mods put on by hand", e); }
+                return HandMods.Last;
+            }))
+                f.ShowDialog(this);
         }
 
         bool SavedFirst()
@@ -1052,10 +1218,11 @@ namespace SkinManager.App
             return true;
         }
 
-        /// <summary>Turns on exactly the mods of a profile (null: none, P+ as it comes), in one save.</summary>
-        void SwitchProfile(string name)
+        /// <summary>Turns on exactly the mods of a profile (null: none, P+ as it comes), in one save. False if it didn't.</summary>
+        bool SwitchProfile(string name)
         {
-            if (name == _lib.ActiveProfile || !SavedFirst()) return;
+            if (name == _lib.ActiveProfile) return true;
+            if (!SavedFirst()) return false;
             var want = new HashSet<string>(name == null ? new List<string>() : _lib.Profiles.First(p => p.Name == name).On);
             var change = new Installer.Change();
             var usedSlots = new HashSet<string>();
@@ -1072,14 +1239,20 @@ namespace SkinManager.App
             }
             string before = _lib.ActiveProfile;
             _lib.ActiveProfile = name;
-            if (change.IsEmpty) { _lib.Save(); UpdateProfileButton(); PendingChanged(); return; }
+            bool ok = true;
+            if (change.IsEmpty) { _lib.Save(); UpdateProfileButton(); PendingChanged(); return true; }
             int ons = change.Enable.Count + change.StageEnable.Count, offs = change.Disable.Count + change.StageDisable.Count;
             if (!Run(change, name == null ? "Switched to P+ as it comes: all your mods are off (they're still in My Mods)."
                                           : $"Switched to \"{name}\": {ons} mod(s) turned on, {offs} turned off."))
-            { _lib.ActiveProfile = before; }
+            { _lib.ActiveProfile = before; ok = false; }
             _lib.Save();
             UpdateProfileButton();
+            return ok;
         }
+
+        bool NameTaken(string name, Profile except = null) =>
+            name.Equals(Library.DefaultName, StringComparison.OrdinalIgnoreCase) || name.StartsWith("P+ as it comes", StringComparison.OrdinalIgnoreCase) ||
+            _lib.Profiles.Any(p => p != except && p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
         void NewProfile()
         {
@@ -1088,8 +1261,7 @@ namespace SkinManager.App
             {
                 f.Option.Checked = true;
                 if (f.ShowDialog(this) != DialogResult.OK || f.Value == "") return;
-                if (f.Value == Library.DefaultName || _lib.Profiles.Any(p => p.Name.Equals(f.Value, StringComparison.OrdinalIgnoreCase)))
-                { MessageBox.Show(this, "There's already a profile with that name.", "New profile", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                if (NameTaken(f.Value)) { MessageBox.Show(this, "There's already a profile with that name.", "New profile", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 _lib.Profiles.Add(new Profile { Name = f.Value, On = f.Option.Checked ? _lib.OnNow() : new List<string>() });
                 _lib.Save();
                 if (f.Option.Checked) { _lib.ActiveProfile = f.Value; _lib.Save(); UpdateProfileButton(); PendingChanged(); }
@@ -1097,27 +1269,67 @@ namespace SkinManager.App
             }
         }
 
-        void RenameProfile()
+        void RenameProfile(string name)
         {
-            var p = _lib.Active; if (p == null) return;
+            var p = _lib.Profiles.FirstOrDefault(x => x.Name == name); if (p == null) return;
             using (var f = new InputForm("Rename profile", "New name:", p.Name, "Rename"))
             {
                 if (f.ShowDialog(this) != DialogResult.OK || f.Value == "" || f.Value == p.Name) return;
-                if (f.Value == Library.DefaultName || _lib.Profiles.Any(x => x != p && x.Name.Equals(f.Value, StringComparison.OrdinalIgnoreCase)))
-                { MessageBox.Show(this, "There's already a profile with that name.", "Rename profile", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-                p.Name = f.Value; _lib.ActiveProfile = f.Value; _lib.Save(); UpdateProfileButton();
+                if (NameTaken(f.Value, p)) { MessageBox.Show(this, "There's already a profile with that name.", "Rename profile", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                bool active = _lib.ActiveProfile == p.Name;
+                p.Name = f.Value; if (active) _lib.ActiveProfile = f.Value;
+                _lib.Save(); UpdateProfileButton();
             }
         }
 
-        void DeleteProfile()
+        void CopyProfile(string name)
         {
-            var p = _lib.Active; if (p == null || _lib.Profiles.Count < 2) return;
-            if (MessageBox.Show(this, $"Delete the profile \"{p.Name}\"?\r\n\r\nYour mods stay in My Mods and nothing on the SD card changes. Pick another profile afterwards to switch to it.",
-                "Delete profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            _lib.Profiles.Remove(p);
-            var next = _lib.Profiles.First();
-            _lib.ActiveProfile = null;    // nothing active until the next one is switched to
-            SwitchProfile(next.Name);
+            var p = _lib.Profiles.FirstOrDefault(x => x.Name == name); if (p == null) return;
+            string suggestion = p.Name + " (copy)";
+            for (int i = 2; NameTaken(suggestion); i++) suggestion = $"{p.Name} (copy {i})";
+            using (var f = new InputForm("Copy profile", $"A new profile with the same mods as \"{p.Name}\". Its name:", suggestion, "Copy"))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK || f.Value == "") return;
+                if (NameTaken(f.Value)) { MessageBox.Show(this, "There's already a profile with that name.", "Copy profile", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                _lib.Save();   // the one in use remembers what's on first
+                _lib.Profiles.Insert(_lib.Profiles.IndexOf(p) + 1, new Profile { Name = f.Value, On = new List<string>(p.On) });
+                _lib.Save();
+            }
+        }
+
+        /// <summary>Deletes a profile. "P+ as it comes" isn't one: it can never be deleted. Deleting the one in use switches
+        /// to another first (or to P+ as it comes when it was the last).</summary>
+        void DeleteProfile(string name)
+        {
+            var p = _lib.Profiles.FirstOrDefault(x => x.Name == name); if (p == null) return;
+            bool active = _lib.ActiveProfile == p.Name;
+            var next = _lib.Profiles.FirstOrDefault(x => x != p);
+            string what = !active ? "Your mods stay in My Mods, and nothing on your SD card changes."
+                : next != null ? $"It's the one in use, so the app switches to \"{next.Name}\" first (its mods get turned on). Your mods stay in My Mods."
+                : "It's the one in use and your last profile, so the app switches to P+ as it comes first: all your mods get turned off. They stay in My Mods, and you can make a new profile any time.";
+            if (MessageBox.Show(this, $"Delete the profile \"{p.Name}\"?\r\n\r\n{what}", "Delete profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (active)
+            {
+                if (!SavedFirst()) return;
+                int at = _lib.Profiles.IndexOf(p);
+                _lib.Save();                                   // it remembers what's on, in case the switch can't happen
+                _lib.Profiles.Remove(p);
+                _lib.ActiveProfile = "\u0001";                // none for a moment, so the switch goes ahead
+                if (!SwitchProfile(next?.Name))
+                {
+                    _lib.Profiles.Insert(at, p); _lib.ActiveProfile = p.Name; _lib.Save(); UpdateProfileButton();
+                    return;
+                }
+            }
+            else { _lib.Profiles.Remove(p); _lib.Save(); }
+            UpdateProfileButton();
+        }
+
+        void ManageProfiles()
+        {
+            if (_lib == null || _busy) return;
+            using (var f = new ProfilesForm(_lib, n => SwitchProfile(n), NewProfile, RenameProfile, CopyProfile, DeleteProfile))
+                f.ShowDialog(this);
         }
 
         // ----- IModHost (My Mods) -----
@@ -1349,8 +1561,9 @@ namespace SkinManager.App
                 {
                     Picture = pics.TryGetValue(c.CspTextureName(s.Index), out var p) ? p : null,
                     Caption = $"Costume {s.Index + 1}",
-                    Badge = skin != null ? "Your skin: " + skin.Name : PPlusCard.TeamColorName(s.TeamColor) + (s.OnCard ? "" : " • from Brawl") + (others > 0 ? $"\r\n{others} of yours (off)" : ""),
-                    BadgeColor = skin != null ? Theme.Accent : Theme.Muted,
+                    Badge = skin != null ? "Your skin: " + skin.Name : HandMods.Last?.Costume(c, s.Index) != null ? "Your own costume\r\n(put on by hand)" + (others > 0 ? $" • {others} off" : "")
+                        : PPlusCard.TeamColorName(s.TeamColor) + (s.OnCard ? "" : " • from Brawl") + (others > 0 ? $"\r\n{others} of yours (off)" : ""),
+                    BadgeColor = skin != null ? Theme.Accent : HandMods.Last?.Costume(c, s.Index) != null ? Theme.Warn : Theme.Muted,
                     Margin = new Padding(0, 0, 14, 14),
                 };
                 if (skin != null) tile.Click += (o, e) => OfferTurnOff(skin);
@@ -1565,6 +1778,23 @@ namespace SkinManager.App
                 if (kv.Value && change.Install.Any(p => p.Character.SlotListId == s.SlotListId && p.Slot.Index == s.SlotIndex)) continue;
                 if (kv.Value) change.Enable.Add(s); else change.Disable.Add(s);
             }
+            // mods put on by hand where this change puts the app's own: ask first (they're kept and come back)
+            var hand = HandMods.Last;
+            if (hand != null && hand.Mods.Count > 0)
+            {
+                var targets = change.Install.SelectMany(p => p.Files.Select(f => f.Key))
+                    .Concat(change.Enable.SelectMany(k => k.Files.Select(f => f.CardPath)))
+                    .Concat(change.StageInstall.Select(p => p.Target.CardPath))
+                    .Concat(change.StageEnable.Select(k => k.CardPath));
+                var clashes = targets.Select(t => hand.At(t)).Where(m => m != null).GroupBy(m => m.Label).Select(g => g.First()).ToList();
+                if (clashes.Count > 0)
+                {
+                    string list = string.Join("\r\n", clashes.Take(8).Select(m => "• " + m.Label)) + (clashes.Count > 8 ? $"\r\n• and {clashes.Count - 8} more" : "");
+                    if (MessageBox.Show(this, $"{(clashes.Count == 1 ? "This spot has a mod" : "These spots have mods")} you put on by hand (not through this app):\r\n\r\n{list}\r\n\r\n" +
+                        "Going ahead replaces them on the card. They're kept: turning the app's mod off puts yours back.\r\n\r\nGo ahead?",
+                        "Your own mods are there", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+                }
+            }
             _busy = true;
             Exception error = null;
             using (var progress = new ProgressForm())
@@ -1598,6 +1828,7 @@ namespace SkinManager.App
             CheckOverwritten();
             _store.RefreshInstalled();
             UpdateProfileButton();
+            RescanHand();
             return error == null;
         }
     }

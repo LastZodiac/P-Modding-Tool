@@ -55,7 +55,7 @@ namespace SkinManager.Core
 
     public sealed class StageSelect
     {
-        public const string PicturesFile = "/Project+/pf/menu2/sc_selmap.pac";
+        public static string PicturesFile => Build.Pf + "/menu2/sc_selmap.pac";
         public static string PreviewTexture(int n) => $"MenSelmapPrevbase.{n:00}";
         public static string IconTexture(int n) => $"MenSelmapIcon.{n:00}";
         public static string NameTexture(int n) => $"MenSelmapFrontStname.{n:00}";
@@ -179,7 +179,7 @@ namespace SkinManager.Core
             var names = new Dictionary<int, string>();
             try
             {
-                string txt = Encoding.UTF8.GetString(card.ReadFile("/Project+/pf/stage/stageslot/Stageslot IDs.txt"));
+                string txt = Encoding.UTF8.GetString(card.ReadFile(Build.Pf + "/stage/stageslot/Stageslot IDs.txt"));
                 foreach (var line in txt.Split('\n'))
                 {
                     var m = System.Text.RegularExpressions.Regex.Match(line, @"^\s*([0-9A-Fa-f]{2})\s*-\s*(.+?)\s*(\(.*)?$");
@@ -199,7 +199,7 @@ namespace SkinManager.Core
         public static StageSelect Read(Fat32Image card)
         {
             var ss = new StageSelect();
-            const string root = "/Project+/pf/stage";
+            string root = Build.Pf + "/stage";
             // stage slot names (P+'s own list)
             var names = new Dictionary<int, string>();
             try

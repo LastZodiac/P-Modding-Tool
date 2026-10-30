@@ -24,8 +24,8 @@ namespace SkinManager.Core
 
     public static class Songs
     {
-        public const string StrmFolder = "/Project+/pf/sound/strm";
-        public const string TracklistFolder = "/Project+/pf/sound/tracklist";
+        public static string StrmFolder => Build.Pf + "/sound/strm";
+        public static string TracklistFolder => Build.Pf + "/sound/tracklist";
         public const long MaxSongBytes = 40L * 1024 * 1024;   // bigger than any Brawl song; a sanity limit
 
         /// <summary>Every song P+'s track lists play.</summary>
@@ -63,7 +63,7 @@ namespace SkinManager.Core
             return songs.Values.OrderBy(s => s.Title, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        public const string StageInfoFolder = "/Project+/pf/stage/stageinfo";
+        public static string StageInfoFolder => Build.Pf + "/stage/stageinfo";
 
         /// <summary>Which track list each stage file plays, from P+'s stage settings (pf/stage/stageinfo/*.param):
         /// "STGBATTLEFIELD_L_BF_MELEE" -> "Battlefield Melee". Keys are stage file names without .pac, upper case.</summary>

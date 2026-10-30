@@ -104,7 +104,7 @@ namespace SkinManager.Core
         public static Dictionary<string, uint> ModuleIds(Fat32Image card)
         {
             var r = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
-            const string folder = "/Project+/pf/module";
+            string folder = Build.Pf + "/module";
             if (!card.Exists(folder)) return r;
             foreach (var e in card.ListFolder(folder))
             {
@@ -150,7 +150,7 @@ namespace SkinManager.Core
             return all.Where(s => !s.IsMain && s.Suffix.Split('_').Any(w => w.Length >= 5 && !Regex.IsMatch(w, @"^\d+$") && plain.Contains(w.ToLowerInvariant()))).ToList();
         }
 
-        public const string Folder = "/Project+/pf/stage/melee";
+        public static string Folder => Build.Pf + "/stage/melee";
 
         static readonly Dictionary<string, string> Names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -317,7 +317,7 @@ namespace SkinManager.Core
             var names = new HashSet<string>(StringComparer.Ordinal);
             try
             {
-                string path = "/Project+/pf/module/" + module;
+                string path = Build.Pf + "/module/" + module;
                 if (card.Exists(path))
                 {
                     var d = card.ReadFile(path);

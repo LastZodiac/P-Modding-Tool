@@ -10,7 +10,12 @@ namespace SkinManager.Core
     public sealed class BrawlOnlineInstall
     {
         public string NetplayFolder;   // ...\Brawl Online\netplay
-        public string CardPath => Path.Combine(NetplayFolder, "User", "Wii", "sd.raw");
+        /// <summary>The SD card the app works on: Brawl Online's own, unless another one was picked in Settings
+        /// (your own Dolphin's, for making and testing mods).</summary>
+        public string CardPath => CardOverride ?? Path.Combine(NetplayFolder, "User", "Wii", "sd.raw");
+        public string CardOverride;    // another Dolphin's sd.raw (null: Brawl Online's)
+        public string OtherDolphin;    // that Dolphin's folder (its game window uses the card too)
+        public bool OwnCard => CardOverride == null;
         public string DolphinToolPath => Path.Combine(NetplayFolder, "DolphinTool.exe");
         public string BrawlDiscPath;   // the Brawl disc image Brawl Online plays (may be null)
 
@@ -87,6 +92,7 @@ namespace SkinManager.Core
                         // Only Brawl Online's own Dolphin uses the card; another Dolphin on this PC does not.
                         string file = ProcessPath(p);
                         if (file == null || file.StartsWith(NetplayFolder, StringComparison.OrdinalIgnoreCase)) { what = "Brawl Online's game window"; return true; }
+                        if (OtherDolphin != null && file.StartsWith(OtherDolphin, StringComparison.OrdinalIgnoreCase)) { what = "your Dolphin"; return true; }
                     }
                 }
                 catch { }

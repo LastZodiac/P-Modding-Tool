@@ -16,13 +16,13 @@ namespace SkinManager.Core
         public string FilePrefix;   // Fit<FilePrefix>NN.pac
         public string[] PartnerPrefixes = new string[0]; // other fighters whose costume goes with this one (Nana)
 
-        public string FighterFolderPath => "/Project+/pf/fighter/" + Folder;
-        public string SlotListPath => $"/Project+/pf/info/costumeslots/{SlotListId:00}.masq";
-        public string CspFilePath => $"/Project+/pf/menu/common/char_bust_tex/MenSelchrFaceB{CosmeticId:00}0.brres";
+        public string FighterFolderPath => Build.Pf + "/fighter/" + Folder;
+        public string SlotListPath => $"{Build.Pf}/info/costumeslots/{SlotListId:00}.masq";
+        public string CspFilePath => $"{Build.Pf}/menu/common/char_bust_tex/MenSelchrFaceB{CosmeticId:00}0.brres";
         public string CspTextureName(int slot) => $"MenSelchrFaceB.{CosmeticId * 10 + slot + 1:000}";
-        public string BattlePortraitPath(int slot) => $"/Project+/pf/info/portrite/InfFace{CosmeticId * 50 + slot + 1:0000}.brres";
+        public string BattlePortraitPath(int slot) => $"{Build.Pf}/info/portrite/InfFace{CosmeticId * 50 + slot + 1:0000}.brres";
         public string BattlePortraitTextureName(int slot) => $"InfFace.{CosmeticId * 50 + slot + 1:000}";
-        public const string StockFilePath = "/Project+/pf/menu/common/StockFaceTex.brres";
+        public static string StockFilePath => Build.Pf + "/menu/common/StockFaceTex.brres";
         public string StockTextureName(int slot) => $"InfStc.{CosmeticId * 50 + slot + 1:0000}";
         public override string ToString() => Name;
     }

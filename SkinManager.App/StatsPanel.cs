@@ -246,7 +246,9 @@ namespace SkinManager.App
 
         Task _loading;
         bool _again;
-        long _lastGameId = -1;
+        DateTime _lastGameStart = DateTime.MinValue;
+        /// <summary>Where every game read is kept for good (so deleting replays loses nothing).</summary>
+        public static string KeptFolder => System.IO.Path.Combine(Program.DataFolder, "Stats");
         static readonly DateTime Started = DateTime.UtcNow;
         /// <summary>A game finished since the last look (its id), with its report ready.</summary>
         public event Action<long> NewGame;
@@ -286,18 +288,18 @@ namespace SkinManager.App
                     if (_stageNames == null)
                         _stageNames = await Task.Run(() => { try { using (var card = _installer()?.OpenCard()) return card != null ? StageSelect.SlotListNames(card) : new Dictionary<int, string>(); } catch { return new Dictionary<int, string>(); } });
                     string path = MatchHistory.DatabasePath(install);
-                    if (!System.IO.File.Exists(path)) { _profile.Big = "No games yet"; _profile.Small = "Brawl Online keeps your history once you've played online."; _profile.Invalidate(); return; }
                     var names = _stageNames;
-                    _h = await Task.Run(() => MatchHistory.Load(path, names));
+                    _h = await Task.Run(() => MatchHistory.Load(path, names, KeptFolder));
+                    if (_h.Games.Count == 0) { _profile.Big = "No games yet"; _profile.Small = "Brawl Online keeps your history once you've played online."; _profile.Invalidate(); return; }
                     ShowAll();
                     if (_art == null) { var installer = _installer; _art = await Task.Run(() => StatsArt.Get(installer)); ShowAll(); }
                     await LoadReplays();
                     // a game played while the app is open (or, the first time, the newest one if it's from then) gets a report
-                    var newest = _h.Singles().OrderBy(x => x.Game.Id).Select(x => x.Game).LastOrDefault();
-                    Program.Trace($"stats read: newest game {newest?.Id}, last seen {_lastGameId}");
-                    bool test = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") != null && _lastGameId < 0;
-                    if (newest != null && newest.Id > _lastGameId && (_lastGameId >= 0 || newest.Start > Started || test)) NewGame?.Invoke(newest.Id);
-                    if (newest != null) _lastGameId = Math.Max(_lastGameId, newest.Id);
+                    var newest = _h.Singles().OrderBy(x => x.Game.Start).Select(x => x.Game).LastOrDefault();
+                    Program.Trace($"stats read: newest game {newest?.Start:u}, last seen {_lastGameStart:u}");
+                    bool test = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") != null && _lastGameStart == DateTime.MinValue;
+                    if (newest != null && newest.Start > _lastGameStart && (_lastGameStart > DateTime.MinValue || newest.Start > Started || test)) NewGame?.Invoke(newest.Id);
+                    if (newest != null && newest.Start > _lastGameStart) _lastGameStart = newest.Start;
                 }
                 catch (Exception e)
                 {
@@ -365,7 +367,8 @@ namespace SkinManager.App
             int id = ++_loadId;
             await LoadTables();
             var games = _h.Singles().Where(x => !_data.Smash.ContainsKey(x.Game.Id)).ToList();
-            string cache = System.IO.Path.Combine(Program.DataFolder, "Cache", "replays");
+            string kept = System.IO.Path.Combine(KeptFolder, "replays");
+            try { var old = System.IO.Path.Combine(Program.DataFolder, "Cache", "replays"); if (System.IO.Directory.Exists(old)) System.IO.Directory.Delete(old, true); } catch { }   // the old cache (1.0), now kept in Stats
             _data.ReplaysLoading = games.Count > 0; _data.ReplaysTotal = games.Count; _data.ReplaysRead = 0;
             var found = new System.Collections.Concurrent.ConcurrentDictionary<long, GameSmash>();
             var progress = new Progress<int>(n =>
@@ -385,7 +388,8 @@ namespace SkinManager.App
                     try
                     {
                         var path = Locate(x.Game.File);
-                        if (path != null) { var s = GameSmash.Of(x.Game, x.Me, x.Them, Replays.Cached(path, cache, tables, key)); if (s != null) found[x.Game.Id] = s; }
+                        var d = Replays.Kept(x.Game.Id, path, kept, tables, key);
+                        if (d != null) { var s = GameSmash.Of(x.Game, x.Me, x.Them, d); if (s != null) found[x.Game.Id] = s; }
                     }
                     catch (Exception e) { if (Program.Testing) Program.Log("reading a replay", e); }
                     int n = System.Threading.Interlocked.Increment(ref done);
@@ -401,6 +405,61 @@ namespace SkinManager.App
             foreach (var s in smash.Values) if (s.TheirHabits != null && s.TheirHabits.Known) { _data.Typical.Add(s.TheirHabits); _data.TypicalGames++; }
             Profile(); RefreshViews(); ShowAll();
         }
+
+        // ----- the coach: how to DI the hits that took your stocks, fun facts, a combo idea (worked out per game, on demand)
+        readonly Dictionary<long, GameCoach> _coach = new Dictionary<long, GameCoach>();
+        readonly HashSet<long> _coaching = new HashSet<long>();
+        readonly Dictionary<int, FighterBook> _books = new Dictionary<int, FighterBook>();
+        readonly List<int> _bookOrder = new List<int>();
+
+        /// <summary>The coach's notes on a game: right away when they're worked out already; otherwise null, and
+        /// <paramref name="ready"/> is called (on the window's thread) once they are.</summary>
+        public GameCoach Coach(long gameId, Action<GameCoach> ready = null)
+        {
+            if (_coach.TryGetValue(gameId, out var done)) return done;
+            if (!_data.Smash.TryGetValue(gameId, out var smash) || smash?.Replay == null) return null;
+            if (ready != null) _coachWaiting[gameId] = ready;
+            if (!_coaching.Add(gameId)) return null;
+            var installer = _installer; Func<int, int, string> name = MoveName;
+            Task.Run(() =>
+            {
+                var c = new GameCoach();
+                try
+                {
+                    using (var card = installer()?.OpenCard())
+                    {
+                        if (card == null) return c;
+                        FighterBook Book(int kind)
+                        {
+                            kind = Fighters.Same(kind);
+                            lock (_books)
+                            {
+                                if (_books.TryGetValue(kind, out var b)) return b;
+                                var ch = Characters.All.FirstOrDefault(x => string.Equals(x.Name, Fighters.Name(kind), StringComparison.OrdinalIgnoreCase));
+                                try { b = ch == null ? null : FrameDataBook.Load(card, ch); if (b != null && b.Body == null) b.Body = Body.Of(b); } catch { b = null; }
+                                _books[kind] = b; _bookOrder.Add(kind);
+                                if (_bookOrder.Count > 6) { _books.Remove(_bookOrder[0]); _bookOrder.RemoveAt(0); }   // they're big: keep a few
+                                return b;
+                            }
+                        }
+                        try { c.Tips = DeathCoach.For(smash.Replay, smash.Me, Book, name); } catch (Exception e) { Program.Log("DI tips", e); }
+                        try { c.Facts = FunFacts.For(smash, name); } catch (Exception e) { Program.Log("fun facts", e); }
+                        try { c.Combo = FunFacts.ComboIdea(smash, Book(smash.MyCharacter), Book(smash.TheirCharacter), name); } catch (Exception e) { Program.Log("combo idea", e); }
+                    }
+                }
+                catch (Exception e) { Program.Log("coach", e); }
+                return c;
+            }).ContinueWith(t =>
+            {
+                _coaching.Remove(gameId);
+                var c = t.IsFaulted ? new GameCoach() : t.Result;
+                _coach[gameId] = c;
+                if (_coachWaiting.TryGetValue(gameId, out var r)) { _coachWaiting.Remove(gameId); try { r(c); } catch (Exception e) { Program.Log("coach", e); } }
+                RefreshViews();
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+            return null;
+        }
+        readonly Dictionary<long, Action<GameCoach>> _coachWaiting = new Dictionary<long, Action<GameCoach>>();
 
         /// <summary>What a player tends to do, from your games against them (empty until the replays are read).</summary>
         public List<(string Habit, string Tip)> Scout(string userId, int max = 3)
@@ -450,7 +509,7 @@ namespace SkinManager.App
             if (_h == null) return;
             var games = _h.Singles(_ranked).ToList();
             _data.History = _h; _data.Games = games;
-            _data.Head = Head; _data.Portrait = Portrait; _data.Stage = StagePic; _data.MoveName = MoveName;
+            _data.Head = Head; _data.Portrait = Portrait; _data.Stage = StagePic; _data.MoveName = MoveName; _data.Coach = id => Coach(id);
             Profile();
             foreach (Control b in _tabs.Controls) Theme.Toggle((Button)b, b.Text.TrimEnd(' ', '•') == _tab);
             _tools.Controls.Clear(); _tools.Height = 0;

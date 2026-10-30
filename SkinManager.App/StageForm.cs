@@ -14,6 +14,9 @@ namespace SkinManager.App
 {
     class StageForm : Form
     {
+        /// <summary>"(the stage is 160 wide)", when it's known.</summary>
+        static string Wide(StageCheck.Fit fit) => fit != null && fit.Width >= 1 ? $" (the stage is {fit.Width:0} wide)" : "";
+
         readonly Installer _installer;
         readonly Library _lib;
         readonly SkinPackage _pkg;
@@ -288,10 +291,11 @@ namespace SkinManager.App
             var mine = _lib.Stages.FirstOrDefault(x => x.Enabled && string.Equals(x.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase));
             var box = Box("Make it play like P+'s " + s.Label + " and replace it" + (mine != null ? $"  (turns off {mine.Name})" : ""), new Fix { Stage = s, Plan = plan });
             var fit = plan.Fit;
+            if (fit != null && (fit.Floors >= 1e6f || float.IsNaN(fit.Floors))) fit = null;   // moving floors only: can't be measured
             bool good = fit != null && fit.Floors < 1f && fit.Rest < 5f;
-            string how = fit == null ? "" : fit.Exact ? "Its floors line up exactly with P+'s, so it will look right."
-                : fit.Floors < 1f ? $"Where you stand lines up. The sides or underside are off by up to {fit.Rest:0.#} (the stage is {fit.Width:0} wide)" + (fit.Rest < 5f ? ", which is hard to notice." : ", so some edges won't match what you see.")
-                : $"Where you stand is off by up to {fit.Floors:0.#} (the stage is {fit.Width:0} wide), so what you see won't quite match where you stand. Try it offline first.";
+            string how = fit == null ? "The app can't measure how well its floors line up (one of the two stands on moving parts), so try it offline first." : fit.Exact ? "Its floors line up exactly with P+'s, so it will look right."
+                : fit.Floors < 1f ? $"Where you stand lines up. The sides or underside are off by up to {fit.Rest:0.#}{Wide(fit)}" + (fit.Rest < 5f ? ", which is hard to notice." : ", so some edges won't match what you see.")
+                : $"Where you stand is off by up to {fit.Floors:0.#}{Wide(fit)}, so what you see won't quite match where you stand. Try it offline first.";
             if (plan.LooksSwapped.Count > 0)
             {
                 how += " Its moving platform will look like P+'s.";
@@ -322,12 +326,12 @@ namespace SkinManager.App
             var mine = _lib.Stages.FirstOrDefault(x => x.Enabled && string.Equals(x.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase));
             var box = Box("Use its looks on P+'s " + s.Label + (mine != null ? $"  (turns off {mine.Name})" : ""), new Fix { Stage = s, Plan = plan, Looks = true });
             var fit = plan.Fit;
-            if (fit != null && fit.Floors == float.MaxValue) fit = null;   // a stage you stand on moving parts of (Corneria's Great Fox): can't be measured
+            if (fit != null && (fit.Floors >= 1e6f || float.IsNaN(fit.Floors))) fit = null;   // a stage you stand on moving parts of (Corneria's Great Fox): can't be measured
             bool good = fit != null && fit.Floors < 1f && fit.Rest < 5f;
             string how = "Plays exactly like P+'s stage, because it IS P+'s stage, with the map's scenery instead of P+'s. ";
             how += fit == null ? "The app can't measure how well the map lines up with this stage (you stand on moving parts), so check the preview." : fit.Exact ? "The map is shaped exactly like it, so what you see lines up with where you stand."
-                : fit.Floors < 1f ? $"Where you stand lines up with what you see; the sides or underside are off by up to {fit.Rest:0.#} (the stage is {fit.Width:0} wide)" + (fit.Rest < 5f ? ", which is hard to notice." : ".")
-                : $"The map is shaped differently: what you see is off from where you stand by up to {fit.Floors:0.#} (the stage is {fit.Width:0} wide), so players may look like they stand on air. Safe online, but check the preview.";
+                : fit.Floors < 1f ? $"Where you stand lines up with what you see; the sides or underside are off by up to {fit.Rest:0.#}{Wide(fit)}" + (fit.Rest < 5f ? ", which is hard to notice." : ".")
+                : $"The map is shaped differently: what you see is off from where you stand by up to {fit.Floors:0.#}{Wide(fit)}, so players may look like they stand on air. Safe online, but check the preview.";
             if (plan.Looks != null && plan.Looks.KeptLooks.Count > 0) how += " Its moving platforms look like P+'s.";
             if (plan.Looks != null && plan.Looks.StaticParts) how += " Some of the map's moving decorations may stand still.";
             if (plan.Looks != null && plan.Looks.PlatformsLeftOut > 0) how += " The map's own copy of the platform is left out, so there's only one.";

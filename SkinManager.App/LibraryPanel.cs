@@ -36,6 +36,7 @@ namespace SkinManager.App
         bool HasUpdate(long gameBananaFileId);   // a newer version is on GameBanana
         void UpdateMod(long modId, long fileId, string pageUrl, string name);
         TexturePacks Textures { get; }           // Dolphin texture packs (null when Brawl Online isn't set up)
+        void ShowHandMods();                     // the mods put on by hand (not through the app)
         void SetOn(TexturePack p, bool on);
         void Delete(TexturePack p);
         bool OnCleanCard { get; }                // the clean card (no mods) is in place
@@ -55,6 +56,7 @@ namespace SkinManager.App
         readonly ComboBox _who = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat };
         readonly Button _allOff = Theme.Secondary("Turn all off");
         readonly Button _ownMusic = Theme.Primary("+ Add your own music");
+        readonly Button _hand = Theme.Secondary("Mods put on by hand");
         readonly Button _allOn = Theme.Secondary("Turn all on");
         readonly FlowLayoutPanel _tabs = new GlassFlow { AutoSize = false, WrapContents = false, Size = new Size(900, 32) };
         readonly GlassFlow _grid = new GlassFlow { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(0, 6, 0, 0) };
@@ -98,6 +100,7 @@ namespace SkinManager.App
             _kindMusic.Click += (s, e) => { _stageMode = true; _musicMode = true; _textureMode = false; Refresh(); };
             _kindTextures.Click += (s, e) => { _stageMode = false; _musicMode = false; _textureMode = true; if (_tab != Tab.On && _tab != Tab.Off) _tab = Tab.All; Refresh(); };
             _ownMusic.Click += (s, e) => _host.AddOwnMusic();
+            _hand.Click += (s, e) => _host.ShowHandMods(); _hand.Visible = false;
             _emptyButton.Click += (s, e) => { if (_host.OnCleanCard && !_textureMode) _host.BackToModded(); else _host.GoToStore(); };
 
             var top = new Panel { Dock = DockStyle.Top, Height = 160 };
@@ -114,10 +117,11 @@ namespace SkinManager.App
                 _allOn.Location = new Point(top.Width - _allOn.Width - 4, 4);
                 _allOff.Location = new Point(_allOn.Left - _allOff.Width - 8, 4);
                 _ownMusic.Location = new Point(_allOff.Left - _ownMusic.Width - 12, 4);
+                _hand.Location = new Point(top.Width - _hand.Width - 4, 86);
 
             };
             _tabs.Location = new Point(0, 86);
-            top.Controls.AddRange(new Control[] { _title, _count, _kindSkins, _kindStages, _kindMusic, _kindTextures, _search, _who, _sortBy, _allOff, _allOn, _ownMusic, _tabs, _meter });
+            top.Controls.AddRange(new Control[] { _title, _count, _kindSkins, _kindStages, _kindMusic, _kindTextures, _search, _who, _sortBy, _allOff, _allOn, _ownMusic, _hand, _tabs, _meter });
             _ownMusic.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             _sortBy.Location = new Point(640, 49);
             _meter.Location = new Point(0, 122); _meter.BringToFront();
@@ -135,6 +139,18 @@ namespace SkinManager.App
         }
 
         /// <summary>New numbers for the space meter and the cost on each card.</summary>
+        /// <summary>Says how many mods were put on the card by hand (not through the app); click to see them.</summary>
+        public void ShowHand(HandScan scan)
+        {
+            int n = scan?.Mods.Count ?? 0;
+            _hand.Visible = n > 0;
+            _hand.Text = n == 1 ? "1 mod put on by hand ›" : $"{n} mods put on by hand ›";
+            _hand.ForeColor = scan != null && scan.Mods.Any(m => m.AffectsGameplay) ? Theme.Bad : Theme.Accent;
+            _hand.Width = TextRenderer.MeasureText(_hand.Text, _hand.Font).Width + 30;
+            _hand.Left = _hand.Parent != null ? _hand.Parent.Width - _hand.Width - 4 : _hand.Left;
+            _hand.BringToFront();
+        }
+
         public void ShowSpace(SpaceReport r) { _meter.Report = r; _meter.Invalidate(); if (Visible) Refresh(); }
 
         string CostText(string id)

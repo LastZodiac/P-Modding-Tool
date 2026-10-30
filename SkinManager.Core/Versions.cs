@@ -20,6 +20,7 @@ namespace SkinManager.Core
     {
         public string Version, ProbePath, ProbeSha;
         public Dictionary<string, string> Files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // path -> sha256
+        public Dictionary<string, long> Sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);       // path -> bytes (when known)
     }
 
     public static class Versions
@@ -95,8 +96,13 @@ namespace SkinManager.Core
             var r = new PPlusRelease { Version = version };
             var probe = Regex.Match(json, "\"probe\"\\s*:\\s*\\{\"path\":\"((?:[^\"\\\\]|\\\\.)*)\",\"sha256\":\"([0-9a-f]{64})\"");
             if (probe.Success) { r.ProbePath = Regex.Unescape(probe.Groups[1].Value); r.ProbeSha = probe.Groups[2].Value; }
-            foreach (Match m in Regex.Matches(json, "\\{\"path\":\"((?:[^\"\\\\]|\\\\.)*)\",\"sha256\":\"([0-9a-f]{64})\",\"size\":-?\\d+\\}"))
-                r.Files[Regex.Unescape(m.Groups[1].Value)] = m.Groups[2].Value;
+            foreach (Match m in Regex.Matches(json, "\\{\"path\":\"((?:[^\"\\\\]|\\\\.)*)\",\"sha256\":\"([0-9a-f]{64})\",\"size\":(-?\\d+)\\}"))
+            {
+                string file = Regex.Unescape(m.Groups[1].Value);
+                r.Files[file] = m.Groups[2].Value;
+                long size = long.Parse(m.Groups[3].Value);
+                if (size >= 0) r.Sizes[file] = size;
+            }
             return r;
         }
 
