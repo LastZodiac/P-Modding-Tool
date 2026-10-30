@@ -331,3 +331,9 @@ Set `SKINMANAGER_GB_BASE` / `SKINMANAGER_GB_IMAGES` to point the app at a local 
   hands it to the usual SongForm (add to a stage's songs, or replace a P+ song). Entry: My Mods > Music
   "+ Add your own music", Add from file (MP3/WAV, several at once), or dropping MP3/WAV files on the window.
 - OGG isn't supported: NVorbis' current versions need System.Memory (Span) and the old ones are Ms-PL (not GPL-compatible).
+
+## Building on Linux
+- The Linux version is the same "P+ Modding Tool.exe", run by Mono. `build/linux/` builds it on Linux:
+  `build-brawllib.sh` (BrawlCrate at the pinned commit + patch_brawllib.sh, built with
+  `-p:FrameworkPathOverride=/usr/lib/mono/4.7.2-api -p:DefineConstants=NOWPF -p:PreBuildEvent=`), `build-app.sh`
+  (same options as release.sh), `run-dev.sh`, `smoke-test.sh` (Xvfb + a fake Brawl Online install). See build/linux/README.md.

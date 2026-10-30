@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+build/linux/out/
+*.AppImage
+
+# Data folder made when the app runs from a build folder (mods, downloads, card backups)
+Data/
+
+# Release work
+Releases/
+payload.zip
+
+# Editors and IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp

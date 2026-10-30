@@ -1,0 +1,25 @@
+# Text files are stored and checked out with LF line endings on every OS, so a commit from
+# Windows doesn't rewrite every line. (Visual Studio and the .NET SDK read LF files fine.)
+* text=auto eol=lf
+
+*.cs      text diff=csharp
+*.csproj  text
+*.config  text
+*.manifest text
+*.sh      text eol=lf
+*.md      text
+*.txt     text
+*.json    text
+*.yml     text
+
+# Binary files: never touched, never diffed as text.
+*.png     binary
+*.ico     binary
+*.gif     binary
+*.jpg     binary
+*.ttf     binary
+*.dll     binary
+*.exe     binary
+*.zip     binary
+*.tgz     binary
+*.AppImage binary
