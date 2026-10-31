@@ -42,6 +42,7 @@ namespace SkinManager.App
         bool OnCleanCard { get; }                // the clean card (no mods) is in place
         void BackToModded();
         StageSpot WhereInGame(InstalledStage s);
+        void StageVersions();                    // which version of a stage you get by just picking it (stage swaps)
         void AddOwnMusic(List<string> files = null);   // your own MP3/WAV songs  // where it is on the stage select (null until read, or not there)
     }
 
@@ -54,8 +55,10 @@ namespace SkinManager.App
         readonly Label _count = Theme.Label("", Theme.Body, Theme.Muted);
         readonly TextBox _search = new TextBox { Width = 220, Font = Theme.Body, BorderStyle = BorderStyle.FixedSingle };
         readonly ComboBox _who = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat };
+        readonly ComboBox _whichStage = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat, MaxDropDownItems = 20 };
         readonly Button _allOff = Theme.Secondary("Turn all off");
         readonly Button _ownMusic = Theme.Primary("+ Add your own music");
+        readonly Button _versions = Theme.Primary("Choose stage versions...");
         readonly Button _hand = Theme.Secondary("Mods put on by hand");
         readonly Button _allOn = Theme.Secondary("Turn all on");
         readonly FlowLayoutPanel _tabs = new GlassFlow { AutoSize = false, WrapContents = false, Size = new Size(900, 32) };
@@ -98,13 +101,17 @@ namespace SkinManager.App
             _sortBy.SelectedIndex = 0; _sortBy.BackColor = Theme.Panel; _sortBy.ForeColor = Theme.Text;
             _sortBy.SelectedIndexChanged += (s, e) => Filter();
             _who.SelectedIndexChanged += (s, e) => Filter();
-            _allOff.Click += (s, e) => { if (_textureMode) { foreach (var p in VisibleTextures().Where(x => x.Enabled).ToList()) _host.SetOn(p, false); return; } if (_stageMode) _host.SetOn(VisibleStages(), false); else _host.SetOn(Visible_Skins(), false); };
+            _whichStage.Items.Add("Every stage"); _whichStage.SelectedIndex = 0;
+            _whichStage.BackColor = Theme.Panel; _whichStage.ForeColor = Theme.Text;
+            _whichStage.SelectedIndexChanged += (s, e) => { if (!_fillingStages) Filter(); };
+            _allOff.Click += (s, e) => { if (_textureMode) { foreach (var p in VisibleTextures().Where(x => x.Enabled).ToList()) _host.SetOn(p, false); return; } if (_stageMode) _host.SetOn(VisibleStages().SelectMany(Members).ToList(), false); else _host.SetOn(Visible_Skins(), false); };
             _allOn.Click += (s, e) => TurnAllOn();
             _kindSkins.Click += (s, e) => { _stageMode = false; _musicMode = false; _textureMode = false; Refresh(); };
             _kindStages.Click += (s, e) => { _stageMode = true; _musicMode = false; _textureMode = false; Refresh(); };
             _kindMusic.Click += (s, e) => { _stageMode = true; _musicMode = true; _textureMode = false; Refresh(); };
             _kindTextures.Click += (s, e) => { _stageMode = false; _musicMode = false; _textureMode = true; if (_tab != Tab.On && _tab != Tab.Off) _tab = Tab.All; Refresh(); };
             _ownMusic.Click += (s, e) => _host.AddOwnMusic();
+            _versions.Click += (s, e) => _host.StageVersions();
             _hand.Click += (s, e) => _host.ShowHandMods(); _hand.Visible = false;
             _emptyButton.Click += (s, e) => { if (_host.OnCleanCard && !_textureMode) _host.BackToModded(); else _host.GoToStore(); };
 
@@ -112,22 +119,23 @@ namespace SkinManager.App
             _title.Location = new Point(0, 0);
             _count.Location = new Point(110, 10);
             _kindSkins.Location = new Point(0, 47); _kindStages.Location = new Point(70, 47);
-            _kindSkins.Layout += (s, e) => { _kindStages.Left = _kindSkins.Right + 4; _kindMusic.Left = _kindStages.Right + 4; _kindTextures.Left = _kindMusic.Right + 4; _search.Left = _kindTextures.Right + 16; _who.Left = _search.Right + 12; };
+            _kindSkins.Layout += (s, e) => { _kindStages.Left = _kindSkins.Right + 4; _kindMusic.Left = _kindStages.Right + 4; _kindTextures.Left = _kindMusic.Right + 4; _search.Left = _kindTextures.Right + 16; _who.Left = _whichStage.Left = _search.Right + 12; };
             _kindMusic.Location = new Point(150, 47); _kindTextures.Location = new Point(230, 47);
             _search.Location = new Point(160, 50);
-            _who.Location = new Point(432, 49);
+            _who.Location = new Point(432, 49); _whichStage.Location = new Point(432, 49);
             _allOff.Anchor = _allOn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             top.Resize += (s, e) =>
             {
                 _allOn.Location = new Point(top.Width - _allOn.Width - 4, 4);
                 _allOff.Location = new Point(_allOn.Left - _allOff.Width - 8, 4);
                 _ownMusic.Location = new Point(_allOff.Left - _ownMusic.Width - 12, 4);
+                _versions.Location = new Point(_allOff.Left - _versions.Width - 12, 4);
                 _hand.Location = new Point(top.Width - _hand.Width - 4, 86);
 
             };
             _tabs.Location = new Point(0, 86);
-            top.Controls.AddRange(new Control[] { _title, _count, _kindSkins, _kindStages, _kindMusic, _kindTextures, _search, _who, _sortBy, _allOff, _allOn, _ownMusic, _hand, _tabs, _meter });
-            _ownMusic.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            top.Controls.AddRange(new Control[] { _title, _count, _kindSkins, _kindStages, _kindMusic, _kindTextures, _search, _who, _whichStage, _sortBy, _allOff, _allOn, _ownMusic, _versions, _hand, _tabs, _meter });
+            _ownMusic.Anchor = _versions.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             _sortBy.Location = new Point(640, 49);
             _meter.Location = new Point(0, 122); _meter.BringToFront();
             _title.SizeChanged += (s, e) => _count.Left = _title.Right + 10;
@@ -201,14 +209,40 @@ namespace SkinManager.App
         bool Matches(InstalledStage s)
         {
             string q = _search.Text.Trim();
+            if (!_musicMode && _whichStage.SelectedIndex > 0 && !string.Equals(StageOf(s), _whichStage.SelectedItem as string, StringComparison.OrdinalIgnoreCase)) return false;
             return q == "" || Has(s.Name, q) || Has(s.Author, q) || Has(s.Target.Label, q);
         }
 
-        bool InConflict(InstalledStage s) => AllStages.Count(x => string.Equals(x.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase)) > 1;
+        static string StageOf(InstalledStage s) => s.IsSwap ? s.TargetLabel : s.Target.StageName;
+        bool _fillingStages;
+
+        /// <summary>The "which stage" list: the stages your stage mods go on.</summary>
+        void FillStageList()
+        {
+            var names = (_host.Lib?.Stages ?? new List<InstalledStage>()).Where(x => !x.IsSong).Select(StageOf).Where(n => !string.IsNullOrEmpty(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n).ToList();
+            string was = _whichStage.SelectedIndex > 0 ? _whichStage.SelectedItem as string : null;
+            if (_whichStage.Items.Count == names.Count + 1 && names.Select((n, i) => (string)_whichStage.Items[i + 1] == n).All(x => x)) return;
+            _fillingStages = true;
+            _whichStage.Items.Clear(); _whichStage.Items.Add("Every stage");
+            foreach (var n in names) _whichStage.Items.Add(n);
+            int at = was == null ? -1 : names.FindIndex(n => string.Equals(n, was, StringComparison.OrdinalIgnoreCase));
+            _whichStage.SelectedIndex = at < 0 ? 0 : at + 1;
+            _fillingStages = false;
+        }
+
+        bool InConflict(InstalledStage s) => Members(s).Any(m => AllStages.Count(x => string.Equals(x.CardPath, m.CardPath, StringComparison.OrdinalIgnoreCase)) > 1);
+
+        /// <summary>The stage files of one mod: a stage put on all of its normal version's files (Smashville's five times
+        /// of day) is one mod, shown as one card.</summary>
+        List<InstalledStage> Members(InstalledStage s) => s.Group == null ? new List<InstalledStage> { s }
+            : (_host.Lib?.Stages ?? new List<InstalledStage>()).Where(x => x.Group == s.Group).ToList();
+
+        static IEnumerable<InstalledStage> OnePerMod(IEnumerable<InstalledStage> list) => list.GroupBy(x => x.Group ?? x.Id).Select(g => g.First());
 
         List<InstalledStage> VisibleStages()
         {
-            var all = AllStages.Where(Matches);
+            var all = OnePerMod(AllStages.Where(Matches));
             switch (_tab)
             {
                 case Tab.On: return all.Where(_host.IsOn).ToList();
@@ -224,13 +258,15 @@ namespace SkinManager.App
         {
             var card = new LibCard
             {
-                Title = s.Name, Line1 = s.IsNewSong ? (s.TargetLabel ?? "New song") : "Replaces " + s.Target.Label, Music = s.IsSong,
-                Line2 = (s.IsSong ? "Song" : "Stage") + (s.GameBananaModId != 0 ? "  •  by " + s.Author : "") + CostText(s.Id),
+                Title = s.Name, Music = s.IsSong,
+                Line1 = s.IsNewSong ? (s.TargetLabel ?? "New song") : s.IsSwap ? "Picking " + s.TargetLabel + " gives this"
+                      : Members(s).Count > 1 ? $"Replaces {s.Target.StageName} ({Members(s).Count} versions)" : "Replaces " + s.Target.Label,
+                Line2 = (s.IsSong ? "Song" : s.IsSwap ? "Stage swap  •  safe online" : "Stage") + (s.GameBananaModId != 0 ? "  •  by " + s.Author : "") + CostText(s.Id),
                 On = _host.IsOn(s), ShowSwitch = true,
                 Tag1 = _host.IsPending(s) ? "Not saved yet" : InConflict(s) ? "Same stage as another" : null,
                 Tag1Color = _host.IsPending(s) ? Theme.Accent : Theme.Warn, Margin = new Padding(0, 0, 12, 12),
             };
-            if (!s.IsSong)
+            if (!s.IsSong && !s.IsSwap)
             {
                 var spot = _host.WhereInGame(s);
                 if (spot != null)
@@ -241,9 +277,9 @@ namespace SkinManager.App
                     _tips.SetToolTip(card, "In the game: " + spot.Text);
                 }
             }
-            if (string.IsNullOrEmpty(s.ThumbUrl)) card.Picture = LocalPicture(s);
+            if (string.IsNullOrEmpty(s.ThumbUrl)) card.Picture = Members(s).Select(LocalPicture).FirstOrDefault(x => x != null);
             LoadUrl(s.ThumbUrl, card);
-            card.SwitchClicked += () => _host.SetOn(new[] { s }, !_host.IsOn(s));
+            card.SwitchClicked += () => _host.SetOn(Members(s), !_host.IsOn(s));
             card.DeleteClicked += () => _host.Delete(s);
             if (_host.SourceOf(s) != null) { card.MoreText = "Add more from this download"; card.MoreClicked += () => _host.AddMore(s); }
             Updatable(card, s.GameBananaModId, s.GameBananaFileId, s.PageUrl, s.Name);
@@ -277,7 +313,7 @@ namespace SkinManager.App
             if (_textureMode) { foreach (var p in VisibleTextures().Where(x => !x.Enabled).ToList()) _host.SetOn(p, true); return; }
             if (_stageMode)
             {
-                _host.SetOn(VisibleStages().GroupBy(x => x.CardPath.ToUpperInvariant()).Select(g => g.FirstOrDefault(_host.IsOn) ?? g.OrderByDescending(x => x.InstalledAt).First()).ToList(), true);
+                _host.SetOn(VisibleStages().GroupBy(x => x.CardPath.ToUpperInvariant()).Select(g => g.FirstOrDefault(_host.IsOn) ?? g.OrderByDescending(x => x.InstalledAt).First()).SelectMany(Members).ToList(), true);
                 return;
             }
             // one skin per slot: if several are in the same slot, the one that is on (or the newest) wins
@@ -289,6 +325,7 @@ namespace SkinManager.App
         public new void Refresh()
         {
             _ownMusic.Visible = _musicMode;
+            _versions.Visible = _stageMode && !_musicMode && _host.Lib != null;
             if (_host.Lib == null)
             {
                 ShowEmpty("Brawl Online isn't set up on this PC yet, so there's no P+ SD card for mods.\r\n\r\nOpen Brawl Online once and let it finish setting up Project+, then open this app again. " +
@@ -302,14 +339,16 @@ namespace SkinManager.App
             var dls = NotInstalled().Where(Matches).ToList();
             int on = all.Count(_host.IsOn);
             var files = _host.Lib.Stages;
-            _count.Text = $"{Skins.Count} skins, {files.Count(x => !x.IsSong)} stages, {files.Count(x => x.IsSong)} songs" + (AllTextures.Count > 0 ? $", {AllTextures.Count} texture pack{(AllTextures.Count == 1 ? "" : "s")}" : "") + $"  •  {Skins.Count(_host.IsOn) + files.Count(_host.IsOn)} on";
+            _count.Text = $"{Skins.Count} skins, {OnePerMod(files.Where(x => !x.IsSong)).Count()} stages, {files.Count(x => x.IsSong)} songs" + (AllTextures.Count > 0 ? $", {AllTextures.Count} texture pack{(AllTextures.Count == 1 ? "" : "s")}" : "") + $"  •  {Skins.Count(_host.IsOn) + OnePerMod(files).Count(_host.IsOn)} on";
             Theme.Toggle(_kindSkins, !_stageMode && !_textureMode); Theme.Toggle(_kindStages, _stageMode && !_musicMode); Theme.Toggle(_kindMusic, _musicMode); Theme.Toggle(_kindTextures, _textureMode);
             _who.Visible = !_stageMode && !_textureMode;
-            _sortBy.Left = (_stageMode || _textureMode ? _search.Right : _who.Right) + 12;
+            _whichStage.Visible = _stageMode && !_musicMode && !_textureMode;
+            if (_whichStage.Visible) FillStageList();
+            _sortBy.Left = (_who.Visible ? _who.Right : _whichStage.Visible ? _whichStage.Right : _search.Right) + 12;
             if (_textureMode) { ShowTextures(); return; }
             if (_stageMode)
             {
-                var allSt = AllStages.Where(Matches).ToList();
+                var allSt = OnePerMod(AllStages.Where(Matches)).ToList();
                 int onSt = allSt.Count(_host.IsOn);
                 BuildTabs(new Dictionary<Tab, int>
                 {

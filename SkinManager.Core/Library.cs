@@ -81,10 +81,13 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public string TrackList;     // "song-new": the stage's song list it's added to (Smashville.tlst)
         [DataMember(EmitDefaultValue = false)] public string SongTitle;     // "song-new": its name in the game's song lists
         [DataMember(EmitDefaultValue = false)] public bool LooksOnly;       // the map's looks on P+'s own stage file (looks-map.pac: the map)
+        [DataMember(EmitDefaultValue = false)] public string Group;         // stage files put on together (Smashville's five times of day): one mod in My Mods
+        [DataMember(EmitDefaultValue = false)] public string Swap;          // "swap": the two versions swapped (StageSwaps.Describe)
         public bool Enabled => !Disabled;
         public bool IsSong => Kind == "song" || Kind == "song-new";
         public bool IsNewSong => Kind == "song-new";
-        public StageFile Target => IsSong ? new StageFile { CardPath = CardPath, StageName = TargetLabel ?? Path.GetFileNameWithoutExtension(CardPath), Version = "" } : Stages.Describe(CardPath);
+        public bool IsSwap => Kind == "swap";
+        public StageFile Target => IsSong || IsSwap ? new StageFile { CardPath = CardPath, StageName = TargetLabel ?? Path.GetFileNameWithoutExtension(CardPath), Version = "" } : Stages.Describe(CardPath);
         public InstalledStage Copy() => (InstalledStage)MemberwiseClone();
     }
 

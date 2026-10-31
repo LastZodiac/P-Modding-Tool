@@ -30,7 +30,9 @@ namespace SkinManager.Core
         public byte[] Bytes;
         public SkinSource Source;
         public string SourcePath, PackageKey;
-        public string Kind;   // null: stage, "song" (replaces a P+ song), "song-new" (added to a stage's song list)
+        public string Kind;   // null: stage, "song" (replaces a P+ song), "song-new" (added to a stage's song list), "swap" (two versions of a stage swapped)
+        public string Group;  // plans put on together as one mod (a stage's front-page files)
+        public string Swap;   // "swap": which versions (StageSwaps.Describe)
         public string TrackList, SongTitle;   // "song-new"
         public Dictionary<string, byte[]> SelectPictures = new Dictionary<string, byte[]>();   // "preview", "icon", "name" (PNG) for the stage select
         public StageCheck.Fit Fit;                 // fixed stages: how far its looks are from P+'s floors
@@ -388,6 +390,7 @@ namespace SkinManager.Core
         byte[] StageForNow(Fat32Image card, InstalledStage s, out string why)
         {
             why = null;
+            if (s.IsSwap) return SwapForNow(card, s, out why);
             var bytes = StageCopy(s);
             if (s.Kind != null) return bytes;   // songs: no gameplay
             RefreshOriginal(card, s.CardPath);
@@ -852,6 +855,76 @@ namespace SkinManager.Core
             return plan;
         }
 
+        /// <summary>Do two versions of a stage play exactly alike? Every file of one against every file of the other (Smashville's
+        /// five times of day), with the parts their stage programs work with. Null if they do, else why not.</summary>
+        public string PlayAlike(Fat32Image card, IList<string> a, IList<string> b, Dictionary<string, (string TrackList, string Module)> info)
+        {
+            string Program(string f) => info != null && info.TryGetValue(Path.GetFileNameWithoutExtension(f).ToUpperInvariant(), out var i) ? i.Module : "";
+            foreach (var x in a)
+                foreach (var y in b)
+                {
+                    if (string.Equals(x, y, StringComparison.OrdinalIgnoreCase)) continue;
+                    string px = Program(x), py = Program(y);
+                    if (!string.Equals(px, py, StringComparison.OrdinalIgnoreCase)) return "it runs on a different stage program, so the game itself does different things on it";
+                    var gx = _stageIndex.Of(card, _lib, x); var gy = _stageIndex.Of(card, _lib, y);
+                    if (gx == null || gy == null) return "one of its files couldn't be read";
+                    var r = StageCheck.Compare(gy, gx, "the other version", _stageIndex.ProgramNames(card, x));
+                    if (!r.Passed) return "it plays differently: " + r.Detail;
+                }
+            return null;
+        }
+
+        /// <summary>The stage select as P+ set it up (with any stage swap of ours undone).</summary>
+        public StageSelect OriginalSelect(Fat32Image card) =>
+            StageSelect.Read(card, path => _lib.Stages.Any(x => x.IsSwap && x.Enabled && string.Equals(x.CardPath, path, StringComparison.OrdinalIgnoreCase)) ? _lib.OriginalFile(path) : null);
+
+        /// <summary>A plan to swap two versions of a stage (what you get by just picking it, and what a button gives), when
+        /// they play exactly alike: it only changes which one you see, so it's safe online.</summary>
+        public StagePlan PlanSwap(Fat32Image card, StageSpot main, StageSpot alt, string altName)
+        {
+            var info = Songs.StageInfo(card);
+            var select = OriginalSelect(card);
+            var plan = new StagePlan
+            {
+                Name = $"{main.SlotName}: {altName} as the normal one", Kind = "swap",
+                Target = new StageFile { CardPath = main.Asl, StageName = main.SlotName, Version = "" },
+                Swap = StageSwaps.Describe(main, alt),
+            };
+            var why = PlayAlike(card, VersionFiles(select, main), VersionFiles(select, alt), info);
+            if (why != null)
+            {
+                plan.Checks.Add(new CheckResult { Passed = false, Title = altName + " plays differently from the normal " + main.SlotName, Detail = why + ". Swapping it would make online games go out of sync with players who don't have the same swap." });
+                return plan;
+            }
+            byte[] asl = _lib.HasOriginalFile(main.Asl) ? _lib.OriginalFile(main.Asl) : card.ReadFile(main.Asl);
+            plan.Bytes = StageSwaps.Swap(asl, plan.Swap);
+            plan.Checks.Add(plan.Bytes == null
+                ? new CheckResult { Passed = false, Title = "Couldn't swap them", Detail = "P+'s list of " + main.SlotName + "'s versions isn't laid out as expected." }
+                : new CheckResult { Passed = true, Title = altName + " plays exactly like the normal " + main.SlotName, Detail = "Only what you see changes, so it's safe online." });
+            return plan;
+        }
+
+        /// <summary>The stage files one version of a slot loads (Smashville's normal one: its five times of day).</summary>
+        public static List<string> VersionFiles(StageSelect select, StageSpot version) =>
+            select.All.Where(x => x.Slot == version.Slot && x.Entry == version.Entry).Select(x => x.File).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        /// <summary>A stage swap made again on P+'s current list (P+ may have updated it), if the two versions still play alike.</summary>
+        byte[] SwapForNow(Fat32Image card, InstalledStage s, out string why)
+        {
+            why = null;
+            RefreshOriginal(card, s.CardPath);
+            var original = _lib.OriginalFile(s.CardPath);
+            if (original == null) { why = $"P+ no longer has {s.TargetLabel}'s list of versions"; return null; }
+            var bytes = StageSwaps.Swap(original, s.Swap);
+            if (bytes == null) { why = $"P+ changed {s.TargetLabel}'s versions"; return null; }
+            var select = StageSelect.Read(card, path => string.Equals(path, s.CardPath, StringComparison.OrdinalIgnoreCase) ? original : null);
+            var (a, b) = StageSwaps.Spots(select, s.CardPath, s.Swap);
+            if (a == null || b == null) { why = $"P+ changed {s.TargetLabel}'s versions"; return null; }
+            var differ = PlayAlike(card, VersionFiles(select, a), VersionFiles(select, b), Songs.StageInfo(card));
+            if (differ != null) { why = $"P+ changed {s.TargetLabel}, and the two versions no longer play alike ({differ})"; return null; }
+            return bytes;
+        }
+
         /// <summary>A plan to replace one of P+'s songs with a .brstm file.</summary>
         public StagePlan PlanSong(SkinPackage pkg, string songFile, SongInfo target)
         {
@@ -899,7 +972,7 @@ namespace SkinManager.Core
         public List<(InstalledStage Stage, string Why)> UnsafeStages(Fat32Image card)
         {
             var result = new List<(InstalledStage, string)>();
-            foreach (var s in _lib.Stages.Where(x => x.Enabled && !x.IsSong).ToList())
+            foreach (var s in _lib.Stages.Where(x => x.Enabled && x.Kind == null).ToList())
             {
                 try
                 {
@@ -973,7 +1046,7 @@ namespace SkinManager.Core
                     InstalledAt = DateTime.Now, GameBananaModId = plan.Source?.ModId ?? 0, GameBananaFileId = plan.Source?.FileId ?? 0,
                     Author = plan.Source?.Author, PageUrl = plan.Source?.PageUrl, ThumbUrl = plan.Source?.ThumbUrl, SourcePath = plan.SourcePath, PackageKey = plan.PackageKey,
                     Kind = plan.Kind, TargetLabel = plan.Kind != null ? plan.Target.StageName : null,
-                    TrackList = plan.TrackList, SongTitle = plan.SongTitle, LooksOnly = plan.Looks != null,
+                    TrackList = plan.TrackList, SongTitle = plan.SongTitle, LooksOnly = plan.Looks != null, Group = plan.Group, Swap = plan.Swap,
                 };
                 RefreshOriginal(card, record.CardPath);   // what's there now (P+'s, or a stage or song put on by hand) comes back when it's off
                 card.WriteFile(record.CardPath, plan.Bytes);

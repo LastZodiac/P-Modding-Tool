@@ -29,6 +29,9 @@ namespace SkinManager.App
         readonly ComboBox _sort = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Font = Theme.Body, FlatStyle = FlatStyle.Flat };
         readonly ComboBox _who = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200, Font = Theme.Body, FlatStyle = FlatStyle.Flat };
         readonly ComboBox _stageCat = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200, Font = Theme.Body, FlatStyle = FlatStyle.Flat, Visible = false };
+        // which stage: GameBanana keeps all stage mods in one list, so this goes by what each mod's title says it's for ("(P+ GHZ 1:1)")
+        readonly ComboBox _stageWhich = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200, Font = Theme.Body, FlatStyle = FlatStyle.Flat, Visible = false, MaxDropDownItems = 20 };
+        static readonly List<(string Base, string Name)> StageChoices = Stages.ForFilter();
         readonly Button _kindSkins = Theme.Secondary("Skins");
         readonly Button _kindStages = Theme.Secondary("Stages");
         readonly Button _kindMusic = Theme.Secondary("Music");
@@ -93,6 +96,10 @@ namespace SkinManager.App
             foreach (var c in StageCategories) _stageCat.Items.Add(c.Item1);
             _stageCat.SelectedIndex = 0; _stageCat.BackColor = Theme.Panel; _stageCat.ForeColor = Theme.Text;
             _stageCat.SelectedIndexChanged += (s, e) => { if (_loadedOnce) NewSearch(); };
+            _stageWhich.Items.Add("Every stage");
+            foreach (var c in StageChoices) _stageWhich.Items.Add(c.Name);
+            _stageWhich.SelectedIndex = 0; _stageWhich.BackColor = Theme.Panel; _stageWhich.ForeColor = Theme.Text;
+            _stageWhich.SelectedIndexChanged += (s, e) => { if (_loadedOnce) NewSearch(); };
             _kindSkins.Click += (s, e) => SetMode(false);
             _kindStages.Click += (s, e) => SetMode(true);
             _kindMusic.Click += (s, e) => SetMode(false, music: true);
@@ -115,9 +122,10 @@ namespace SkinManager.App
             _musicCat.Location = new Point(0, 83);
             var sortLabel = Theme.Label("Sort:", Theme.Body, Theme.Muted); sortLabel.Location = new Point(212, 86);
             _sort.Location = new Point(256, 83);
+            _stageWhich.Location = new Point(300, 116);
             _hideInstalled.Location = new Point(0, 120); _hideOld.Location = new Point(150, 120);
             _heading.Visible = false;   // the page line under the results says what's shown
-            bar.Controls.AddRange(new Control[] { _heading, _search, _go, _who, _stageCat, _musicCat, sortLabel, _sort, _kindSkins, _kindStages, _kindMusic, _favButton, _hideInstalled, _hideOld });
+            bar.Controls.AddRange(new Control[] { _heading, _search, _go, _who, _stageCat, _stageWhich, _musicCat, sortLabel, _sort, _kindSkins, _kindStages, _kindMusic, _favButton, _hideInstalled, _hideOld });
             _favButton.Click += (s, e) => { _favMode = !_favMode; Theme.Toggle(_favButton, _favMode); if (_favMode) ShowFavorites(); else NewSearch(); };
             _hideInstalled.CheckedChanged += (s, e) => { if (_favMode) ShowFavorites(); else if (_current != null) ShowPage(_current, _generation); };
             _hideOld.CheckedChanged += (s, e) => { if (_favMode) ShowFavorites(); else if (_current != null) ShowPage(_current, _generation); };
@@ -192,6 +200,7 @@ namespace SkinManager.App
         {
             _stageMode = stages; _musicMode = music;
             _musicCat.Visible = music; Theme.Toggle(_kindMusic, music);
+            _stageWhich.Visible = stages && !music;
             if (music) { _who.Visible = false; _stageCat.Visible = false; Theme.Toggle(_kindSkins, false); Theme.Toggle(_kindStages, false); if (load && _loadedOnce) NewSearch(); return; }
             _who.Visible = !stages; _stageCat.Visible = stages;
             Theme.Toggle(_kindSkins, !stages); Theme.Toggle(_kindStages, stages);
@@ -214,6 +223,7 @@ namespace SkinManager.App
             var sort = (GbSort)Math.Max(0, _sort.SelectedIndex);
             int page = _page;
             _heading.Text = _musicMode ? "Brawl music on GameBanana" : _stageMode ? "Brawl stages on GameBanana" : who == null ? "Brawl costumes on GameBanana (all characters)" : $"{who.Name} costumes on GameBanana";
+            if (_stageMode && !_musicMode && _stageWhich.SelectedIndex > 0) { await LoadForStage(gen, category, search, sort, StageChoices[_stageWhich.SelectedIndex - 1]); return; }
             ShowMessage("Loading from GameBanana...", false);
             _prev.Enabled = _next.Enabled = false;
             GbPage result;
@@ -229,6 +239,45 @@ namespace SkinManager.App
             if (gen != _generation || IsDisposed) return;
             _current = result;
             ShowPage(result, gen);
+        }
+
+        /// <summary>Stage mods for one stage: GameBanana has no list per stage, so the app searches for the stage's names
+        /// ("Smashville", "SV") and reads the newest pages, and keeps the mods whose title says they're for that stage.</summary>
+        async Task LoadForStage(int gen, int category, string search, GbSort sort, (string Base, string Name) stage)
+        {
+            ShowMessage($"Finding {stage.Name} stages on GameBanana...", false);
+            _prev.Enabled = _next.Enabled = false;
+            var found = new List<GbMod>(); var seen = new HashSet<long>(); Exception failed = null; int asked = 0;
+            await Task.Run(() =>
+            {
+                bool For(GbMod m) => Stages.NamedInTitle(m.Name).Contains(stage.Base, StringComparer.OrdinalIgnoreCase)
+                                     && (string.IsNullOrWhiteSpace(search) || m.Name.IndexOf(search.Trim(), StringComparison.OrdinalIgnoreCase) >= 0);
+                void Ask(string q, int page)
+                {
+                    try { asked++; foreach (var m in GameBanana.List(category, q, sort, page).Mods) if (For(m) && seen.Add(m.Id)) found.Add(m); }
+                    catch (Exception e) { failed = failed ?? e; }
+                }
+                foreach (var q in new[] { stage.Name }.Concat(Stages.ShortNamesFor(stage.Base).Where(x => x.Length >= 3)))
+                    for (int p = 1; p <= 2 && gen == _generation; p++) Ask(q, p);
+                for (int p = 1; p <= 4 && gen == _generation; p++) Ask(string.IsNullOrWhiteSpace(search) ? null : search, p);
+            });
+            if (gen != _generation || IsDisposed) return;
+            if (found.Count == 0 && failed != null)
+            {
+                ShowMessage(failed is GbException ? failed.Message : "Something went wrong: " + Friendly.Explain(failed), true);
+                return;
+            }
+            if (found.Count == 0)
+            {
+                _pageText.Text = "";
+                ShowMessage($"No {stage.Name} stages found" + (string.IsNullOrWhiteSpace(search) ? "" : $" with \"{search.Trim()}\" in the name") +
+                            ". GameBanana has no list per stage, so the app goes by what each mod's title says it's for. Try \"Every stage\" and look through the newest.", false);
+                return;
+            }
+            _current = new GbPage { Mods = found, Total = found.Count, Page = 1, PerPage = Math.Max(1, found.Count) };
+            ShowPage(_current, gen);
+            _pageText.Text = $"{found.Count} found for {stage.Name} (going by their titles)";
+            LayoutPager();
         }
 
         /// <summary>A page of results, with the "hide" switches applied.</summary>

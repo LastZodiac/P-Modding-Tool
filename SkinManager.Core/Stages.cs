@@ -39,6 +39,9 @@ namespace SkinManager.Core
             ["GHZ"] = "STGGREENHILLZONE", ["FD"] = "STGFINALDESTINATION", ["BF"] = "STGBATTLEFIELD", ["SV"] = "STGSMASHVILLE",
             ["PS"] = "STGPOKEMONSTADIUM", ["PS1"] = "STGPOKEMONSTADIUM", ["PS2"] = "STGPOKEMONSTADIUM", ["DL"] = "STGDREAMLAND", ["DL64"] = "STGDREAMLAND",
             ["FOD"] = "STGFOUNTAINOFDREAMS", ["YS"] = "STGYOSHISTORY", ["WW"] = "STGWARIOWARE", ["LC"] = "STGLYLATCRUISE", ["HC"] = "STGHYRULECASTLE",
+            ["DS"] = "STGDELFINOSECRET", ["BC"] = "STGBOWSERCASTLE", ["TOT"] = "STGTEMPLEOFTIME", ["SSZ"] = "STGSKYSANCTUARY", ["CSC"] = "STGCERESSPACECOLONY",
+            ["DP"] = "STGDISTANTPLANET", ["WL"] = "STGWARIOLAND", ["YI"] = "STGYOSHISISLAND", ["LM"] = "STGLUIGISMANSION", ["KJ"] = "STGKONGOJUNGLE",
+            ["FH"] = "STGFRIGATEHUSK", ["GT"] = "STGGOLDENTEMPLE", ["MC"] = "STGMARIOCIRCUIT",
         };
 
         /// <summary>The short names people use for a stage ("SV" for STGSMASHVILLE).</summary>
@@ -66,6 +69,25 @@ namespace SkinManager.Core
             string fileBase = Describe(stageFile ?? "").Base;
             Add(OldNames.TryGetValue(fileBase, out var renamed) ? renamed : fileBase);
             return result;
+        }
+
+        /// <summary>The P+ stages a download's title says it's for ("Emerald Coast (P+ GHZ 1:1)" -> Green Hill Zone), by base name.</summary>
+        public static List<string> NamedInTitle(string title)
+        {
+            var r = NamedFor(null, title, Names.Keys.Select(b => new StageFile { Base = b }));
+            // how stage reskins are usually named: "Xenoville", "Mario Circuit Ville" (Smashville), "Rainbow Road Siege" (Castle Siege)
+            var words = Regex.Split(title ?? "", @"[^A-Za-z]+").Where(w => w.Length > 0).ToList();
+            if (words.Any(w => w.EndsWith("ville", StringComparison.OrdinalIgnoreCase)) && !r.Contains("STGSMASHVILLE")) r.Insert(0, "STGSMASHVILLE");
+            if (words.Any(w => w.Equals("siege", StringComparison.OrdinalIgnoreCase)) && !r.Contains("STGCASTLESIEGE")) r.Add("STGCASTLESIEGE");
+            return r;
+        }
+
+        /// <summary>P+'s stages people pick between, by base name and name: the usual competitive ones first, then the rest by name.</summary>
+        public static List<(string Base, string Name)> ForFilter()
+        {
+            var first = new[] { "STGBATTLEFIELD", "STGFINALDESTINATION", "STGSMASHVILLE", "STGPOKEMONSTADIUM", "STGYOSHISTORY", "STGDREAMLAND", "STGFOUNTAINOFDREAMS", "STGGREENHILLZONE", "STGWARIOLAND", "STGLYLATCRUISE", "STGDELFINOSECRET" };
+            var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "STGRESULT", "STGCONFIGTEST", "STGCHARAROLL", "STGDUALDUMMY", "STGRESTAREA", "STGTRAININGROOM" };
+            return first.Select(b => (b, Names[b])).Concat(Names.Where(kv => !first.Contains(kv.Key) && !skip.Contains(kv.Key)).OrderBy(kv => kv.Value).Select(kv => (kv.Key, kv.Value))).ToList();
         }
 
         /// <summary>The stage program (module) a stage file was made for: P+'s own setting when the file is named like

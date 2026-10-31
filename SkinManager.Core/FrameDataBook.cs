@@ -15,6 +15,7 @@ namespace SkinManager.Core
         public string[] Parts;          // animation names played in order
         public MoveData Data;
         public string Note;             // a line about the move when its numbers need explaining (a bomb is an item...)
+        public bool NoteIsInfo;         // the note only explains what's drawn (it doesn't make the row any less exact)
         public List<string> Covers = new List<string>();   // the parts of identical rows merged into this one (its air version...)
         public bool Extra;              // a row for a move outside the usual list (a landing hit, a crouch attack...)
         public bool Sets;               // it puts out something that only hits later, when set off (Snake's C4)
@@ -30,6 +31,8 @@ namespace SkinManager.Core
         public float LandingLag(int off) => Moves.Attr(off);
         public Body Body;                                   // weight, gravity, size... and the standing body
         public Dictionary<MoveData, List<FramePlace>> Places; // where each move's hitboxes are (read when combos are first asked for)
+        public Moveset Item;                                // an item the fighter makes, its own scripts (R.O.B.'s gyro)
+        public float ItemGravity = float.NaN, ItemMaxFall, ItemAirFriction, ItemGroundFriction;   // ...and how it moves (P+'s item settings)
 
         /// <summary>Works out where every move's hitboxes are (a few seconds the first time).</summary>
         public void Measure()
@@ -120,9 +123,51 @@ namespace SkinManager.Core
                 using (var root = NodeFactory.FromFile(null, tmp.Path))
                     foreach (var ch in root.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>())
                         if (!book.Lengths.ContainsKey(ch.Name)) book.Lengths[ch.Name] = ch.FrameCount;
+                // the costume file can carry a thing's animations too (Olimar's Pikmin: WpnPikminPikmin...)
+                if (book.Costume != null && c.FilePrefix == "Pikmin")
+                    using (var tmp = new TempFile(".pac", book.Costume))
+                    using (var root = NodeFactory.FromFile(null, tmp.Path))
+                        foreach (var ch in root.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().Where(x => x.Name.StartsWith("Wpn", StringComparison.OrdinalIgnoreCase)))
+                            if (!book.Lengths.ContainsKey(ch.Name)) book.Lengths[ch.Name] = ch.FrameCount;
             }
+            if (c.FilePrefix == "Robot") ReadGyro(card, c, book);
             Build(book);
             return book;
+        }
+
+        // R.O.B.'s gyro is an item: its hitboxes are in /item/ItmCommonParam.pac (ItmRobotGyroParam), how it moves in
+        // /item/ItmParam.pac (its entry "R.O.B.'s Gyro"). Left out if either can't be read.
+        static void ReadGyro(Fat32Image card, Character c, FighterBook book)
+        {
+            try
+            {
+                string dir = c.FighterFolderPath; int k = dir.IndexOf("/fighter/", StringComparison.OrdinalIgnoreCase);
+                if (k < 0) return;
+                var common = card.ReadFile(dir.Substring(0, k) + "/item/ItmCommonParam.pac");
+                var param = card.ReadFile(dir.Substring(0, k) + "/item/ItmParam.pac");
+                if (common == null || param == null) return;
+                lock (BrawlGate.Lock)
+                {
+                    using (var tmp = new TempFile(".pac", common))
+                    using (var root = NodeFactory.FromFile(null, tmp.Path))
+                    {
+                        var arc = root.Children.FirstOrDefault(x => string.Equals(x.Name, "ItmRobotGyroParam", StringComparison.OrdinalIgnoreCase));
+                        if (arc == null || arc.Children.Count == 0) return;
+                        var src = arc.Children[0].WorkingUncompressed;
+                        var bytes = new byte[src.Length];
+                        System.Runtime.InteropServices.Marshal.Copy((IntPtr)src.Address, bytes, 0, src.Length);
+                        book.Item = Moveset.ItemParam(bytes);
+                    }
+                    using (var tmp = new TempFile(".pac", param))
+                    using (var root = NodeFactory.FromFile(null, tmp.Path))
+                    {
+                        var e = root.Children.FirstOrDefault()?.Children.OfType<ItmParamEntryNode>().FirstOrDefault(x => x.Name.Contains("Gyro"));
+                        if (e == null) { book.Item = null; return; }
+                        book.ItemGravity = e.Gravity; book.ItemMaxFall = e.TerminalVelocity; book.ItemAirFriction = e.AirFriction; book.ItemGroundFriction = e.GroundFriction;
+                    }
+                }
+            }
+            catch { book.Item = null; }
         }
 
         static void Build(FighterBook b)
@@ -247,19 +292,42 @@ namespace SkinManager.Core
                 if (Notes.FirstOrDefault(n => n.Fighter == b.Character.FilePrefix && NoteFits(n.Move, e.Parts[0].Replace("Air", ""))) is var note && note.Text != null) e.Note = note.Text;
                 else if (e.Sets) e.Note = "Puts out something that only hits later, when it's set off.";
                 else if (e.Group.EndsWith(" B") && e.Data.Hits.Count == 0 && e.Data.Projectiles.Count == 0 && e.Data.Intangible.Count == 0 && !FighterMotion.Moves(b, e)) e.Note = "No hitbox in this move's own files (the game's code handles what it does).";
-            // Pikachu's thunder: the cloud and bolt are the game's code's (it starts them when the move's script says), so their
-            // numbers are told rather than drawn: the cloud's height (block 3 +0) and the bolt's falling speed (its article +4)
+            // Olimar's smashes and aerials: the Pikmin do the hitting
+            if (b.Character.FilePrefix == "Pikmin") PikminAttacks(b);
+            // Sheik's chain: its four hitboxes (special hitboxes 0-3, no bone of their own) are put on the chain's links by the
+            // game's chain code, which also swings it. Drawn on the chain model (WpnSheikIronWire, links every 4 units out to
+            // 28.5) held straight out of the hand it's held in (its article's bone, LHaveN): ids 0-3 on links 3, 5, 7 and 9,
+            // the last (the strongest) at the tip.
+            if (b.Character.FilePrefix == "Sheik")
+            {
+                var chain = b.Moves.Articles.FirstOrDefault(a => a.Slot == 7 && a.Bone > 0);
+                if (chain != null && b.Lengths.Keys.Any(k => k.StartsWith("WpnSheikIronWire", StringComparison.OrdinalIgnoreCase)))
+                    foreach (var e in b.Entries.Where(x => x.Parts.Any(pt => pt.Replace("Air", "") == "SpecialSStart")))
+                    {
+                        int[] links = { 4, 6, 8, 10 };
+                        bool any = false;
+                        foreach (var h in e.Data.Frames.SelectMany(f => f.Hitboxes).Concat(e.Data.Hits).Where(h => h.Special && h.Bone == 0 && h.Id >= 0 && h.Id < 4 && h.X == 0 && h.Y == 0 && h.Z == 0))
+                        { h.ArticleModel = "WpnSheikIronWire"; h.ArticleAnim = null; h.AttachBone = chain.Bone; h.Bone = links[h.Id]; any = true; }
+                        if (any) e.Note = "The chain is swung by the game's physics; it's drawn held straight out of Sheik's hand, with its four hitboxes along it (the strongest at the tip).";
+                    }
+            }
+            // Peach's toad: the spores come out when the counter connects; the game's code makes them
+            if (b.Character.FilePrefix == "Peach")
+                foreach (var e in b.Entries.Where(x => x.Parts[0].Replace("Air", "") == "SpecialNHit" && x.Data.Hits.Count == 0 && x.Note == null))
+                    e.Note = "Toad's spores come out when the counter is hit; the game's code makes them, so they aren't drawn.";
+            // Pikachu's jolt and thunder: drawn by ProjectileFlightRules; these say in words what the game does with them
             if (b.Character.FilePrefix == "Pikachu")
             {
                 float high = m.FighterF(3, 0), fall = Math.Abs(m.ArticleF(m.Articles.FirstOrDefault(a => a.Slot == 7), 4));
                 int crawl = m.ArticleI(m.Articles.FirstOrDefault(a => a.Slot == 6), 0);
                 foreach (var e in b.Entries.Where(x => x.Parts[0].Replace("Air", "") == "SpecialN"))
                     if (crawl > 0 && crawl <= 600)
-                        e.Note = $"In the air the jolt flies down at an angle until it lands. On the ground it runs along the floor (and up walls) for up to {crawl} frames; how fast is up to the game's code, so that part isn't drawn.";
+                        e.Note = $"The jolt flies down at an angle until it reaches the floor (at once on the ground), then runs along the floor (and up walls) for up to {crawl} frames. How fast it runs is up to the game's code, so it's drawn at its flying speed.";
                 foreach (var e in b.Entries.Where(x => x.Parts[0].Replace("Air", "") == "SpecialLw"))
                     if (!float.IsNaN(high) && !float.IsNaN(fall) && fall > 0)
-                        e.Note = $"A cloud appears {high:0} above Pikachu and a bolt falls from it at {fall:0.#} a frame; if it reaches him he's wrapped in the big hit (the \"Down B hit\" row). When the bolt drops is up to the game's code, so its fall isn't drawn.";
+                    { e.Note = $"A cloud appears {high:0} above Pikachu and a bolt falls from it at {fall:0.#} a frame; if it reaches him he's wrapped in the big hit (the \"Down B hit\" row)."; e.NoteIsInfo = true; }
             }
+            if (b.Character.FilePrefix == "Robot" && b.Item != null && !float.IsNaN(b.ItemGravity)) GyroThrow(b);
             // a move whose animation isn't in the fighter's animation file can't be shown (it would stand in its default
             // pose): Kirby's copy abilities (their animations are with the fighter he copies), leftover unused moves
             if (b.Lengths.Count > 0)
@@ -351,12 +419,23 @@ namespace SkinManager.Core
             // start): its script for this move has hitboxes, so they're the move's too
             foreach (var art in arts.Where(x => x.Bone > 0))
             {
-                if (e.Data.Hits.Any(h => h.ArticleModel != null)) break;
-                var own = art.Subactions.FirstOrDefault(s => e.Parts.Any(pt => string.Equals(pt, s.Animation, StringComparison.OrdinalIgnoreCase)) && s.Main.Any(x => x.Id == 0x06000D00 || x.Id == 0x06150F00));
-                if (own == null) continue;
-                var d = FrameData.Run(b.Moves, own.Animation, new[] { own }, _ => 0);
-                if (d.Hits.Count == 0) continue;
-                Attach(b, e, new Projectile { Name = "Held", Frame = 1, Article = art, Data = d }, own.Animation);
+                if (e.Data.Hits.Any(h => h.ArticleModel != null || h.OnArticle)) break;
+                bool any = false;
+                foreach (var part in e.Parts)
+                {
+                    var own = art.Subactions.FirstOrDefault(s => string.Equals(part, s.Animation, StringComparison.OrdinalIgnoreCase) && s.Main.Any(x => x.Id == 0x06000D00 || x.Id == 0x06150F00));
+                    if (own == null) continue;
+                    var d = FrameData.Run(b.Moves, own.Animation, new[] { own }, _ => 0);
+                    if (d.Hits.Count == 0) continue;
+                    // it plays along from where this part of the move starts
+                    int from = e.Data.Frames.FirstOrDefault(f => string.Equals(f.Animation, part, StringComparison.OrdinalIgnoreCase))?.Frame ?? 1;
+                    var held = new Projectile { Name = "Held", Frame = from, Article = art, Data = d };
+                    // with its own animation it's posed by that; without one (Ness's yo-yo: the game moves it, and the move's
+                    // animation sweeps the bone it hangs off, ThrowN, along its path) its hitboxes go on that bone
+                    if (!Attach(b, e, held, own.Animation)) OnBone(e, held);
+                    any = true;
+                }
+                if (any) break;
             }
         }
 
@@ -515,7 +594,6 @@ namespace SkinManager.Core
             ("Snake", "SpecialLwStart$", "Sets C4 (on the floor, a wall or someone). It blows up when you press down B again: that's the \"Down B blast\" row."),
             ("Snake", "SpecialHiStart$", "The Cypher only hits once Snake lets go of it."),
             ("Snake", "SpecialLwBlast$", "Sets off the C4. It blows up wherever it's stuck: it's drawn where Snake is."),
-            ("Sheik", "SpecialS", "The chain's hitboxes are set on the start's last frame, as the chain comes out. How long they stay out is decided by the game's code, so no active frames are shown."),
             ("Sheik", "SpecialLw2$", "Turns into Zelda. Its script sets hitboxes and removes them on the same frame, so it never hits."),
             ("Marth", "SpecialLw$", "A counter: it only hits when something hits it first. The counterattack is the \"Down B hit\" row."),
             ("Roy", "SpecialLw$", "A counter: it only hits when something hits it first. The counterattack is the \"Down B hit\" row."),
@@ -574,6 +652,174 @@ namespace SkinManager.Core
             }
             FrameData.Windows(md);
             return true;
+        }
+
+        static readonly string[] PikminColours = { "red", "yellow", "blue", "white", "purple" };
+
+        /// <summary>Olimar's smashes and aerials: his script sets flag 0x22000010 and the game sends the Pikmin in front
+        /// (ftPikminStatusUniqProcessSmashAttack::execFixPos). The Pikmin's hitboxes are in its own scripts, one set per
+        /// colour (Moveset.ArticleColourScript); its animation (WpnPikminPikmin..., in the costume file) carries it out from
+        /// Olimar. Shown with a red Pikmin; the note gives each colour's damage.</summary>
+        // R.O.B.'s down B throws the gyro (an item): ftRobotStatusUniqProcessSpecialGyro::execFixPos, when the move sets flag
+        // 0x22000011, makes it at node 0xA2 (162) + (forward setting 0xFD2, up 0xFD3) and throws it forward at setting 0xFD0
+        // + charge * 0xFD1 (the charge goes up to setting 0xFCF frames). The item then falls with its own gravity
+        // and slides along the floor slowing by its floor friction (ItmParam). Its hitboxes are its own scripts: "Throw"
+        // while thrown, "WaitGround" spinning on the floor. Drawn uncharged and fully charged.
+        static void GyroThrow(FighterBook b)
+        {
+            var m = b.Moves; var g = b.Item;
+            float Setting(int id) => SettingIds.Find(b.Character.FilePrefix, id, out int blk, out int off) ? m.FighterF(blk, off) : float.NaN;
+            float max = Setting(0xFCF), v0 = Setting(0xFD0), per = Setting(0xFD1), fwd = Setting(0xFD2), up = Setting(0xFD3);
+            if (float.IsNaN(v0) || v0 <= 0 || float.IsNaN(per) || float.IsNaN(max) || max < 0 || max > 600) return;
+            if (float.IsNaN(fwd)) fwd = 0; if (float.IsNaN(up)) up = 0;
+            Hitbox HitOf(string anim)
+            {
+                var s = g.Subactions.FirstOrDefault(x => string.Equals(x.Animation, anim, StringComparison.OrdinalIgnoreCase) && x.Main.Any(IsHit));
+                if (s == null) return null;
+                return FrameData.Run(g, anim, new[] { s }, a => 60).Hits.FirstOrDefault(h => !h.Grab);
+            }
+            var thrown = HitOf("Throw");
+            if (thrown == null) return;
+            var spin = HitOf("WaitGround") ?? thrown;
+            float grav = b.ItemGravity, maxFall = Math.Abs(b.ItemMaxFall), airFr = Math.Max(0, b.ItemAirFriction), floorFr = b.ItemGroundFriction;
+            if (float.IsNaN(grav) || grav <= 0 || float.IsNaN(floorFr) || floorFr <= 0) return;
+            foreach (var e in b.Entries.Where(x => x.Parts.FirstOrDefault()?.Replace("Air", "") == "SpecialLw" && x.Data.Hits.Count == 0))
+            {
+                int at = e.Data.FlagsSet.Where(f => f.Var == 0x22000011).Select(f => f.Frame).DefaultIfEmpty(0).Min();
+                if (at <= 0) continue;
+                bool air = e.Parts[0].Contains("Air");
+                foreach (var (speed, name) in new[] { (v0, "gyro, uncharged"), (v0 + max * per, "gyro, full charge") })
+                {
+                    if (speed <= 0) continue;
+                    // its path from a start this high above the floor, and the frame it lands on
+                    (List<(float X, float Y)> Path, int Landed) Sim(float h)
+                    {
+                        var p = new List<(float, float)>(); float x = 0, y = 0, vx = speed, vy = 0; int landed = h <= 0.01f ? 0 : -1;
+                        for (int k = 0; k < 400; k++)
+                        {
+                            if (landed >= 0 && vx <= 0) break;
+                            p.Add((x, y));
+                            if (landed < 0)
+                            {
+                                x += vx; y += vy; vy = Math.Max(-maxFall, vy - grav); vx = Math.Max(0, vx - airFr);
+                                if (y <= -h) { y = -h; landed = k + 1; }
+                            }
+                            else { x += vx; vx = Math.Max(0, vx - floorFr); }
+                        }
+                        return (p, landed < 0 ? p.Count : landed);
+                    }
+                    List<List<Hitbox>> HitsFrom(float h)
+                    {
+                        var r = Sim(h);
+                        return r.Path.Select((q, k) => new List<Hitbox> { (k < r.Landed ? thrown : spin).Copy() }).ToList();
+                    }
+                    float tallest = air ? 40 : 10;
+                    var first = Sim(tallest);
+                    float slide = speed * speed / (2 * floorFr);
+                    var f = new Flight
+                    {
+                        Start = at, Path = first.Path, Hits = HitsFrom(tallest), Bone = 162, Forward = fwd, Up = up,
+                        About = $"thrown at {speed:0.##} a frame, it drops to the floor and slides about {slide:0} units, slowing by {floorFr:0.###} a frame, with its thrown hit until it lands and its spinning hit after. "
+                              + "The game also makes it hit harder the faster it goes; how much isn't in the game's files, so the damage shown is its script's",
+                        PathForHeight = h => Sim(h).Path, HitsForHeight = HitsFrom,
+                    };
+                    var data = new MoveData { Name = name };
+                    data.Hits.Add(thrown); if (spin != thrown) data.Hits.Add(spin);
+                    e.Data.Projectiles.Add(new Projectile { Name = name, Frame = at, Data = data, Flight = f });
+                }
+                e.Note = $"The gyro is an item: drawn thrown uncharged and fully charged ({max:0} frames of charging), from P+'s item data for it.";
+                e.NoteIsInfo = true;
+            }
+        }
+
+        static void PikminAttacks(FighterBook b)
+        {
+            var m = b.Moves;
+            var pik = m.Articles.FirstOrDefault(a => a.Slot == 10);
+            if (pik == null) return;
+            foreach (var e in b.Entries.Where(x => (x.Group == "Ground attacks" || x.Group == "Aerials") && x.Data.Hits.Count == 0 && x.Data.Projectiles.Count == 0))
+            {
+                int sent = e.Data.FlagsSet.Where(f => f.Var == 0x22000010).Select(f => f.Frame).DefaultIfEmpty(0).Min();
+                if (sent <= 0) continue;
+                var part = e.Parts.LastOrDefault(p => !p.EndsWith("Start"));
+                if (part == null) continue;
+                string sub = part == "AttackS4S" ? "AttackS4SJump" : part;
+                int si = pik.Subactions.FindIndex(s => string.Equals(s.Animation, sub, StringComparison.OrdinalIgnoreCase));
+                var chr = b.Lengths.Keys.FirstOrDefault(k => k.StartsWith("WpnPikminPikmin", StringComparison.OrdinalIgnoreCase) && k.EndsWith(sub, StringComparison.OrdinalIgnoreCase));
+                if (si < 0 || chr == null) continue;
+                // the scripts test a power value (10000008, 0 to 2): drawn at 0, the note gives the range
+                MoveData Run(int colour, int power = 0)
+                {
+                    var ev = m.ArticleColourScript(pik, colour, si);
+                    if (ev == null || ev.Count == 0) return null;
+                    var st = new ScriptState(m, b.Character.FilePrefix); st.Set(0x10000008, power);
+                    return FrameData.Run(m, chr, new[] { new Subaction { Index = -1, Animation = chr, Main = ev } }, a => b.Lengths.TryGetValue(a, out var l) ? l : 0, state: st);
+                }
+                // where it is: aerials hang it on his right hand (node 0x29, RHaveN); smashes hold it at his feet plus his
+                // settings 0xFA4/0xFA5 (forward smash) or 0xFA6/0xFA7 (up smash); down smash sends one each way from his feet
+                float Setting(int id) => SettingIds.Find(b.Character.FilePrefix, id, out int blk, out int off) ? m.FighterF(blk, off) : 0f;
+                bool aerial = sub.StartsWith("AttackAir");
+                float ox = sub == "AttackS4SJump" ? Setting(0xFA4) : sub == "AttackHi4" ? Setting(0xFA6) : 0, oy = sub == "AttackS4SJump" ? Setting(0xFA5) : sub == "AttackHi4" ? Setting(0xFA7) : 0;
+                if (float.IsNaN(ox)) ox = 0; if (float.IsNaN(oy)) oy = 0;
+                bool both = sub == "AttackLw4";
+                var red = Run(0);
+                if (red == null || red.Hits.Count == 0) continue;
+                var md = e.Data;
+                foreach (var f in red.Frames)
+                {
+                    int at = sent + f.Frame - 1;
+                    var target = md.Frames.FirstOrDefault(x => x.Frame == at);
+                    if (target == null)
+                    {
+                        // it can still be out after Olimar's move ends: he holds his last pose
+                        var last = md.Frames[md.Frames.Count - 1];
+                        if (at != last.Frame + 1 || f.Hitboxes.Count == 0) continue;
+                        target = new FrameState { Frame = at, AnimFrame = last.AnimFrame, Animation = last.Animation, After = true, MoveX = last.MoveX, MoveY = last.MoveY, Hidden = last.Hidden };
+                        md.Frames.Add(target);
+                    }
+                    foreach (var h in f.Hitboxes)
+                        foreach (bool back in both ? new[] { false, true } : new[] { false })
+                        {
+                            var c = h.Copy(); c.ArticleModel = "WpnPikminR"; c.ArticleAnim = chr; c.ArticleFrame = f.AnimFrame > 0 ? f.AnimFrame : f.Frame;
+                            c.AttachBone = aerial ? 41 : -2; c.ArticleNoTurn = aerial; c.ArticleX = ox; c.ArticleY = oy; c.ArticleMirror = back;
+                            if (back) c.Id += 100;   // the one behind: its own hitbox
+                            target.Hitboxes.Add(c);
+                            if (!back && !md.Hits.Any(x => x.Id == c.Id && x.Damage == c.Damage && x.Angle == c.Angle)) md.Hits.Add(c);
+                        }
+                }
+                FrameData.Windows(md);
+                string Range(int k)
+                {
+                    var lo = k == 0 ? red : Run(k); var hi = Run(k, 2);
+                    if (lo == null || lo.Hits.Count == 0) return null;
+                    float a = lo.Hits.Max(h => h.Damage), z = hi == null || hi.Hits.Count == 0 ? a : hi.Hits.Max(h => h.Damage);
+                    return PikminColours[k] + " " + (Math.Abs(z - a) < 0.05f ? $"{a:0.#}%" : $"{a:0.#}-{z:0.#}%");
+                }
+                var by = Enumerable.Range(0, 5).Select(Range).Where(x => x != null).ToList();
+                e.Note = "The Pikmin does the hitting; shown with a red one" + (both ? " (one goes each way)" : aerial ? ", hanging from his hand" : "") +
+                         ". Each colour hits differently (strongest hit: " + string.Join(", ", by) + "; the higher numbers come with a Pikmin power value the game's code sets).";
+                e.NoteIsInfo = true;
+            }
+            foreach (var e in b.Entries.Where(x => (x.Group == "Ground attacks" || x.Group == "Aerials") && x.Data.Hits.Count == 0 && x.Data.Projectiles.Count == 0 && x.Note == null))
+                e.Note = "The Pikmin do the hitting here, and the app couldn't find their scripts for this move.";
+        }
+
+        /// <summary>A held thing's hitboxes on the fighter's bone it hangs off, from when it plays along.</summary>
+        static void OnBone(MoveEntry e, Projectile p)
+        {
+            var md = e.Data;
+            foreach (var f in p.Data.Frames)
+            {
+                var target = md.Frames.FirstOrDefault(x => x.Frame == p.Frame + f.Frame - 1);
+                if (target == null) continue;
+                foreach (var h in f.Hitboxes)
+                {
+                    var c = h.Copy(); c.Bone = p.Article.Bone; c.OnArticle = true;
+                    target.Hitboxes.Add(c);
+                    if (!md.Hits.Any(x => x.Id == c.Id && x.OnArticle && x.Damage == c.Damage)) md.Hits.Add(c);
+                }
+            }
+            FrameData.Windows(md);
         }
 
         static string Signature(MoveData d) =>

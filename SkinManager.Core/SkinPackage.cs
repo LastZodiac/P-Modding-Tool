@@ -215,6 +215,11 @@ namespace SkinManager.Core
                 else if (Math.Abs(r - 1) < 0.01 && size.Width <= 64) kind = PictureKind.StockIcon;
             }
             if (kind == null) return null;
+            // named like a portrait but shaped nothing like one (a sheet of several portraits side by side, a banner): squeezed
+            // into the game's frame it would show parts of several pictures, so it isn't used (P+'s or a picture made from the model is)
+            double want = kind == PictureKind.SelectPortrait ? 128.0 / 160 : kind == PictureKind.BattlePortrait ? 48.0 / 56 : 1.0;
+            double shape = (double)size.Width / Math.Max(1, size.Height) / want;
+            if (shape > 1.3 || shape < 0.7) return null;
             var num = Regex.Matches(System.IO.Path.GetFileNameWithoutExtension(file), @"\d+").Cast<Match>().LastOrDefault();
             return new PackagePicture { Path = path, Kind = kind.Value, Number = num != null ? (int?)int.Parse(num.Value) : null };
         }

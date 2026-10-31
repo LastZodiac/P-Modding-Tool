@@ -33,16 +33,59 @@ namespace SkinManager.Core
                     f.FollowFighter = true; return f;
                 });
 
-            // ---- Pikachu: thunder jolt in the air. sora_melee jolt activate: straight at article param +4 (radians, -40°)
-            // and +8 per frame, life article param +0; made at TopN + (forward fighter param 0 +0x0, up +0x4). On reaching
-            // the floor it becomes the crawling jolt (its crawl isn't in the code the game reads from the card).
+            // ---- Pikachu: thunder jolt. sora_melee jolt activate: straight at article param +4 (radians, -40°) and +8 per
+            // frame, life article param +0; made at TopN + (forward fighter param 0 +0x0, up +0x4). On reaching the floor
+            // sora_melee 0x32625C makes the crawling jolt (article slot 6, its own "Regular" hitboxes) where it landed, which
+            // lives slot 6 param +0 frames. On the ground it's made 1 unit up, so it lands at once and crawls. How fast it
+            // crawls is set by the game's shared weapon code, not anything the app can read: drawn at the flying speed.
             Add("Pikachu", 5, c =>
             {
                 int life = c.AI(0); float ang = Deg(c.AF(4)), sp = c.AF(8);
-                // on the ground it's made on the floor and crawls along it at once (that crawl isn't in the code read here)
-                if (life <= 0 || float.IsNaN(sp) || !c.Air) return null;
-                var f = Fly(c, Straight(life, sp, ang), "Regular", $"flies down at {-ang:0}° until it reaches the floor, then crawls along it", bone: 0, fwd: c.FF(0, 0x0), up: c.FF(0, 0x4));
-                f.StopAtGround = true; return f;
+                if (life <= 0 || float.IsNaN(sp) || sp <= 0) return null;
+                var crawler = c.M.Articles.FirstOrDefault(x => x.Slot == 6);
+                var cc = crawler == null ? null : new Ctx { Book = c.Book, Entry = c.Entry, Shot = c.Shot, Article = crawler };
+                int crawl = crawler != null && c.M.ArticleI(crawler, 0) > 0 ? Math.Min(300, c.M.ArticleI(crawler, 0)) : 100;
+                double a = ang * Math.PI / 180; float vx = (float)(sp * Math.Cos(a)), vy = (float)(sp * Math.Sin(a));
+                int FallFrames(float h) => vy >= 0 ? life : Math.Min(life, (int)Math.Ceiling(h / -vy));
+                List<(float X, float Y)> PathFrom(float h)
+                {
+                    var p = new List<(float, float)>(); float x = 0, y = 0; int fall = FallFrames(h);
+                    for (int k = 0; k < fall; k++) { p.Add((x, y)); x += vx; y += vy; }
+                    if (fall >= life) return p;   // never reaches the floor in its life
+                    y = -h;
+                    for (int k = 0; k < crawl; k++) { p.Add((x, y)); x += sp; }
+                    return p;
+                }
+                var flyHits = c.Script("Regular", life);
+                var crawlHits = cc?.Script("Regular", crawl);
+                List<List<Hitbox>> HitsFrom(float h)
+                {
+                    int fall = FallFrames(h);
+                    var list = flyHits.Take(fall).Select(x => x.Select(q => q.Copy()).ToList()).ToList();
+                    if (fall < life) list.AddRange(crawlHits ?? flyHits.Take(crawl).ToList());
+                    return list;
+                }
+                float tallest = c.Air ? 40 : 1;   // the most it could have to fall: drawn again for where it really starts
+                var f = new Flight
+                {
+                    Path = PathFrom(tallest), Hits = HitsFrom(tallest), Bone = 0, Forward = c.FF(0, 0x0), Up = c.FF(0, 0x4),
+                    About = $"flies down at {-ang:0}° to the floor, then crawls along it for {crawl} frames (how fast it crawls isn't in the game's files, so it's drawn at its flying speed, {sp:0.#} a frame)",
+                };
+                f.PathForHeight = PathFrom; f.HitsForHeight = HitsFrom;
+                return f;
+            });
+
+            // ---- Pikachu: thunder (down B). The move sets flag 0x22000010 (frame 14), on which ftPikachu makes the cloud
+            // (activeArticle1 @0x9620) at fighter param 3 +0 (150) above him; the cloud's status (@0x17B44) sends the bolt
+            // (article slot 7, fn_98_13B80) straight down at slot 7 param +4 (-5) a frame, so it reaches Pikachu after
+            // 150/5 frames. If it touches him he does "Down B hit" (its own entry).
+            Add("Pikachu", 7, c =>
+            {
+                float h = c.FF(3, 0x0), v = c.AF(4);
+                if (float.IsNaN(h) || float.IsNaN(v) || v >= 0 || h <= 0) return null;
+                int fall = (int)Math.Ceiling(h / -v), at = c.FlagFrame(0x22000010);
+                return Fly(c, Straight(fall, -v, -90), "Regular", $"comes down from the cloud {h:0} above him at {-v:0.#} a frame and reaches him {fall} frames later (then \"Down B hit\")",
+                           start: at > 0 ? at : 0, bone: 0, up: h);
             });
 
             // ---- Ness, Lucas: PK fire bolt. ftNess/ftLucas activate: ground speed fighter param 1 +0xC at angle +0x8 (radians),

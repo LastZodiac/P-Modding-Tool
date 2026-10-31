@@ -28,6 +28,10 @@ namespace SkinManager.Core
         public ushort Button;        // 0 = just pick it
         public string ListEntry;     // L/R list entry name ("N64")
         public string SubStage;      // a sub-stage the game picks itself (Smashville's time of day)
+        public string Asl;           // the slot's list of versions on the card (/stage/stageslot/21.asl)
+        public int Entry;            // this version's place in that list
+        public string Param;         // this version's settings (stageinfo/<Param>.param)
+        public string File;          // the stage file it loads (/Project+/pf/stage/melee/STGSMASHVILLE_00_MORNING.pac)
 
         public string Region =>      // its part of the preview picture
             Button == 0 ? "main" : Button == 0x40 ? "L" : Button == 0x20 ? "R" : Button == 0x10 ? "Z" : null;
@@ -190,13 +194,22 @@ namespace SkinManager.Core
             return names;
         }
 
+        /// <summary>Every way to get every stage file, slot by slot.</summary>
+        public List<StageSpot> All => _byFile.Values.SelectMany(x => x).ToList();
+
+        /// <summary>The stage files you get by just picking a slot's icon (Smashville: its five times of day).</summary>
+        public List<string> FrontFiles(int slot) =>
+            _byFile.Where(kv => kv.Value.Any(x => x.Slot == slot && x.Button == 0)).Select(kv => kv.Key).ToList();
+
         public string WhereText(string cardPath)
         {
             var s = SpotsOf(cardPath);
             return s.Count == 0 ? null : string.Join("; or ", s.Take(3).Select(x => x.Text));
         }
 
-        public static StageSelect Read(Fat32Image card)
+        /// <summary>Reads the stage select from the card. original: a stage slot list as P+ made it (when the app changed it
+        /// for a stage swap), so a swap doesn't change what counts as P+'s own version.</summary>
+        public static StageSelect Read(Fat32Image card, Func<string, byte[]> original = null)
         {
             var ss = new StageSelect();
             string root = Build.Pf + "/stage";
@@ -240,14 +253,17 @@ namespace SkinManager.Core
             foreach (var kv in picture) ss.Pictures[kv.Key] = kv.Value;
             // each slot's versions and the stage files they load
             var infoFolder = root + "/stageinfo";
-            var stageFiles = new HashSet<string>(card.ListFolder(Stages.Folder).Where(e => !e.IsDirectory).Select(e => Path.GetFileNameWithoutExtension(e.Name)), StringComparer.OrdinalIgnoreCase);
+            var realNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in card.ListFolder(Stages.Folder).Where(e => !e.IsDirectory)) realNames[Path.GetFileNameWithoutExtension(e.Name)] = e.Name;
+            var stageFiles = new HashSet<string>(realNames.Keys, StringComparer.OrdinalIgnoreCase);
             if (!card.Exists(root + "/stageslot")) return ss;
             foreach (var asl in card.ListFolder(root + "/stageslot").Where(e => !e.IsDirectory && e.Name.EndsWith(".asl", StringComparison.OrdinalIgnoreCase)))
             {
                 int slot;
                 try { slot = Convert.ToInt32(Path.GetFileNameWithoutExtension(asl.Name), 16); } catch { continue; }
                 byte[] d;
-                try { d = card.ReadFile(root + "/stageslot/" + asl.Name); } catch { continue; }
+                string aslPath = root + "/stageslot/" + asl.Name;
+                try { d = original?.Invoke(aslPath) ?? card.ReadFile(aslPath); } catch { continue; }
                 if (d.Length < 8 || d[0] != 'A' || d[1] != 'S' || d[2] != 'L' || d[3] != 'S') continue;
                 int count = d[4] << 8 | d[5], nameBase = d[6] << 8 | d[7];
                 for (int i = 0; i < count; i++)
@@ -265,6 +281,7 @@ namespace SkinManager.Core
                         {
                             Slot = slot, SlotName = names.TryGetValue(slot, out var n) ? n : param.Replace('_', ' '),
                             Button = button, SubStage = sub, Picture = picture.TryGetValue(slot, out var p) ? p : -1,
+                            Asl = aslPath, Entry = i, Param = param, File = Stages.Folder + "/" + (realNames.TryGetValue(file, out var real) ? real : file + ".pac"),
                         };
                         if (where.TryGetValue(slot, out var w)) { spot.Page = w.page; spot.Row = w.row; spot.Column = w.col; }
                         if (button >= 0x4000 && button < 0xC000) spot.ListEntry = ListEntry(card, root, slot, button);

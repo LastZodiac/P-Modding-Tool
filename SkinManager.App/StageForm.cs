@@ -41,6 +41,9 @@ namespace SkinManager.App
         }
 
         sealed class Fix { public StageFile Stage; public StagePlan Plan; public bool Looks; }
+        /// <summary>A stage's normal version made of several files (Smashville: the game picks one of five by the time of day):
+        /// put on all of them together, as one mod.</summary>
+        sealed class Group { public int Slot; public string Name; public List<(StageFile Stage, Fix Fix)> Parts = new List<(StageFile, Fix)>(); }
 
         readonly List<Row> _rows = new List<Row>();
         readonly Button _install = Theme.Primary("Install");
@@ -51,6 +54,7 @@ namespace SkinManager.App
         Dictionary<string, uint> _modules;   // program numbers of P+'s stage programs
         List<StageFile> _all;
         StageSelect _select;                 // where P+'s stages are on the stage select
+        StageSelect _front;                  // the same as P+ set it up (a stage swap of ours undone): which version is the normal one
         Dictionary<string, Bitmap> _previews = new Dictionary<string, Bitmap>();   // P+'s preview pictures, for showing the change
         readonly HashSet<string> _ticked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // stages already ticked by default (one file each)
 
@@ -62,13 +66,13 @@ namespace SkinManager.App
             Size = new Size(980, 700); MinimumSize = new Size(760, 480);
             StartPosition = FormStartPosition.CenterParent; AutoScaleMode = AutoScaleMode.Dpi; ShowInTaskbar = false;
 
-            var head = new Panel { Dock = DockStyle.Top, Height = 92 };
+            var head = new Panel { Dock = DockStyle.Top, Height = 112 };
             var title = Theme.Label(pkg.StageFiles.Count == 1 ? "Which stage should it replace?" : $"This download has {pkg.StageFiles.Count} stage files", Theme.Title);
             title.Location = new Point(24, 14);
             var hint = new Label
             {
-                Text = "A stage can only replace a P+ stage it plays exactly like (same floors, platforms, blast zones and moving parts), so it's safe online. When it doesn't, the app copies P+'s gameplay into it, or puts its looks on P+'s own stage. \"What's different\" shows exactly why a map doesn't match.",
-                Font = Theme.Body, ForeColor = Theme.Muted, AutoSize = false, Location = new Point(26, 50), Size = new Size(920, 40), BackColor = Color.Transparent,
+                Text = "It goes on P+'s normal version of the stage first (what you get by just picking its icon). It has to play exactly like P+'s stage, so it's safe online: when it doesn't, the app copies P+'s gameplay into it, or puts its looks on P+'s own stage. \"What's different\" shows exactly why a map doesn't match.",
+                Font = Theme.Body, ForeColor = Theme.Muted, AutoSize = false, Location = new Point(26, 50), Size = new Size(920, 60), BackColor = Color.Transparent,
             };
             head.Controls.Add(title); head.Controls.Add(hint);
             head.Resize += (s, e) => hint.Width = head.Width - 50;
@@ -136,7 +140,7 @@ namespace SkinManager.App
                             if (_info == null) _info = Songs.StageInfo(card);
                             if (_modules == null) _modules = Stages.ModuleIds(card);
                             if (_all == null) _all = Stages.All(card);
-                            if (_select == null) try { _select = StageSelect.Read(card); } catch (Exception e) { Program.Trace("stage select: " + e); }
+                            if (_select == null) try { _select = StageSelect.Read(card); _front = _installer.OriginalSelect(card); } catch (Exception e) { Program.Trace("stage select: " + e); }
                             return _installer._stageIndex.Matches(card, _lib, row.Gameplay, (i, n) => pr.Report((i, n)), Allowed(row));
                         }
                     });
@@ -148,13 +152,29 @@ namespace SkinManager.App
                 // the stages it's named for come first
                 var named = Stages.NamedFor(r.File, _pkg.Name, _all);
                 int Rank(StageFile s) { int i = named.FindIndex(b => string.Equals(b, s.Base, StringComparison.OrdinalIgnoreCase)); return i < 0 ? 99 : i; }
-                foreach (var m in matches.OrderBy(Rank).ThenBy(m => Stages.SameNumber(r.File, m) ? 0 : 1).ThenBy(m => m.IsMain ? 0 : 1)) AddExact(r, m, Rank(m) < 99);
-                // per stage it's named for: the main version, or else the first version that runs the same stage program
+                // the normal version (what you get by just picking the stage) first. When it's several files (Smashville's
+                // five times of day) it's offered as one choice that goes on all of them, so the map shows whenever you pick it.
+                var bases = named.Take(3).Concat(matches.OrderBy(Rank).Select(m => m.Base)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4).ToList();
+                var exactFiles = new HashSet<string>(matches.Select(m => m.CardPath), StringComparer.OrdinalIgnoreCase);
+                var grouped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var b in bases)
+                {
+                    var front = FrontOf(b);
+                    if (front.Files.Count < 2) continue;
+                    foreach (var f in front.Files) grouped.Add(f.CardPath);
+                    await AddGroup(r, front.Slot, front.Name, front.Files, exactFiles, Rank(front.Files[0]) < 99);
+                    if (IsDisposed) return;
+                }
+                foreach (var m in matches.Where(m => !grouped.Contains(m.CardPath)).OrderBy(Rank).ThenBy(m => IsFront(m) ? 0 : 1).ThenBy(m => Stages.SameNumber(r.File, m) ? 0 : 1)) AddExact(r, m, Rank(m) < 99);
+                // per stage it's named for: its normal version, even when the map plays exactly like another version
                 foreach (var b in named.Take(3))
                 {
-                    var versions = _all.Where(s => string.Equals(s.Base, b, StringComparison.OrdinalIgnoreCase))
-                        .OrderBy(s => Stages.SameNumber(r.File, s) ? 0 : 1).ThenBy(s => s.IsMain ? 0 : 1).ToList();   // STGVILLAGE_02 -> Smashville _02_DUSK
-                    if (versions.Any(v => r.Boxes.Any(x => TargetOf(x) == v))) continue;   // already plays exactly like one of them
+                    var versions = _all.Where(s => string.Equals(s.Base, b, StringComparison.OrdinalIgnoreCase) && !grouped.Contains(s.CardPath))
+                        .OrderBy(s => IsFront(s) ? 0 : 1).ThenBy(s => Stages.SameNumber(r.File, s) ? 0 : 1).ToList();
+                    if (versions.Count == 0) continue;
+                    var main = versions.FirstOrDefault(IsFront);
+                    if (main != null) { if (!r.Tried.Contains(main.CardPath)) await TryFix(r, main, true); continue; }
+                    if (versions.Any(v => r.Boxes.Any(x => TargetsOf(x).Contains(v)))) continue;   // already plays exactly like one of them
                     var s = versions.FirstOrDefault(Allowed(r)) ?? versions.FirstOrDefault();
                     if (s != null && !r.Tried.Contains(s.CardPath)) await TryFix(r, s, true);
                 }
@@ -191,6 +211,7 @@ namespace SkinManager.App
                 // tick the best one: what it's named for, playing exactly alike first
                 var best = r.Candidates.OrderBy(c => c.score).FirstOrDefault();
                 if (best.box != null && best.score < 50 && _ticked.Add(TargetOf(best.box).CardPath)) best.box.Checked = true;
+                if (IsDisposed) return;
                 bool exact = r.Boxes.Any(b => b.Tag is StageFile);
                 r.Status.Text = exact ? "Plays exactly like P+'s stages below. Tick the one(s) it should replace:"
                     : r.Boxes.Any() ? "As it is, it plays differently from P+'s stages (it was probably made for an older P+ version, or for another stage), so online games would go out of sync. " +
@@ -224,7 +245,23 @@ namespace SkinManager.App
             return w == null ? "\r\n    In the game: not on the stage select pages (P+ only uses it in some modes)." : "\r\n    In the game: " + w + ".";
         }
 
-        static StageFile TargetOf(CheckBox b) => b.Tag as StageFile ?? (b.Tag as Fix)?.Stage;
+        static StageFile TargetOf(CheckBox b) => b.Tag as StageFile ?? (b.Tag as Fix)?.Stage ?? (b.Tag as Group)?.Parts.FirstOrDefault().Stage;
+        static List<StageFile> TargetsOf(CheckBox b) => b.Tag is Group g ? g.Parts.Select(p => p.Stage).ToList() : new List<StageFile> { TargetOf(b) };
+
+        /// <summary>Is this the version you get by just picking the stage (as P+ set it up)?</summary>
+        bool IsFront(StageFile s) => _front != null ? _front.SpotsOf(s.CardPath).Any(x => x.Button == 0 && x.Page > 0) : s.IsMain;
+
+        /// <summary>A stage's normal version: its slot, name and the files it is (Smashville: its five times of day).</summary>
+        (int Slot, string Name, List<StageFile> Files) FrontOf(string stageBase)
+        {
+            if (_front == null) return (0, null, new List<StageFile>());
+            var spot = _all.Where(s => string.Equals(s.Base, stageBase, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(s => _front.SpotsOf(s.CardPath)).FirstOrDefault(x => x.Button == 0 && x.Page > 0);
+            if (spot == null) return (0, null, new List<StageFile>());
+            var files = _front.FrontFiles(spot.Slot).Select(f => _all.FirstOrDefault(s => string.Equals(Path.GetFileNameWithoutExtension(s.CardPath), f, StringComparison.OrdinalIgnoreCase)))
+                .Where(s => s != null).OrderBy(s => s.Suffix, StringComparer.OrdinalIgnoreCase).ToList();
+            return (spot.Slot, spot.SlotName, files);
+        }
 
         /// <summary>P+ stages this file may go on: ones run by the same stage program it was made for (another may
         /// look for parts the file doesn't have and crash the game).</summary>
@@ -243,7 +280,8 @@ namespace SkinManager.App
             var mine = _lib.Stages.FirstOrDefault(s => s.Enabled && string.Equals(s.CardPath, m.CardPath, StringComparison.OrdinalIgnoreCase));
             var box = Box("Replace P+'s " + m.Label + (done ? "  (already yours)" : mine != null ? $"  (turns off {mine.Name})" : ""), m);
             AddOption(r, box, "Plays exactly like it already, so only the looks change." + WhereNote(m), Theme.Muted);
-            if (!done) r.Candidates.Add((box, (named ? 0 : 20) + (Stages.SameNumber(r.File, m) ? -1 : m.IsMain ? 0 : 1)));
+            if (r.Boxes.Count(b => b.Tag is StageFile) == 1) _ = AddPreview(r, File.ReadAllBytes(r.File), "How it will look", false);
+            if (!done) r.Candidates.Add((box, (named ? 0 : 20) + (IsFront(m) ? -2 : Stages.SameNumber(r.File, m) ? -1 : 1)));
         }
 
         CheckBox Box(string text, object tag)
@@ -302,7 +340,9 @@ namespace SkinManager.App
                 if (plan.LooksSwapped.All(x => x.StartsWith("+"))) how += " The map's own platform may still show as a decoration that doesn't move; check it offline first.";
             }
             AddOption(r, box, how + WhereNote(s), good ? Theme.Muted : Theme.Warn);
-            r.Candidates.Add((box, (good ? (named ? 10 : 30) : 60) - (Stages.SameNumber(r.File, s) ? 1 : 0)));
+            // the normal version comes first: people pick a stage's icon, not a button version of it
+            r.Candidates.Add((box, good && IsFront(s) ? (named ? -3 : 25) : (good ? (named ? 10 : 30) : 60) - (Stages.SameNumber(r.File, s) ? 1 : 0)));
+            await AddPreview(r, plan.Bytes, "How it will look on P+'s " + s.Label, plan.LooksSwapped.Count > 0);
         }
 
         /// <summary>Puts the map's looks on P+'s own stage file and adds that as an option, with a preview.</summary>
@@ -335,20 +375,90 @@ namespace SkinManager.App
             if (plan.Looks != null && plan.Looks.KeptLooks.Count > 0) how += " Its moving platforms look like P+'s.";
             if (plan.Looks != null && plan.Looks.StaticParts) how += " Some of the map's moving decorations may stand still.";
             if (plan.Looks != null && plan.Looks.PlatformsLeftOut > 0) how += " The map's own copy of the platform is left out, so there's only one.";
-            AddOption(r, box, how + WhereNote(s), good ? Theme.Muted : Theme.Warn);
-            // a preview: the map's scenery on P+'s floors (gold lines)
-            var caption = new Label { Text = "    Preview (the gold lines are where you stand):", Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 2) };
-            var pic = new PictureBox { Size = new Size(384, 216), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black, Margin = new Padding(24, 0, 0, 10) };
+            AddOption(r, box, how + " " + LooksWarning + WhereNote(s), Theme.Warn);
+            // never ticked by itself: the map's scenery is placed by another stage program than it was made for, and the game
+            // can place it differently from what the files show (you could end up standing inside the map). Ranked so the
+            // best one is first in the list.
+            r.Candidates.Add((box, 60 + (fit != null && fit.Exact ? 0 : good ? 5 : 20) + (IsFront(s) ? 0 : 1)));
+            await AddPreview(r, plan.Bytes, "How it will look on P+'s " + s.Label, plan.Looks != null && plan.Looks.KeptLooks.Count > 0);
+        }
+
+        const string LooksWarning = "Try it offline first: P+'s stage program places the scenery, and it can end up a little off from the files (you could stand inside the map's ground), which the app can't check.";
+
+        /// <summary>A picture of the result: the scenery as the game shows it at the start, with where you stand drawn on top.</summary>
+        async Task AddPreview(Row r, byte[] bytes, string what, bool platformsArePPlus)
+        {
+            if (bytes == null) return;
+            var caption = new Label
+            {
+                Text = "    " + what + ". The gold line is where you stand; grey lines are walls and undersides." +
+                       (platformsArePPlus ? " The platforms that move are P+'s own (they're kept so they move right), so they look like P+'s on every stage." : ""),
+                Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 2),
+            };
+            var pic = new PictureBox { Size = new Size(480, 270), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black, Margin = new Padding(24, 0, 0, 10) };
             r.Targets.Controls.Add(caption); r.Targets.Controls.Add(pic);
             Relayout(r);
-            // a stage it isn't named for is only ticked by itself when the download has just this one stage file
-            r.Candidates.Add((box, fit != null && fit.Exact ? (named ? 35 : _pkg.StageFiles.Count == 1 ? 40 : 55) : good ? (named || _pkg.StageFiles.Count == 1 ? 45 : 58) : 80));
-            var bytes = plan.Bytes;
             Bitmap shot = null;
-            try { shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 384, 216)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
+            try { shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
             if (IsDisposed) return;
             if (shot != null) pic.Image = shot;
-            else { caption.Text = "    (No preview for this one.)"; pic.Height = 0; pic.Margin = Padding.Empty; Relayout(r); }
+            else { caption.Text = "    (No picture for this one.)"; pic.Height = 0; pic.Margin = Padding.Empty; Relayout(r); }
+        }
+
+        /// <summary>The map on all the files of a stage's normal version (Smashville's five times of day), as one choice.</summary>
+        async Task AddGroup(Row r, int slot, string slotName, List<StageFile> members, HashSet<string> exact, bool named)
+        {
+            if (!r.Tried.Add("group|" + slot)) return;
+            var allowed = Allowed(r);
+            var g = new Group { Slot = slot, Name = slotName };
+            string before = r.Status.Text, problem = null;
+            for (int i = 0; i < members.Count; i++)
+            {
+                var m = members[i];
+                r.Status.Text = $"Checking it on P+'s normal {slotName} ({i + 1} of {members.Count})...";
+                if (exact.Contains(m.CardPath) && allowed(m)) { g.Parts.Add((m, null)); continue; }
+                StagePlan plan = null;
+                try
+                {
+                    plan = await Task.Run(() =>
+                    {
+                        using (var card = _installer.OpenCard())
+                        {
+                            if (allowed(m)) { var p = _installer.PlanFixedStage(card, _pkg, r.File, m); if (p.CanInstall) return p; }
+                            return _installer.PlanLooks(card, _pkg, r.File, m);
+                        }
+                    });
+                }
+                catch (Exception e) { problem = Friendly.Explain(e); }
+                if (IsDisposed) return;
+                if (problem == null && !plan.CanInstall) problem = string.Join(" ", plan.Checks.Where(c => !c.Passed).Select(c => c.Detail ?? c.Title));
+                if (problem != null) break;
+                g.Parts.Add((m, new Fix { Stage = m, Plan = plan, Looks = plan.Looks != null }));
+            }
+            r.Status.Text = before;
+            string versions = string.Join(", ", members.Select(m => m.Version == "" ? m.StageName : m.Version));
+            if (problem != null)
+            {
+                AddOption(r, Theme.Label("✗  P+'s normal " + slotName, Theme.Body, Theme.Muted), "Can't be done: " + problem, Theme.Muted);
+                return;
+            }
+            var mine = _lib.Stages.Where(x => x.Enabled && members.Any(m => string.Equals(x.CardPath, m.CardPath, StringComparison.OrdinalIgnoreCase))).Select(x => x.Name).Distinct().ToList();
+            var box = Box($"Replace P+'s normal {slotName} (all {members.Count} of its versions)" + (mine.Count > 0 ? $"  (turns off {string.Join(", ", mine.Take(2))})" : ""), g);
+            bool looks = g.Parts.Any(p => p.Fix != null && p.Fix.Looks), fixd = g.Parts.Any(p => p.Fix != null && !p.Fix.Looks);
+            var fits = g.Parts.Where(p => p.Fix?.Plan.Fit != null).Select(p => p.Fix.Plan.Fit).Where(f => f.Floors < 1e6f && !float.IsNaN(f.Floors)).ToList();
+            float floors = fits.Count == 0 ? 0 : fits.Max(f => f.Floors), rest = fits.Count == 0 ? 0 : fits.Max(f => f.Rest);
+            bool good = floors < 1f && rest < 5f;
+            string how = $"Picking {slotName} gives one of {members.Count} versions, by the time of day or at random ({versions}). The map goes on all of them, so it always shows. ";
+            how += looks ? "It's P+'s stage underneath with the map's scenery on it, so it plays exactly like P+'s. " + LooksWarning
+                 : fixd ? (good ? "The app copies P+'s gameplay into it, and its floors line up with P+'s, so it will look right."
+                                : $"The app copies P+'s gameplay into it. Where you stand is off by up to {floors:0.#} from what you see, so try it offline first.")
+                 : "Plays exactly like them already, so only the looks change.";
+            var spot = _front?.SpotsOf(members[0].CardPath).FirstOrDefault(x => x.Button == 0);
+            if (spot != null) how += "\r\n    In the game: " + spot.Where + ", just pick it.";
+            AddOption(r, box, how, looks || !good ? Theme.Warn : Theme.Muted);
+            r.Candidates.Add((box, looks ? 60 : !fixd ? (named ? -10 : 15) : good ? (named ? -4 : 25) : 70));
+            var first = g.Parts[0];
+            await AddPreview(r, first.Fix != null ? first.Fix.Plan.Bytes : File.ReadAllBytes(r.File), $"How it will look on P+'s {slotName} ({first.Stage.Version})", first.Fix?.Plan.Looks?.KeptLooks.Count > 0);
         }
 
         /// <summary>"What's different?": exactly why the map doesn't play like one of P+'s stages.</summary>
@@ -408,7 +518,7 @@ namespace SkinManager.App
         /// <summary>The stage picked from "Put it on a different stage".</summary>
         async Task TryStage(Row r, StageFile s)
         {
-            var existing = r.Boxes.FirstOrDefault(b => string.Equals(TargetOf(b)?.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase));
+            var existing = r.Boxes.FirstOrDefault(b => !(b.Tag is Group) && string.Equals(TargetOf(b)?.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase));
             if (existing != null) { existing.Checked = true; return; }
             if (r.Tried.Contains(s.CardPath)) return;   // already shown as not possible
             r.Other.Enabled = false;
@@ -419,7 +529,7 @@ namespace SkinManager.App
             if (same && Allowed(r)(s)) AddExact(r, s, true);
             else await TryFix(r, s, true);
             if (IsDisposed) return;
-            var added = r.Boxes.FirstOrDefault(b => string.Equals(TargetOf(b)?.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase));
+            var added = r.Boxes.FirstOrDefault(b => !(b.Tag is Group) && string.Equals(TargetOf(b)?.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase));
             if (added != null) added.Checked = true;
             r.Other.Enabled = true;
         }
@@ -461,12 +571,12 @@ namespace SkinManager.App
         new void Update()
         {
             foreach (var r in _rows) ShowPicture(r);
-            var ticked = _rows.SelectMany(r => r.Boxes.Where(b => b.Checked)).Select(b => TargetOf(b)?.CardPath).ToList();
+            var ticked = _rows.SelectMany(r => r.Boxes.Where(b => b.Checked)).SelectMany(TargetsOf).Select(t => t?.CardPath).ToList();
             int n = ticked.Count;
             bool clash = ticked.GroupBy(x => x, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1);
             _summary.ForeColor = clash ? Theme.Bad : Theme.Muted;
             _summary.Text = _checking ? "Checking..." : clash ? "Two files are set to replace the same stage. Untick one of them."
-                : n == 0 ? "Tick at least one stage to replace." : $"{n} stage file(s) will be replaced.";
+                : n == 0 ? "Tick at least one stage to replace." : n == 1 ? "1 stage file will be replaced." : $"{n} stage files will be replaced.";
             _install.Text = n == 1 ? "Install" : $"Install ({n})";
             _install.Enabled = n > 0 && !_checking && !clash;
             _layoutFoot();
@@ -578,6 +688,27 @@ namespace SkinManager.App
             foreach (var r in _rows)
                 foreach (var b in r.Boxes.Where(b => b.Checked))
                 {
+                    if (b.Tag is Group g)
+                    {
+                        // one mod in My Mods: the same group on each file, the stage select picture on the first
+                        string id = Guid.NewGuid().ToString("N"); var row0 = r; bool firstPart = true;
+                        foreach (var (stage, fx) in g.Parts)
+                        {
+                            try
+                            {
+                                _summary.Text = "Running safety checks on " + stage.Label + "...";
+                                var plan = fx != null ? fx.Plan : await Task.Run(() => { using (var card = _installer.OpenCard()) return _installer.PlanStage(card, _pkg, row0.File, stage, row0.Gameplay); });
+                                plan.Name = _pkg.StageFiles.Count == 1 ? _pkg.Name : plan.Name;
+                                plan.Group = id;
+                                if (firstPart) plan.SelectPictures = PicturesFor(row0, stage);
+                                firstPart = false;
+                                if (plan.CanInstall) plans.Add(plan); else problems.Add($"{stage.Label}: " + string.Join("; ", plan.Checks.Where(c => !c.Passed).Select(c => c.Title)));
+                            }
+                            catch (Exception e) { problems.Add($"{stage.Label}: {Friendly.Explain(e)}"); }
+                            if (IsDisposed) return;
+                        }
+                        continue;
+                    }
                     var target = TargetOf(b); var row = r;
                     try
                     {

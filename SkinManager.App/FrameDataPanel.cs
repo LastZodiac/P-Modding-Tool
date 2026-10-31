@@ -438,6 +438,10 @@ namespace SkinManager.App
         readonly System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer { Interval = 16 };
         readonly Button _play = Theme.Secondary("❚❚"), _back = Theme.Secondary("◀"), _next = Theme.Secondary("▶"), _speed = Theme.Secondary("1×"), _gif = Theme.Secondary("Save GIF…");
         readonly CheckBox _hurt = new CheckBox { Text = "Hurtboxes", Checked = true, AutoSize = true, ForeColor = Theme.Text, BackColor = Color.Transparent, Font = Theme.Small };
+        // stop for a moment on a hit that's only out a frame or three (Fox's shine), so it doesn't flash by; off = full speed.
+        // Kept for every move until the app closes.
+        static bool _pauseOnHits = true;
+        readonly CheckBox _pauseHits = new CheckBox { Text = "Pause on quick hits", Checked = _pauseOnHits, AutoSize = true, ForeColor = Theme.Text, BackColor = Color.Transparent, Font = Theme.Small };
         Rectangle _pic, _strip;
 
         public MoveView()
@@ -446,13 +450,15 @@ namespace SkinManager.App
             BackColor = Color.Transparent;
             foreach (var b in new[] { _play, _back, _next, _speed }) { b.Width = 46; b.Font = Theme.Body; }
             _gif.Width = 110;
-            Controls.AddRange(new Control[] { _play, _back, _next, _speed, _gif, _hurt });
+            Controls.AddRange(new Control[] { _play, _back, _next, _speed, _gif, _hurt, _pauseHits });
+            new ToolTip().SetToolTip(_pauseHits, "On: the player stops for a moment on hits that are only out for a frame or three, so you can see them.\nOff: everything plays at full speed.");
             _play.Click += (s, e) => { _playing = !_playing; _play.Text = _playing ? "❚❚" : "▶▶"; };
             _back.Click += (s, e) => Step(-1);
             _next.Click += (s, e) => Step(1);
             _speed.Click += (s, e) => { _speedIndex = (_speedIndex + 1) % Speeds.Length; _speed.Text = SpeedNames[_speedIndex]; };
             _gif.Click += (s, e) => SaveGif?.Invoke();
             _hurt.CheckedChanged += (s, e) => { Hurtboxes = _hurt.Checked; HurtboxesChanged?.Invoke(); };
+            _pauseHits.CheckedChanged += (s, e) => { _pauseOnHits = _pauseHits.Checked; if (!_pauseOnHits) _hold = 0; };
             _timer.Tick += (s, e) =>
             {
                 if (!_playing || Pictures == null || Pictures.Count == 0 || !Visible) return;
@@ -464,7 +470,7 @@ namespace SkinManager.App
                 {
                     _frame = (_frame + 1) % Pictures.Count;
                     // a hit that's out for only a frame or three (Fox's shine) would flash by: stay on it a moment
-                    if (_move != null && _move.Data.Active.Any(a => a.From == _frame + 1 && a.To - a.From < 3)) { _hold = Math.Max(1, 400 / Math.Max(1, _timer.Interval)); break; }
+                    if (_pauseOnHits && _move != null && _move.Data.Active.Any(a => a.From == _frame + 1 && a.To - a.From < 3)) { _hold = Math.Max(1, 400 / Math.Max(1, _timer.Interval)); break; }
                 }
                 Invalidate();
             };
@@ -488,6 +494,7 @@ namespace SkinManager.App
             int by = _strip.Bottom + 8;
             _back.Location = new Point(0, by); _play.Location = new Point(50, by); _next.Location = new Point(100, by); _speed.Location = new Point(150, by);
             _hurt.Location = new Point(206, by + 6);
+            _pauseHits.Location = new Point(_hurt.Right + 14, by + 6);
             _gif.Location = new Point(w - _gif.Width, by);
         }
 

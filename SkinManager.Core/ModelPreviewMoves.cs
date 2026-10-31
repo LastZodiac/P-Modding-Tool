@@ -28,6 +28,11 @@ namespace SkinManager.Core
         }
 
         /// <summary>One picture per frame of a move. motionFile: the fighter's Fit&lt;Name&gt;MotionEtc.pac; costume: Fit&lt;Name&gt;00.pac.</summary>
+        /// <summary>For checking the whole cast (not used by the app): when set, RenderMove only works out what it would draw
+        /// and notes per frame how many of the move's own hitboxes there are, how many got a place, and how many of its
+        /// projectiles' hitboxes were drawn. No pictures are made.</summary>
+        public static List<(int Frame, int Own, int OwnDrawn, int Thrown)> AuditFrames;
+
         public static List<Bitmap> RenderMove(byte[] costume, byte[] motionFile, Moveset moves, MoveData move, int width = 360, int height = 300, bool hurtboxes = true, Action<int, int> progress = null, Func<bool> cancelled = null, MoveCamera camera = null)
         {
             var shots = new List<Shot>();
@@ -52,7 +57,11 @@ namespace SkinManager.Core
                     return Yaw(new Vector3(bp._x + g._x, bp._y + g._y, bp._z + g._z));
                 }
                 // a hitbox on a held thing (ZSS's whip): the thing's model, posed by its own animation, hanging off the fighter's bone
-                var artModels = mroot.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                // (a thing's model and animations can also be in the costume file: Olimar's Pikmin)
+                var artModels = mroot.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Concat(root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(m => m.Name.StartsWith("Wpn", StringComparison.OrdinalIgnoreCase)))
+                    .GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                foreach (var ca in root.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().Where(a => a.Name.StartsWith("Wpn", StringComparison.OrdinalIgnoreCase)))
+                    if (!anims.ContainsKey(ca.Name)) anims[ca.Name] = ca;
                 Vector3? ArticlePlace(Hitbox h)
                 {
                     if (!artModels.TryGetValue(h.ArticleModel, out var am)) return null;
@@ -60,13 +69,21 @@ namespace SkinManager.Core
                     am.ApplyCHR(aa, aa == null ? 0 : Math.Max(1, Math.Min(h.ArticleFrame, aa.FrameCount)));
                     var abs = am._linker?.BoneCache;
                     var ab = abs != null && h.Bone >= 0 && h.Bone < abs.Length ? abs[h.Bone] as MDL0BoneNode : null;
-                    var fb = BoneAt(h.AttachBone);
-                    if (ab == null || fb == null) return null;
+                    // AttachBone -2: its animation is made around the fighter's feet (Olimar's Pikmin jumping out of his hand)
+                    var fb = h.AttachBone == -2 ? null : BoneAt(h.AttachBone);
+                    if (ab == null || (fb == null && h.AttachBone != -2)) return null;
                     var bp = ab._frameMatrix.GetPoint(); var r = ab._frameMatrix.GetRotationMatrix(); var sc = Scale(ab);
                     var g = r.Multiply(new Vector3(h.X / NZ(sc._x), h.Y / NZ(sc._y), h.Z / NZ(sc._z)));
                     var local = new Vector3(bp._x + g._x, bp._y + g._y, bp._z + g._z);
+                    if (fb == null)
+                    {
+                        local = new Vector3(local._x, local._y + h.ArticleY, local._z + h.ArticleX);
+                        if (h.ArticleMirror) local._z = -local._z;
+                        return Yaw(local);
+                    }
                     // its animation is made around the fighter: its own "HaveN" follows the hand. Line that up with the fighter's
                     // hand (RHaveN/LHaveN) so the thing sits in the hand it's held in.
+                    if (h.ArticleNoTurn) { var at = fb._frameMatrix.GetPoint(); return Yaw(new Vector3(at._x + local._x, at._y + local._y, at._z + local._z)); }
                     string handName = fb.Name.Length > 1 && (fb.Name[0] == 'R' || fb.Name[0] == 'L') ? fb.Name.Substring(1) : fb.Name;
                     var hand = abs.OfType<MDL0BoneNode>().FirstOrDefault(x => string.Equals(x.Name, handName, StringComparison.OrdinalIgnoreCase));
                     if (hand != null) local = fb._frameMatrix * (hand._frameMatrix.Invert() * local);
@@ -97,7 +114,7 @@ namespace SkinManager.Core
                     // the camera stays put and the fighter moves across it (a dash or a lunge shows how far it goes), with
                     // a mark on the ground every 5 units
                     float shift = 0;
-                    var shot = new Shot { After = f.After, Shift = shift, Tris = Gather(root, new[] { model }, 90, texCache, new HashSet<string>(f.Hidden.Where(i => i >= 0 && i < bones.Length).Select(i => bones[i].Name))), Body = f.Body };
+                    var shot = new Shot { After = f.After, Shift = shift, Tris = AuditFrames != null ? new List<(Vector3 a, Vector3 b, Vector3 c, Vector2 ta, Vector2 tb, Vector2 tc, Tex tex, bool xlu)>() : Gather(root, new[] { model }, 90, texCache, new HashSet<string>(f.Hidden.Where(i => i >= 0 && i < bones.Length).Select(i => bones[i].Name))), Body = f.Body };
                     foreach (var h in f.Hitboxes)
                     {
                         if (h.ArticleModel != null)
@@ -134,6 +151,7 @@ namespace SkinManager.Core
                                 origins[p] = fo = Start();
                                 // a bouncing one: its path depends on how high above the floor it starts
                                 if (fl.PathForHeight != null) { var np = fl.PathForHeight(Math.Max(0, fo._y)); for (int q = 0; q < fl.Path.Count; q++) fl.Path[q] = q < np.Count ? np[q] : np[np.Count - 1]; }
+                                if (fl.HitsForHeight != null) { var nh = fl.HitsForHeight(Math.Max(0, fo._y)); for (int q = 0; q < fl.Hits.Count; q++) fl.Hits[q] = q < nh.Count ? nh[q] : new List<Hitbox>(); }
                             }
                             fo = origins[p];
                             var at = new Vector3(fo._x + fl.Path[j - 1].X, fo._y + fl.Path[j - 1].Y, fo._z);
@@ -170,9 +188,11 @@ namespace SkinManager.Core
                     for (int k = 0; k < shot.Hits.Count; k++) { var h = shot.Hits[k]; if (k < ownCount) { h.p._x += fx; h.p._y += fy; } h.p._x -= shift; shot.Hits[k] = h; }
                     for (int k = 0; k < shot.Hurt.Count; k++) { var h = shot.Hurt[k]; h.a._x += fx - shift; h.b._x += fx - shift; h.a._y += fy; h.b._y += fy; shot.Hurt[k] = h; }
                     foreach (var tr in shot.Trails) for (int k = 0; k < tr.Count; k++) { var v = tr[k]; v._x -= shift; tr[k] = v; }
-                    shots.Add(shot);
+                    AuditFrames?.Add((f.Frame, f.Hitboxes.Count(h => !h.Grab), shot.HitOf.Take(ownCount).Count(h => !h.Grab), shot.Hits.Count - ownCount));
+                    if (AuditFrames == null) shots.Add(shot);
                 }
             }
+            if (AuditFrames != null) return new List<Bitmap>();
             // one view for the whole move, so the pictures don't jump
             float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
             void Grow(float x, float y, float r) { minX = Math.Min(minX, x - r); maxX = Math.Max(maxX, x + r); minY = Math.Min(minY, y - r); maxY = Math.Max(maxY, y + r); }

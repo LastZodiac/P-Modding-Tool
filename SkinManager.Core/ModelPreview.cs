@@ -244,7 +244,16 @@ namespace SkinManager.Core
         /// <summary>A stage seen from the front: its scenery, with its floors drawn on top (gold: where you stand,
         /// grey: walls and undersides). Framed on the floors.</summary>
         public static int Cull = 1;
-        public static Bitmap RenderStage(byte[] stage, int width = 480, int height = 270)
+        /// <summary>The names of a stage file's animations and how long each is (frames).</summary>
+        public static List<(string Name, int Frames)> StageAnimations(byte[] stage)
+        {
+            lock (BrawlGate.Lock)
+            using (var tmp = new TempFile(".pac", stage))
+            using (var root = NodeFactory.FromFile(null, tmp.Path))
+                return root.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().Select(c => (c.Name, c.FrameCount)).ToList();
+        }
+
+        public static Bitmap RenderStage(byte[] stage, int width = 480, int height = 270, string animation = null, int frame = 0)
         {
             lock (BrawlGate.Lock)
             using (var tmp = new TempFile(".pac", stage))
@@ -252,7 +261,8 @@ namespace SkinManager.Core
             {
                 Installer.Quiet();
                 var models = root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(m => (m.FindChild("Objects", false)?.Children.Count ?? 0) > 0).ToList();
-                foreach (var m in models) { try { m.ApplyCHR(null, 0); } catch { } }
+                var anim = animation == null ? null : root.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().FirstOrDefault(a => a.Name == animation);
+                foreach (var m in models) { try { m.ApplyCHR(anim, anim == null ? 0 : frame); } catch { } }
                 var tris = Gather(root, models, 0);
                 var floors = StageCheck.Surfaces(root);
                 if (floors.Count == 0) floors = StageCheck.Surfaces(root, moving: true);   // a stage you stand on moving parts of: where they start
@@ -264,6 +274,116 @@ namespace SkinManager.Core
                 float h = w * height / width;
                 var lines = floors.Select(f => (f.x1, f.y1, f.x2, f.y2, f.floor ? Color.FromArgb(230, 255, 190, 40) : Color.FromArgb(200, 210, 210, 210))).ToList();
                 return Draw(tris, width, height, cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2, 1f, 1f, lines, Cull, (fx1 - fx0) * 1.5f);
+            }
+        }
+
+        /// <summary>Does what you see line up with where you stand? A stage's floors (its collision) and its scenery (its
+        /// models) are separate: a map can have scenery that sits above P+'s floors (you'd walk inside the map's road) or
+        /// none under them (you'd stand on air). Measured along every floor you stand on, at the depth fighters are at.</summary>
+        public sealed class Standing
+        {
+            public float Length;      // how much floor was measured
+            public float Buried;      // how much of it has the map's scenery where your body is
+            public float OnAir;       // how much has no scenery under your feet
+            public float Deepest;     // the most scenery above your feet (units)
+            public List<(float x1, float y1, float x2, float y2, int kind)> Spans = new List<(float, float, float, float, int)>();   // 0 fine, 1 inside scenery, 2 on air
+            public bool Measured => Length > 0;
+            /// <summary>Too far off to use: you'd visibly walk through the scenery, or float over nothing.</summary>
+            public bool Bad => Measured && (Buried > Length * BuriedLimit || OnAir > Length * AirLimit);
+            public const float BuriedLimit = 0.08f, AirLimit = 0.35f;
+        }
+
+        const float Res = 0.5f;          // units per cell of the camera's view
+        const float Body = 7f;           // how much of a fighter above the floor is checked
+        const float InFront = 3f;        // scenery this far in front of the fighters hides them
+        const float Behind = 20f;        // under the feet, scenery this close behind them reads as ground
+
+        /// <summary>Looks at the stage the way the camera does (from the front): along every floor you stand on, is the
+        /// fighter hidden by scenery in front of them (walking inside the map), and is there ground to see under their feet?</summary>
+        static Standing Measure(List<(Vector3 a, Vector3 b, Vector3 c, Vector2 ta, Vector2 tb, Vector2 tc, Tex tex, bool xlu)> tris, List<(float x1, float y1, float x2, float y2, bool floor)> surfaces)
+        {
+            var r = new Standing();
+            var stand = surfaces.Where(s => s.floor && Math.Abs(s.x2 - s.x1) > 0.01f).ToList();
+            if (stand.Count == 0 || tris.Count == 0) return r;
+            float fx0 = stand.Min(f => Math.Min(f.x1, f.x2)) - 4, fx1 = stand.Max(f => Math.Max(f.x1, f.x2)) + 4;
+            float fy0 = stand.Min(f => Math.Min(f.y1, f.y2)) - 8, fy1 = stand.Max(f => Math.Max(f.y1, f.y2)) + Body + 4;
+            int W = (int)Math.Ceiling((fx1 - fx0) / Res) + 1, H = (int)Math.Ceiling((fy1 - fy0) / Res) + 1;
+            if ((long)W * H > 6000000) return r;
+            float nearZ = (fx1 - fx0) * 1.5f;   // the near side of a sky dome is behind the camera: left out, as in the preview
+            var depth = new float[W * H];
+            for (int i = 0; i < depth.Length; i++) depth[i] = float.MinValue;
+            foreach (var t in tris)
+            {
+                if (t.xlu) continue;   // water, glass: you see through it
+                if (t.a._z > nearZ || t.b._z > nearZ || t.c._z > nearZ) continue;
+                float ax = (t.a._x - fx0) / Res, ay = (fy1 - t.a._y) / Res, bx = (t.b._x - fx0) / Res, by = (fy1 - t.b._y) / Res, cx = (t.c._x - fx0) / Res, cy = (fy1 - t.c._y) / Res;
+                float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+                if (Math.Abs(area) < 1e-6f || Math.Sign(area) == Cull) continue;   // its back faces the camera
+                int x0 = Math.Max(0, (int)Math.Floor(Math.Min(ax, Math.Min(bx, cx)))), x1 = Math.Min(W - 1, (int)Math.Ceiling(Math.Max(ax, Math.Max(bx, cx))));
+                int y0 = Math.Max(0, (int)Math.Floor(Math.Min(ay, Math.Min(by, cy)))), y1 = Math.Min(H - 1, (int)Math.Ceiling(Math.Max(ay, Math.Max(by, cy))));
+                for (int py = y0; py <= y1; py++)
+                    for (int px = x0; px <= x1; px++)
+                    {
+                        float fx = px + 0.5f, fy = py + 0.5f;
+                        float w0 = ((bx - fx) * (cy - fy) - (by - fy) * (cx - fx)) / area;
+                        float w1 = ((cx - fx) * (ay - fy) - (cy - fy) * (ax - fx)) / area;
+                        float w2 = 1 - w0 - w1;
+                        if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+                        float z = w0 * t.a._z + w1 * t.b._z + w2 * t.c._z;
+                        int k = py * W + px;
+                        if (z > depth[k]) depth[k] = z;
+                    }
+            }
+            float At(float x, float y)
+            {
+                int px = (int)((x - fx0) / Res), py = (int)((fy1 - y) / Res);
+                return px < 0 || py < 0 || px >= W || py >= H ? float.MinValue : depth[py * W + px];
+            }
+            foreach (var s in stand)
+            {
+                float len = Math.Abs(s.x2 - s.x1);
+                int n = Math.Max(2, (int)(len / Res));
+                int runKind = -1; float runX = 0, runY = 0, prevX = 0, prevY = 0;
+                for (int i = 0; i <= n; i++)
+                {
+                    float x = s.x1 + (s.x2 - s.x1) * i / n, y = s.y1 + (s.y2 - s.y1) * i / n;
+                    // the body: how much of it the camera can't see
+                    int hidden = 0, cells = 0; float top = 0;
+                    for (float h = 1.5f; h <= Body; h += Res) { cells++; if (At(x, y + h) > InFront) { hidden++; top = h; } }
+                    // the feet: something to see just under them, near the fighters (not the far background)
+                    bool ground = false;
+                    for (float h = 0.25f; h <= 3f && !ground; h += Res) ground = At(x, y - h) >= -Behind;
+                    int kind = hidden * 2 > cells ? 1 : ground ? 0 : 2;
+                    float step = i == 0 ? 0 : len / n;
+                    r.Length += step;
+                    if (kind == 1) { r.Buried += step; r.Deepest = Math.Max(r.Deepest, top); }
+                    if (kind == 2) r.OnAir += step;
+                    if (kind != runKind)
+                    {
+                        if (runKind >= 0) r.Spans.Add((runX, runY, x, y, runKind));
+                        runKind = kind; runX = x; runY = y;
+                    }
+                    prevX = x; prevY = y;
+                }
+                if (runKind >= 0) r.Spans.Add((runX, runY, prevX, prevY, runKind));
+            }
+            return r;
+        }
+
+        /// <summary>Measures a stage file: does its scenery line up with where you stand?</summary>
+        public static Standing CheckStanding(byte[] stage)
+        {
+            lock (BrawlGate.Lock)
+            using (var tmp = new TempFile(".pac", stage))
+            using (var root = NodeFactory.FromFile(null, tmp.Path))
+            {
+                Installer.Quiet();
+                var models = root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(m => (m.FindChild("Objects", false)?.Children.Count ?? 0) > 0).ToList();
+                var floors = StageCheck.Surfaces(root);
+                foreach (var m in models) { try { m.ApplyCHR(null, 0); } catch { } }
+                var worst = Measure(Gather(root, models, 0), floors);
+                foreach (var m in models) { try { m.ApplyCHR(null, 0); } catch { } }
+                return worst;
             }
         }
 

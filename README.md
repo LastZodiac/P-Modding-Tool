@@ -20,6 +20,9 @@ No typing commands, no manual file juggling: everything is a button.</p>
 - **Your own Dolphin too (even without Brawl Online):** make or test mods in your own P+ Dolphin? In Settings, pick its folder and the app puts mods on that Dolphin's SD card instead (with its own mods list; it can bring your mods over, turned off). One click goes back to Brawl Online's card.
 - Costumes are **checked to fit in the game's memory**: one that would crash the match (usually a port with huge pictures) gets lighter pictures automatically (the model is never touched), and the original is kept.
 - Every stage is **checked so you stay in sync online**. Anything that could break online play is refused before it touches your SD card.
+- **Stages go on the normal version first**: the one you get by just picking the stage's icon. For stages the game picks between by itself (Smashville's five times of day), the stage goes on all of them, so it always shows.
+- **Choose stage versions:** pick which version of a stage you get by just picking it. Versions that play the same are swapped for real; any other version's scenery goes on the normal stage, so it stays safe online.
+- **Find stages by stage** in the Mod Store and My Mods (Battlefield, Final Destination, Smashville...).
 
 ![Mod Store](docs/mod-store.png)
 ![Costume slots](docs/costume-slots.png)
@@ -53,7 +56,7 @@ Put a 3D model from another game or a 3D program (.glb, .gltf, .obj, .dae) on a 
 ### 🎯 Frame Data
 Like a frame data site, for the **whole P+ cast**, read straight from P+'s own files:
 - Every move played **frame by frame** with its **hitboxes and hurtboxes**: startup, active frames, first actionable frame, landing lag (and L-cancelled), damage, angle, knockback, shield damage.
-- **Projectiles** and spawned hitboxes (lasers, arrows, boomerangs, missiles, PK moves, charge shots at no charge and full charge...), throws, dodges and ledge options. Every special has a row, with a note when its hitbox isn't in the fighter's files (Link's bombs are items).
+- **Projectiles** and spawned hitboxes (lasers, arrows, boomerangs, missiles, PK moves, charge shots at no charge and full charge, Olimar's Pikmin, R.O.B.'s gyro...), throws, dodges and ledge options. Every special has a row, with a note when its hitbox isn't in the fighter's files (Link's bombs are items).
 - **Launch & combos**: where a hit sends your opponent at any percent and DI, hitstun, frame advantage on hit and on shield, and a chart of the **true combos** each move leads into at every percent.
 - **How to DI**: drag your fighter onto the move as it plays. It picks out the hitbox that would hit you there, shows where it sends you, and draws the stick: which way to hold to **survive**, which way to **get out of combos**, and how to **SDI**. With the percent each DI kills you at.
 - Moves are worked out the way the game runs them: their conditions, variables and each fighter's own settings, the scripts of the fighter's actions (where P+ puts many hitboxes and timers), and projectiles flying their whole path.

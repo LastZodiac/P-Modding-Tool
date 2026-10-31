@@ -1471,19 +1471,24 @@ namespace SkinManager.App
 
         public void Delete(InstalledStage s)
         {
-            string text = $"Delete \"{s.Name}\" from My Mods?\r\n\r\n" + (s.Enabled ? $"It's on right now, so P+'s own {s.Target.Label} goes back. " : "It's off, so nothing on your SD card changes. ") +
-                          AgainLine(SourceOf(s));
-            if (MessageBox.Show(this, text, "Delete stage", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            _pending.Remove(s.Id);
-            if (!s.Enabled)
+            // a stage on all of a normal version's files (Smashville's five times of day) is one mod: they go together
+            var all = s.Group == null ? new List<InstalledStage> { s } : _lib.Stages.Where(x => x.Group == s.Group).ToList();
+            string what = s.IsSwap ? $"the normal {s.TargetLabel}" : all.Count > 1 ? $"P+'s normal {s.Target.StageName}" : $"P+'s own {s.Target.Label}";
+            bool on = all.Any(x => x.Enabled);
+            string text = $"Delete \"{s.Name}\" from My Mods?\r\n\r\n" + (on ? $"It's on right now, so {what} goes back. " : "It's off, so nothing on your SD card changes. ") +
+                          (s.IsSwap ? "" : AgainLine(SourceOf(s)));
+            if (MessageBox.Show(this, text, s.IsSwap ? "Delete stage swap" : "Delete stage", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            foreach (var x in all) _pending.Remove(x.Id);
+            if (!on)
             {
-                _lib.Stages.Remove(s);
-                if (!SaveList()) { _lib.Stages.Add(s); return; }
-                try { Directory.Delete(_lib.StageFolder(s.Id), true); } catch { }
+                foreach (var x in all) _lib.Stages.Remove(x);
+                if (!SaveList()) { _lib.Stages.AddRange(all); return; }
+                foreach (var x in all) try { Directory.Delete(_lib.StageFolder(x.Id), true); } catch { }
                 PendingChanged();
                 return;
             }
-            Run(new Installer.Change { StageRemove = { s } }, $"Deleted. {s.Target.Label} is P+'s again.");
+            var change = new Installer.Change(); change.StageRemove.AddRange(all);
+            Run(change, $"Deleted. {char.ToUpperInvariant(what[0]) + what.Substring(1)} is P+'s again.");
         }
 
         public string SourceOf(InstalledStage s) => SourceOf(new InstalledSkin { SourcePath = s.SourcePath, GameBananaModId = s.GameBananaModId, GameBananaFileId = s.GameBananaFileId });
@@ -1743,6 +1748,14 @@ namespace SkinManager.App
         }
 
         /// <summary>Your own MP3/WAV songs: made into game songs, then placed like any music.</summary>
+        /// <summary>"Choose stage versions": which version of a stage you get by just picking it.</summary>
+        public void StageVersions()
+        {
+            if (_busy || _installer == null || _lib == null) return;
+            using (var f = new StageVersionsForm(_installer, _lib))
+                if (f.ShowDialog(this) == DialogResult.OK && f.Change != null && !f.Change.IsEmpty) Run(f.Change, f.Done);
+        }
+
         public void AddOwnMusic(List<string> files = null)
         {
             if (_busy) return;
@@ -1815,7 +1828,9 @@ namespace SkinManager.App
                         if (songs.ShowDialog(this) == DialogResult.OK) songPlans = songs.Plans;
                 if (stagePlans.Count == 0 && songPlans.Count == 0) return;
                 var change = new Installer.Change(); change.StageInstall.AddRange(stagePlans); change.StageInstall.AddRange(songPlans);
-                Run(change, "Installed! " + string.Join("\r\n", stagePlans.Select(p => $"{p.Target.Label} now looks like \"{p.Name}\".")) +
+                Run(change, "Installed! " + string.Join("\r\n", stagePlans.GroupBy(p => p.Group ?? p.Target.CardPath).Select(g => g.Count() > 1
+                        ? $"P+'s normal {g.First().Target.StageName} (all {g.Count()} of its versions) now looks like \"{g.First().Name}\"."
+                        : $"{g.First().Target.Label} now looks like \"{g.First().Name}\".")) +
                     (songPlans.Count > 0 ? (stagePlans.Count > 0 ? "\r\n" : "") + string.Join("\r\n", songPlans.Take(10).Select(p => p.Kind == "song-new" ? $"\"{p.Name}\" was added to the songs that can play on {p.Target.StageName.Replace("New song on ", "")}." : $"\"{p.Target.StageName}\" now plays \"{p.Name}\".")) + (songPlans.Count > 10 ? $"\r\n...and {songPlans.Count - 10} more." : "") : "") +
                     (stagePlans.Count > 0 ? "\r\n\r\nIt plays exactly like P+'s stage (the app checked), so it's safe online. In rooms you host, the people who join will see it too." : ""));
                 return;
@@ -1974,6 +1989,7 @@ namespace SkinManager.App
                 MessageBox.Show(this, doneMessage + "\r\n\r\n" + undoLine + (notes.Count > 0 ? "\r\n\r\nP+ has changed since some of your mods were made:\r\n• " + string.Join("\r\n• ", notes) : ""),
                     "Done", MessageBoxButtons.OK, notes.Any(n => n.Contains("turned off") || n.Contains("stayed off")) ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             }
+            _stageSelect = null;   // a stage swap changes where versions are on the stage select
             CheckOverwritten();
             _store.RefreshInstalled();
             UpdateProfileButton();

@@ -32,14 +32,14 @@ namespace SkinManager.Core
                     if (p.Flight != null)
                     {
                         string about = p.Flight.About ?? "";
-                        if (about.Contains("drawn") || about.Contains("shown") || about.Contains("no stick") || about.Contains("steered"))
+                        if (about.Contains("drawn") || about.Contains("shown") || about.Contains("no stick") || about.Contains("steered") || about.Contains("isn't in the game's files"))
                             approx.Add($"{name}: flies by the game's rules with speeds from your files ({about})");
                     }
                     else if (p.Unknown) notDrawn.Add($"when {name} comes out is decided by the game's code, so its hits aren't on the timeline");
                     else approx.Add($"{name} is drawn where it comes out; where it goes after that is decided by the game's code");
                 }
                 if (FighterMotion.Moves(b, e)) approx.Add("how far the fighter travels is drawn with no stick held");
-                if (e.Note != null && !e.Note.StartsWith("The fighter")) approx.Add(e.Note.TrimEnd('.'));
+                if (e.Note != null && !e.NoteIsInfo && !e.Note.StartsWith("The fighter")) approx.Add(e.Note.TrimEnd('.'));
                 bool drawsNothing = !d.Hits.Any() && !d.Projectiles.Any(p => p.Flight != null || !p.Unknown) && d.Intangible.Count == 0;
                 var level = notDrawn.Count > 0 || drawsNothing && e.Note != null ? Sureness.NotDrawn : approx.Count > 0 ? Sureness.Approximate : Sureness.Exact;
                 string why = level == Sureness.Exact

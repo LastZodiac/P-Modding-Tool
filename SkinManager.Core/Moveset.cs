@@ -61,6 +61,17 @@ namespace SkinManager.Core
         /// <summary>A number anywhere in the data (an offset a parameter points to: a table of speeds...).</summary>
         public float RawF(int at) => F(at);
         public int RawI(int at) => I(at);
+
+        /// <summary>Olimar's Pikmin: each colour has its own scripts (the article's data +0x38: one list per colour, red,
+        /// yellow, blue, white, purple, of a script per subaction). Null when there's none.</summary>
+        public List<MoveEvent> ArticleColourScript(Article a, int colour, int subaction)
+        {
+            if (a == null || colour < 0 || colour > 4 || subaction < 0) return null;
+            int table = I(a.Offset + 0x38 + colour * 4);
+            if (table <= 16 || table + subaction * 4 + 4 > _d.Length) return null;
+            int at = I(table + subaction * 4);
+            return at <= 16 || at >= _d.Length ? null : Script(at, 0);
+        }
         public List<(float X, float Y, float Z, float SX, float SY, float SZ, float Radius, int Bone, int Zone)> HurtBoxes = new List<(float, float, float, float, float, float, float, int, int)>();
 
         /// <summary>Model visibility: [reference][switch][group] = bone indices; and each switch's group shown by default.</summary>
@@ -219,6 +230,32 @@ namespace SkinManager.Core
                 }
                 Articles.Add(a);
             }
+        }
+
+        Moveset(byte[] data, bool raw) { _d = data; }
+
+        /// <summary>An item's own scripts (an entry of /item/ItmCommonParam.pac, like R.O.B.'s gyro): its "animParam" block
+        /// holds the subaction flags/names (+0), their count (+4) and the main scripts (+28). Null if it isn't laid out so.</summary>
+        public static Moveset ItemParam(byte[] file)
+        {
+            if (file == null || file.Length < 0x40) return null;
+            int lookup = BE(file, 4), lookupCount = BE(file, 8), tableCount = BE(file, 12), extCount = BE(file, 16);
+            var d = new byte[file.Length - 0x20]; Buffer.BlockCopy(file, 0x20, d, 0, d.Length);
+            var m = new Moveset(d, true);
+            int table = lookup + lookupCount * 4, strings = table + (tableCount + extCount) * 8;
+            for (int i = 0; i < tableCount && i < 16; i++) { var name = m.Str(strings + m.I(table + i * 8 + 4)); if (name != null) m.Sections[name] = m.I(table + i * 8); }
+            if (!m.Sections.TryGetValue("animParam", out int ap)) return null;
+            int flags = m.I(ap), count = m.I(ap + 4), main = m.I(ap + 28);
+            if (count <= 0 || count > 200 || flags <= 0 || main <= 0 || flags + count * 8 > d.Length || main + count * 4 > d.Length) return null;
+            for (int i = 0; i < count; i++)
+            {
+                var s = new Subaction { Index = i, Flags = d[flags + i * 8 + 1], ScriptOffset = m.I(main + i * 4) };
+                int nameAt = m.I(flags + i * 8 + 4);
+                s.Animation = nameAt > 0 && nameAt < d.Length ? m.Str(nameAt) : null;
+                if (s.ScriptOffset > 0 && s.ScriptOffset < d.Length) s.Main = m.Script(s.ScriptOffset, 0);
+                m.Subactions.Add(s);
+            }
+            return m;
         }
 
         static int BE(byte[] b, int at) => b[at] << 24 | b[at + 1] << 16 | b[at + 2] << 8 | b[at + 3];

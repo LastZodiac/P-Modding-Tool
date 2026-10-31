@@ -331,3 +331,56 @@ Set `SKINMANAGER_GB_BASE` / `SKINMANAGER_GB_IMAGES` to point the app at a local 
   hands it to the usual SongForm (add to a stage's songs, or replace a P+ song). Entry: My Mods > Music
   "+ Add your own music", Add from file (MP3/WAV, several at once), or dropping MP3/WAV files on the window.
 - OGG isn't supported: NVorbis' current versions need System.Memory (Span) and the old ones are Ms-PL (not GPL-compatible).
+
+## Stage versions (2026-10-30)
+- A stage's normal version = what its icon gives with no button (stageslot/<slot>.asl entry with button 0). Some load
+  several files the game picks between (Smashville: 00_MORNING..04_MIDNIGHT by the clock; Spear Pillar, Shadow Moses:
+  3 each). StageForm offers "P+'s normal <stage> (all N versions)" as one choice (StagePlan.Group / InstalledStage.Group:
+  one card in My Mods, switched and deleted together) and ranks the normal version above button versions.
+- StageSelect.Read(card, original): reads P+'s own .asl when ours is swapped (Installer.OriginalSelect), so "normal" means
+  P+'s normal. StageSpot has Asl, Entry, Param, File.
+- Stage swaps (StageSwaps.cs, Kind "swap", CardPath = the .asl): the name offsets of two entries are exchanged, so the
+  button gives the normal version and no button gives the other. Only when every file of both versions passes
+  StageCheck.Compare (with program parts) and both use the same stage program (Installer.PlayAlike). On P+'s card only
+  Smashville's time-of-day list entries pass (Sakura, Beach... change parts st_smashville drives). Other versions: their
+  scenery on each file of the normal version (PlanLooks with P+'s own file of that version as the map). Both kinds have
+  PackageKey "version|<slot>|<param>#<entry>"; choosing again removes the old one. Redone on P+ updates (SwapForNow).
+- Looks-only installs are never ticked by default and say "try it offline first": MK Adventure GHZ (looks on GHZ) showed
+  the map's ground one grass block above the floor in game while every file-level check (collision, models at frame 0,
+  all CHR0 animations) lines up; the stage program places it, which the files don't show. ModelPreview.CheckStanding
+  (camera-view check of scenery vs floors) exists but isn't used: it flags several of P+'s own stages.
+- Mod Store / My Mods "which stage" filter: GameBanana has one flat "1:1 Stages" category, so stage mods are matched by
+  title (Stages.NamedInTitle: names, short names like SV/GHZ/DS, "...ville" = Smashville, "Siege" = Castle Siege).
+- Pictures named like portraits but far from portrait shape (> 30% off: a sheet of several) aren't used as portraits.
+
+## Pikachu's jolt and thunder (2026-10-31)
+- Neutral B is listed as a ground move (SpecialN only), so the old air-only jolt rule never ran. Now one rule: flies at
+  slot 5 +4/+8 until the floor (Flight.PathForHeight/HitsForHeight, from where it really starts), then the crawling
+  jolt (slot 6, its own Regular hitboxes, slot 6 +0 = 100 frames). Crawl speed isn't in any code or data the app reads
+  (sora_melee jolt2 class sets no speed; its animation doesn't move): drawn at the flying speed, marked approximate.
+- Down B: flag 0x22000010 (frame 14) makes the cloud 150 up (fighter block 3 +0); its status (ft_pikachu 0x17B44) sends
+  bolt pieces (slot 7, fn_98_13B80) down at slot 7 +4 = 5 a frame: reaches Pikachu after 30 frames.
+- Not drawn on purpose: Charizard's rock smash stones (random angles), Ike's thrown sword (end point from a work value
+  set elsewhere).
+
+## Whole-cast pass (2026-10-31)
+- ModelPreview.AuditFrames: RenderMove reports per frame the move's hitboxes, how many got placed and how many projectile
+  hitboxes were drawn (no pictures). Every move: none lose hitboxes in drawing; gaps were all in the data.
+- FrameData.Run: hitboxes made on a piece's last tick (never on one of its frames) carry into the next piece (Sheik's
+  chain, Charizard's air neutral B start). Ones already shown still end with their piece.
+- Held things without their own animation (Ness's yo-yo, article bone 66 = ThrowN, which the smash animations sweep
+  along the yo-yo's path): hitboxes on that fighter bone (Hitbox.OnArticle), from the frame their part starts.
+- Sheik's chain: special hitboxes 0-3 (no bone) put on WpnSheikIronWire links 3/5/7/9 (bind pose: straight, 4 units
+  apart to 28.5) hanging off LHaveN; noted as approximate (the game swings it).
+- Left with notes: Peach's toad spores (made by code on counter). Sheik's down B 2 sets and removes its hitboxes at once.
+- Olimar's Pikmin attacks: per-colour scripts at article header +0x38 + colour*4 (group 0 main), by Pikmin subaction
+  (AttackS4SJump, AttackHi4, AttackLw4, AttackAirF/B/Hi/Lw = Pikmin motions 0x1E-0x21, ft_pikmin attack_air execFixPos).
+  Power var 0x10000008 set to 0; the note lists each colour's range. Smashes: around his feet + settings 0xFA4/5 (fsmash)
+  and 0xFA6/7 (usmash); down smash one each way. Aerials: at node 0x29 (RHaveN) position only (updateHoldPikmin passes a
+  Vec2f), facing his way (ArticleNoTurn). Hits follow his hand's swing (fair front-low sweeping under, bair behind then up).
+- R.O.B.'s gyro: an item (itKind 0x57) made at flag 0x22000011, node 0xA2 + settings 0xFD2/0xFD3, thrown at 0xFD0 +
+  charge*0xFD1 (charge up to 0xFCF = 90). Its scripts: /item/ItmCommonParam.pac ItmRobotGyroParam, "animParam" (+0 flags,
+  +4 count, +28 main): Throw = 4% 45° BKB 55, WaitGround = 5% 60° (rehit 40), FuraFura = 2%. Motion from ItmParam.pac
+  "R.O.B.'s Gyro" (gravity 0.051, fall 1.8, floor friction 0.03). Drawn uncharged and full charge; the item code's
+  speed-to-damage scaling isn't in the files (noted).
+- Whole-cast signature dump before/after (start, active, FAF, hits, projectiles): only those 5 rows changed.

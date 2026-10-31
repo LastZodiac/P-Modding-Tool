@@ -18,6 +18,9 @@ namespace SkinManager.Core
         // a hitbox on a thing the fighter holds (ZSS's whip...): its Bone is that thing's bone; it hangs off the fighter's AttachBone,
         // posed by the thing's own animation (ArticleAnim, frame ArticleFrame) on its model (ArticleModel, in the motion file)
         public string ArticleModel, ArticleAnim; public int AttachBone = -1; public float ArticleFrame;
+        public bool OnArticle;   // a held thing's hitbox put on the fighter's bone it hangs off (Ness's yo-yo): Bone is the fighter's
+        public float ArticleX, ArticleY; public bool ArticleMirror;
+        public bool ArticleNoTurn;   // it goes where the fighter's bone is, but keeps facing the way the fighter faces (Olimar's Pikmin in his hand)   // AttachBone -2: where the thing stands from the fighter's feet (forward, up), and turned the other way
         public Hitbox Copy() => (Hitbox)MemberwiseClone();
         public string DamageText => float.IsNaN(Damage) ? "?" : Damage.ToString("0.#") + "%";
         public string Summary => Grab ? $"grab {Size:0.#}" : $"{DamageText} {Angle}° BKB {Bkb} KBG {Kbg}" + (Wkb > 0 ? $" WKB {Wkb}" : "");
@@ -46,6 +49,7 @@ namespace SkinManager.Core
         public bool FollowFighter;                          // stays on the fighter as it moves (Fox's side B afterimage)
         public bool StopAtGround;                           // the flight ends when it comes down to the floor
         public Func<float, List<(float X, float Y)>> PathForHeight;   // a flight that bounces on the floor: its path given how high above the floor it starts
+        public Func<float, List<List<Hitbox>>> HitsForHeight;        // ...and its hitboxes, when they change on reaching the floor (Pikachu's jolt starts crawling)
         public int Life => Path.Count;
         public int End => Start + Life - 1;
     }
@@ -249,6 +253,7 @@ namespace SkinManager.Core
                 int animLen = s.Animation == null ? 0 : length(s.Animation);
                 float t = 0, rate = 1;
                 lastPart = part == parts.Count - 1;
+                var shown = new HashSet<int>();   // hitboxes that were out on one of this piece's frames
 
                 // the fighter's action for this piece: a new one runs its own script first (once), and what it put out stays
                 // for every piece it plays; the old one's every-frame loops stop
@@ -278,6 +283,7 @@ namespace SkinManager.Core
                     // a looping animation (subaction flag 0x02: rapid jabs, grab holds...) starts over at its end
                     if ((s.Flags & 0x02) != 0 && animLen > 1 && at > animLen) at = (at - 1) % animLen + 1;
                     md.Frames.Add(new FrameState { Frame = frame, AnimFrame = at, Animation = s.Animation, Body = body, Hidden = hidden.ToArray(), Hitboxes = active.Values.Select(h => h.Copy()).ToList() });
+                    foreach (var id in active.Keys) shown.Add(id);
                 }
 
                 var ev = s.Main;
@@ -321,7 +327,11 @@ namespace SkinManager.Core
                 // a start part hands over on its last frame (Fox's smashes: start 4 frames + swing hit 8 = frame 12, as in Melee)
                 if (animLen > 0) Advance(lastPart ? animLen : Math.Max(t, animLen - 1));
                 else if (active.Count > 0) Advance(t + 1);   // no animation (a projectile): show its hitboxes out at least once
+                // hitboxes made on a piece's very last tick (Sheik's chain, made as its start ends) come out as the next piece
+                // starts: they carry over. Ones that were out already end with their piece, as before.
+                var carry = lastPart ? null : active.Where(kv => !shown.Contains(kv.Key)).ToList();
                 active.Clear();
+                if (carry != null) foreach (var kv in carry) active[kv.Key] = kv.Value;
                 if (body != 0) body = 0;
             }
             md.Lingers = md.Frames.Count > 0 && md.Frames[md.Frames.Count - 1].Hitboxes.Count > 0;
