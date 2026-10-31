@@ -550,31 +550,48 @@ namespace SkinManager.Core
                 throw;
             }
 
-            // The card is in place: keep copies of the new skins (to put them back after a P+ update).
-            foreach (var kv in newSkinFolders) SaveSkinCopy(kv.Key, kv.Value);
-            foreach (var removed in _lib.Skins.Where(s => !skins.Any(k => k.Id == s.Id)))
-                try { Directory.Delete(_lib.SkinFolder(removed.Id), true); } catch { }
-            _lib.Skins.Clear(); _lib.Skins.AddRange(skins);
+            // The new card is in place: from here on the card HAS changed. Nothing below may fail as if it hadn't: copies of
+            // the new mods are kept if they can be (a note says so if not), the list of mods is written (if that fails the
+            // message says the card was saved), and only then are the old mods' folders removed.
+            foreach (var kv in newSkinFolders)
+                try { SaveSkinCopy(kv.Key, kv.Value); }
+                catch (Exception e) { Notes.Add($"{kv.Value.Name} is on your SD card, but the app couldn't keep its own copy of it ({Friendly.Explain(e)}). If a P+ update ever removes it, add it again."); }
             foreach (var kv in newStageCopies)
-            {
-                Directory.CreateDirectory(_lib.StageFolder(kv.Key));
-                File.WriteAllBytes(Path.Combine(_lib.StageFolder(kv.Key), kv.Value.Target.FileName), kv.Value.Bytes);
-                foreach (var pic in kv.Value.SelectPictures) File.WriteAllBytes(Path.Combine(_lib.StageFolder(kv.Key), "select-" + pic.Key + ".png"), pic.Value);
-                if (kv.Value.LooksMap != null) File.WriteAllBytes(Path.Combine(_lib.StageFolder(kv.Key), "looks-map.pac"), kv.Value.LooksMap);
-            }
+                try
+                {
+                    Directory.CreateDirectory(_lib.StageFolder(kv.Key));
+                    File.WriteAllBytes(Path.Combine(_lib.StageFolder(kv.Key), kv.Value.Target.FileName), kv.Value.Bytes);
+                    foreach (var pic in kv.Value.SelectPictures) File.WriteAllBytes(Path.Combine(_lib.StageFolder(kv.Key), "select-" + pic.Key + ".png"), pic.Value);
+                    if (kv.Value.LooksMap != null) File.WriteAllBytes(Path.Combine(_lib.StageFolder(kv.Key), "looks-map.pac"), kv.Value.LooksMap);
+                }
+                catch (Exception e) { Notes.Add($"{kv.Value.Name} is on your SD card, but the app couldn't keep its own copy of it ({Friendly.Explain(e)}). If a P+ update ever removes it, add it again."); }
             _newSelectPictures.Clear();
-            foreach (var removed in _lib.Stages.Where(s => !stages.Any(k => k.Id == s.Id)))
-                try { Directory.Delete(_lib.StageFolder(removed.Id), true); } catch { }
+            var goneSkins = _lib.Skins.Where(s => !skins.Any(k => k.Id == s.Id)).ToList();
+            var goneStages = _lib.Stages.Where(s => !stages.Any(k => k.Id == s.Id)).ToList();
+            _lib.Skins.Clear(); _lib.Skins.AddRange(skins);
             _lib.Stages.Clear(); _lib.Stages.AddRange(stages);
             _lib.Written.Clear(); foreach (var kv in _written) _lib.Written[kv.Key] = kv.Value;
-            _lib.Save();
-            // the card from before this save goes to the app's folder (one copy, for "Undo last save")
-            if (WorkInPlace) { }
-            else if (Undo == null || !Undo.Finish(backupPath, cardPath, CardName, Describe(change), p => progress?.Invoke("Keeping the old SD card for \"Undo last save\"", p)))
+            Exception listFailed = null;
+            try { _lib.Save(); } catch (Exception e) { listFailed = e; }
+            if (listFailed == null)
             {
-                try { if (File.Exists(backupPath)) File.Delete(backupPath); } catch { }
-                if (Undo != null) UndoNote = "There wasn't room next to the app to keep the old SD card, so this save can't be undone.";
+                foreach (var removed in goneSkins) try { Directory.Delete(_lib.SkinFolder(removed.Id), true); } catch { }
+                foreach (var removed in goneStages) try { Directory.Delete(_lib.StageFolder(removed.Id), true); } catch { }
             }
+            // the card from before this save goes to the app's folder (one copy, for "Undo last save")
+            try
+            {
+                if (WorkInPlace) { }
+                else if (Undo == null || !Undo.Finish(backupPath, cardPath, CardName, Describe(change), p => progress?.Invoke("Keeping the old SD card for \"Undo last save\"", p)))
+                {
+                    try { if (File.Exists(backupPath)) File.Delete(backupPath); } catch { }
+                    if (Undo != null) UndoNote = "There wasn't room next to the app to keep the old SD card, so this save can't be undone.";
+                }
+            }
+            catch (Exception e) { UndoNote = $"The old SD card couldn't be kept for \"Undo last save\" ({Friendly.Explain(e)}), so this save can't be undone."; }
+            if (listFailed != null)
+                throw new SavedButException("Your SD card was saved, but the app couldn't write down which mods are on it (" + Friendly.Explain(listFailed) +
+                                            "). Close and reopen the app: if your mods look wrong after that, report it from Settings > Report a problem.", listFailed);
             progress?.Invoke("Done", 100);
         }
 

@@ -17,6 +17,9 @@ namespace SkinManager.App
         readonly TrackBar _dark = new TrackBar { Minimum = 0, Maximum = 90, TickFrequency = 10, Width = 320, BackColor = Theme.Panel };
         readonly Label _which = Theme.Label("", Theme.Small, Theme.Muted);
 
+        /// <summary>Asks to save switches that aren't saved yet before the app restarts (false: the user cancelled, or the save failed).</summary>
+        public Func<bool> SaveFirst;
+
         public SettingsPanel(LookSettings look, Action changed)
         {
             _look = look; _changed = changed;
@@ -59,7 +62,7 @@ namespace SkinManager.App
             void Make(string path, string where)
             {
                 try { SelfUpdate.MakeShortcut(path); MessageBox.Show(FindForm(), "Done: P+ Modding Tool is " + where + ".", "Shortcut", MessageBoxButtons.OK, MessageBoxIcon.Information); }
-                catch (Exception ex) { MessageBox.Show(FindForm(), "The shortcut couldn't be made: " + ex.Message, "Shortcut", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception ex) { MessageBox.Show(FindForm(), "The shortcut couldn't be made: " + Friendly.Explain(ex), "Shortcut", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             }
             desk.Click += (s, e) => Make(SelfUpdate.DesktopShortcut, "on your desktop");
             start.Click += (s, e) => Make(SelfUpdate.StartMenuShortcut, "in your Start menu");
@@ -72,7 +75,11 @@ namespace SkinManager.App
             bug.Location = new Point(260, 146);
             bug.Click += (s, e) => BugReport.Show(FindForm());
             card2.Height = 196;
-            card2.Controls.AddRange(new Control[] { h2, t2, open, desk, start, ver, check, bug });
+            var undo = Theme.Secondary("Undo last save...");
+            undo.Click += (s, e) => (FindForm() as MainForm)?.UndoLastSaveAsked();
+            new ToolTip().SetToolTip(undo, "Puts your SD card and mods back the way they were before your last save (also in the Profile menu).");
+            card2.Layout += (s, e) => { check.Left = 20; bug.Left = check.Right + 12; undo.Location = new Point(bug.Right + 12, bug.Top); };
+            card2.Controls.AddRange(new Control[] { h2, t2, open, desk, start, ver, check, bug, undo });
 
             var card3 = new GlassPanel { Location = new Point(28, 702), Size = new Size(720, 104), Tint = 215, TintColor = Theme.Panel };
             var h3 = Theme.Label("Add-ons", Theme.Heading); h3.Location = new Point(20, 16);
@@ -89,7 +96,14 @@ namespace SkinManager.App
             var hk = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text, Location = new Point(600, 148) };
             hk.Items.AddRange(Hotkeys.Choices);
             hk.SelectedItem = look.HotkeyText;
-            hk.SelectedIndexChanged += (s, e) => { _look.HotkeyText = (string)hk.SelectedItem; Changed(); };
+            string hkText = hkLabel.Text;
+            void HotkeyNote()   // a key another program already uses can't be the overlay's: say so here
+            {
+                bool bad = Program.HotkeyProblem != null;
+                hkLabel.Text = bad ? Program.HotkeyProblem : hkText; hkLabel.ForeColor = bad ? Theme.Warn : Theme.Muted;
+            }
+            hk.SelectedIndexChanged += (s, e) => { _look.HotkeyText = (string)hk.SelectedItem; Changed(); HotkeyNote(); };
+            VisibleChanged += (s, e) => { if (Visible) HotkeyNote(); };
             var sideLabel = Theme.Label("Where the opponent card and slim bar go (Brawl Online's chat is on the left):", Theme.Small, Theme.Muted);
             sideLabel.Location = new Point(40, 186); sideLabel.AutoSize = false; sideLabel.Size = new Size(540, 20);
             var side = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text, Location = new Point(600, 182) };
@@ -140,8 +154,9 @@ namespace SkinManager.App
             pick.Click += (s, e) => PickDolphin();
             back.Click += (s, e) =>
             {
-                if (MessageBox.Show(FindForm(), "Go back to Brawl Online's SD card? The app restarts to switch (switches you haven't saved are dropped). Your Dolphin's card and its mods list stay as they are.",
+                if (MessageBox.Show(FindForm(), "Go back to Brawl Online's SD card? The app restarts to switch. Your Dolphin's card and its mods list stay as they are.",
                     "SD card", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                if (SaveFirst != null && !SaveFirst()) return;
                 _look.CardFile = null; _look.Save(); Application.Restart(); Environment.Exit(0);
             };
             card5.Controls.AddRange(new Control[] { h5, now5, t5, pick, back });
@@ -245,7 +260,7 @@ namespace SkinManager.App
                 if (found.Problem != null) { MessageBox.Show(FindForm(), found.Problem, "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             }
             if (MessageBox.Show(FindForm(), "Found it:\r\n" + found.Card + "\r\n\r\n" + (found.Warning != null ? "Heads up: " + found.Warning + "\r\n\r\n" : "") +
-                "The app puts mods on this card from now on, with its own mods list (your Brawl Online mods stay as they are). It restarts to switch (switches you haven't saved are dropped).",
+                "The app puts mods on this card from now on, with its own mods list (your Brawl Online mods stay as they are). It restarts to switch.",
                 "Use your Dolphin's SD card", MessageBoxButtons.OKCancel, found.Warning != null ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.OK) return;
             string data = OtherCards.DataFolderFor(Program.DataFolder, found.Card);
             if (OtherCards.IsNew(data) && !OtherCards.IsNew(Program.DataFolder) &&
@@ -253,9 +268,10 @@ namespace SkinManager.App
                     "(Your Brawl Online card and its mods stay as they are.)", "Your Dolphin's SD card", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
                 try { Cursor = Cursors.WaitCursor; OtherCards.BringMods(Program.DataFolder, data); }
-                catch (Exception ex) { MessageBox.Show(FindForm(), "Your mods couldn't all be brought over: " + ex.Message + "\r\nYou can still add them again on that card.", "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception ex) { MessageBox.Show(FindForm(), "Your mods couldn't all be brought over: " + SkinManager.Core.Friendly.Explain(ex) + "\r\nYou can still add them again on that card.", "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 finally { Cursor = Cursors.Default; }
             }
+            if (SaveFirst != null && !SaveFirst()) return;
             _look.CardFile = found.Card; _look.Save();
             Application.Restart(); Environment.Exit(0);
         }
@@ -277,7 +293,7 @@ namespace SkinManager.App
                     Changed();
                     if (old != null && old.StartsWith(Program.DataFolder) && File.Exists(old)) try { File.Delete(old); } catch { }
                 }
-                catch (Exception ex) { MessageBox.Show(FindForm(), "That picture couldn't be opened: " + ex.Message, "Background", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception ex) { MessageBox.Show(FindForm(), "That picture couldn't be opened: " + Friendly.Explain(ex), "Background", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             }
         }
 

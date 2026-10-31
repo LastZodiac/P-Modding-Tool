@@ -217,7 +217,7 @@ namespace SkinManager.App
                 Text(g, "to win", Theme.Small, Theme.Muted, new RectangleF(Width - 80, 40, 72, 18), true);
             }
             float y = 72;
-            if ((h == null && !Preview) || _proj == null) Text(g, "Reading your match history…", Theme.Small, Theme.Muted, new RectangleF(12, y, Width - 24, 18));
+            if ((h == null && !Preview) || _proj == null) Text(g, h == null && Program.HistoryProblem != null ? Program.HistoryProblem : "Reading your match history…", Theme.Small, Theme.Muted, new RectangleF(12, y, Width - 24, 18));
             else foreach (var (t, c) in Compact().Take(2))
             {
                 bool two = t.StartsWith("Coach: ");
@@ -249,7 +249,7 @@ namespace SkinManager.App
             Text($"{s.OpponentCode} · {mode} · game {s.Game}" + (s.MyWins + s.TheirWins > 0 ? $" · set {s.MyWins}–{s.TheirWins}" : ""), Theme.Small, Theme.Muted, left, 130); y += 18;
             if (s.Stage != null && h != null) Text(h.StageName(s.Stage.Value), Theme.Small, Theme.Text, left, 130);
             y = 84;
-            if ((h == null && !Preview) || _proj == null) { Text("Reading your match history…", Theme.Body, Theme.Muted); return; }
+            if ((h == null && !Preview) || _proj == null) { Text(h == null && Program.HistoryProblem != null ? Program.HistoryProblem : "Reading your match history…", Theme.Body, Theme.Muted); return; }
 
             var lines = _lines;
             // the chance to win, big, on the right

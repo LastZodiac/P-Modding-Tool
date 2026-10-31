@@ -290,7 +290,7 @@ namespace SkinManager.App
             catch (Exception e)
             {
                 if (IsDisposed) return;
-                _status.Text = "The preview couldn't be made: " + e.Message; _status.ForeColor = Theme.Bad;
+                _status.Text = "The preview couldn't be made: " + Friendly.Explain(e); _status.ForeColor = Theme.Bad;
             }
             finally
             {

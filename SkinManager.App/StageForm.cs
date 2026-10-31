@@ -143,7 +143,7 @@ namespace SkinManager.App
                 }
                 catch (Exception e) { matches = new List<StageFile>(); error = e; }
                 if (IsDisposed) return;
-                if (error != null) { r.Status.Text = "Couldn't read this stage file: " + error.Message; r.Status.ForeColor = Theme.Bad; Relayout(r); continue; }
+                if (error != null) { r.Status.Text = "Couldn't read this stage file: " + Friendly.Explain(error); r.Status.ForeColor = Theme.Bad; Relayout(r); continue; }
 
                 // the stages it's named for come first
                 var named = Stages.NamedFor(r.File, _pkg.Name, _all);
@@ -387,7 +387,7 @@ namespace SkinManager.App
                             }
                         });
                     }
-                    catch (Exception ex) { lines = new List<string> { "Couldn't compare: " + ex.Message }; }
+                    catch (Exception ex) { lines = new List<string> { "Couldn't compare: " + Friendly.Explain(ex) }; }
                     if (f.IsDisposed || me != version) return;
                     var said = new List<string>();
                     if (!Allowed(r)(st))
@@ -558,7 +558,7 @@ namespace SkinManager.App
                 var p = PreviewOf(spot.Picture);
                 if (p != null)
                     try { using (var img = Image.FromFile(files["preview"])) using (var stage = StageSelect.StagePart(img)) r.PicBox.Image = StageSelect.PaintPreview(p, spot.Region, stage); }
-                    catch (Exception e) { text += " (Couldn't open that picture: " + e.Message + ")"; }
+                    catch (Exception e) { text += " (Couldn't open that picture: " + Friendly.Explain(e) + ")"; }
             }
             r.PicText.Text = text;
             r.PicBox.Visible = r.PicBox.Image != null;
@@ -588,7 +588,7 @@ namespace SkinManager.App
                         plan.SelectPictures = PicturesFor(row, target);
                         if (plan.CanInstall) plans.Add(plan); else problems.Add($"{target.Label}: " + string.Join("; ", plan.Checks.Where(c => !c.Passed).Select(c => c.Title)));
                     }
-                    catch (Exception e) { problems.Add($"{target.Label}: {e.Message}"); }
+                    catch (Exception e) { problems.Add($"{target.Label}: {Friendly.Explain(e)}"); }
                     if (IsDisposed) return;
                 }
             if (problems.Count > 0)

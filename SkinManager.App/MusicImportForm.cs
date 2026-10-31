@@ -92,7 +92,7 @@ namespace SkinManager.App
                     if (row.Name.Text == Path.GetFileNameWithoutExtension(f) || row.Name.Text == "") row.Name.Text = Title(row.Clip);
                     row.Info.Text = $"{Path.GetFileName(f)}  ·  {row.Clip.Duration:m\\:ss}  ·  {row.Clip.Rate / 1000.0:0.#} kHz";
                 }
-                catch (Exception e) { row.Info.Text = "Couldn't read this file: " + e.Message; row.Info.ForeColor = Theme.Bad; }
+                catch (Exception e) { row.Info.Text = "Couldn't read this file: " + Friendly.Explain(e); row.Info.ForeColor = Theme.Bad; }
                 Summary();
             }
             Summary();
@@ -160,7 +160,7 @@ namespace SkinManager.App
                 _player.Play();
                 _summary.Text = loop ? $"Playing \"{r.Name.Text}\": the last seconds, then where it loops back to." : $"Playing the start of \"{r.Name.Text}\" as it will sound.";
             }
-            catch (Exception e) { _summary.Text = "Couldn't play it here: " + e.Message; }
+            catch (Exception e) { _summary.Text = "Couldn't play it here: " + Friendly.Explain(e); }
         }
 
         void Summary()
@@ -199,7 +199,7 @@ namespace SkinManager.App
             catch (Exception e)
             {
                 Program.Log("make music", e);
-                _summary.Text = "Couldn't make it: " + e.Message;
+                _summary.Text = "Couldn't make it: " + Friendly.Explain(e);
                 _working = false; _bar.Visible = false; Summary();
             }
         }

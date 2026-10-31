@@ -27,15 +27,24 @@ namespace SkinManager.App
             _list.Location = new Point(18, 84);
             Controls.AddRange(new Control[] { _intro, _list, _again, _close, _fresh });
             CancelButton = _close; _close.DialogResult = DialogResult.Cancel;
-            _again.Click += (s, e) => { Cursor = Cursors.WaitCursor; try { var r = _rescan(false); if (r != null) Show(r); } finally { Cursor = Cursors.Default; } };
+            _again.Click += (s, e) => Look(false);
             _fresh.Click += (s, e) =>
             {
-                if (MessageBox.Show(this, "Take a new snapshot of the card as it is now? Everything on it now counts as the build's own, and only what's added or changed from here on shows up.", "Start over", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
-                Cursor = Cursors.WaitCursor; try { var r = _rescan(true); if (r != null) Show(r); } finally { Cursor = Cursors.Default; }
+                if (MessageBox.Show(this, "Count everything on your SD card right now as normal P+ files? From then on, only files added or changed after this point show up here.", "Start over from now", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                Look(true);
             };
             Resize += (s, e) => Arrange();
             Show(scan);
             Arrange();
+        }
+
+        /// <summary>Looks through the SD card again in the background (it reads every file: it can take a while).</summary>
+        async void Look(bool fresh)
+        {
+            string was = _again.Text;
+            _again.Enabled = _fresh.Enabled = false; _again.Text = "Looking...";
+            try { var r = await System.Threading.Tasks.Task.Run(() => _rescan(fresh)); if (r != null && !IsDisposed) Show(r); }
+            finally { if (!IsDisposed) { _again.Enabled = _fresh.Enabled = true; _again.Text = was; } }
         }
 
         void Arrange()
@@ -55,7 +64,7 @@ namespace SkinManager.App
             if (snap)
             {
                 DateTime.TryParse(scan.Version.Substring(CardBaseline.Prefix.Length), null, System.Globalization.DateTimeStyles.RoundtripKind, out var taken);
-                _intro.Text = $"This card isn't plain P+ as Brawl Online has it (it's another build, like Cobalt, or P+ without Brawl Online to compare with). So the app compares it with how it was on {taken:MMM d, h:mm tt}, the first time it looked: " +
+                _intro.Text = $"This SD card isn't the P+ that Brawl Online sets up (it's another mod pack, or P+ on its own), so the app compares it with how it looked on {taken:MMM d, h:mm tt}, the first time it checked: " +
                     (n == 0 ? "nothing was added or changed since. (Your costumes and stages already on the card show in Costume Slots and when you add a stage.)" : $"these {n} file(s) were added or changed since, not by this app. It leaves them alone and asks before putting a mod where one sits.");
                 _list.Show(scan?.Mods ?? new List<HandMod>());
                 return;

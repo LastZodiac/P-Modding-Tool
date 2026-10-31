@@ -1,4 +1,4 @@
-// Reading glTF models (.glb, and .gltf with its files): what Tripo3D, Source 2 Viewer, Blender and most sites
+// Reading glTF models (.glb, and .gltf with its files): what Source 2 Viewer, Blender and most sites
 // export. The scene's meshes are placed as the scene places them, each material becomes a part, and its base
 // colour picture (packed inside a .glb) is saved next to the app's temporary files so the swapper can use it.
 using System;

@@ -59,6 +59,16 @@ namespace SkinManager.App
         GbPage _current;
         long _shownMod;
         CancellationTokenSource _download;
+        // the download that's going: shown in a strip at the bottom of the page, which stays when another mod is picked
+        readonly Panel _dlStrip = new Panel { Dock = DockStyle.Bottom, Height = 46, Visible = false, BackColor = Theme.Panel, Padding = new Padding(12, 6, 12, 6) };
+        readonly Label _dlText = new Label { AutoSize = false, AutoEllipsis = true, ForeColor = Theme.Text, Font = Theme.Small, BackColor = Color.Transparent, UseMnemonic = false };
+        readonly ProgressBar _dlBar = new ProgressBar { Maximum = 1000, Height = 10 };
+        readonly Button _dlCancel = Theme.Secondary("Cancel");
+        void DownloadShow(string text, int permille)
+        {
+            _dlStrip.Visible = true; _dlText.Text = text; _dlBar.Value = Math.Max(0, Math.Min(1000, permille));
+        }
+        void DownloadHide() => _dlStrip.Visible = false;
         bool _loadedOnce;
         readonly SemaphoreSlim _pictureSlots = new SemaphoreSlim(4);
 
@@ -122,7 +132,14 @@ namespace SkinManager.App
             _retry.Visible = false;
             _message.Controls.Add(_messageText); _message.Controls.Add(_retry);
 
-            left.Controls.Add(_results); left.Controls.Add(_message); left.Controls.Add(_pager); left.Controls.Add(bar);
+            _dlStrip.Controls.Add(_dlText); _dlStrip.Controls.Add(_dlBar); _dlStrip.Controls.Add(_dlCancel);
+            _dlCancel.Click += (s, e) => _download?.Cancel();
+            _dlStrip.Resize += (s, e) =>
+            {
+                _dlCancel.Location = new Point(_dlStrip.Width - _dlCancel.Width - 12, (_dlStrip.Height - _dlCancel.Height) / 2);
+                _dlText.SetBounds(12, 4, _dlCancel.Left - 24, 18); _dlBar.SetBounds(12, 26, _dlCancel.Left - 24, 10);
+            };
+            left.Controls.Add(_results); left.Controls.Add(_message); left.Controls.Add(_pager); left.Controls.Add(_dlStrip); left.Controls.Add(bar);
             Controls.Add(left); Controls.Add(_details);
             ShowNothingSelected();
             SetCue(_search, "Search GameBanana by name (optional)");
@@ -206,7 +223,7 @@ namespace SkinManager.App
             {
                 if (gen != _generation) return;
                 Program.Trace("list failed: " + e);
-                ShowMessage(e is GbException ? e.Message : "Something went wrong: " + e.Message, true);
+                ShowMessage(e is GbException ? e.Message : "Something went wrong: " + Friendly.Explain(e), true);
                 return;
             }
             if (gen != _generation || IsDisposed) return;
@@ -315,7 +332,7 @@ namespace SkinManager.App
             int w = _details.ClientSize.Width - 40;
             var t = Wrapped("Pick a costume to see what's in it.", Theme.Body, Theme.Muted, w);
             t.Location = new Point(16, 18);
-            var t2 = Wrapped("Every download goes through the same safety checks as \"Add a skin\", so anything that could break online play is refused before it touches your SD card.", Theme.Small, Theme.Muted, w);
+            var t2 = Wrapped("Every download goes through the same safety checks as \"Add from file\", so anything that could break online play is refused before it touches your SD card.", Theme.Small, Theme.Muted, w);
             t2.Location = new Point(16, t.Bottom + 10);
             _details.Controls.Add(t); _details.Controls.Add(t2);
         }
@@ -347,7 +364,7 @@ namespace SkinManager.App
             {
                 if (gen != _detailsGen) return;
                 ClearDetails();
-                var err = Wrapped(e is GbException ? e.Message : "Something went wrong: " + e.Message, Theme.Body, Theme.Bad, _details.ClientSize.Width - 40);
+                var err = Wrapped(e is GbException ? e.Message : "Something went wrong: " + Friendly.Explain(e), Theme.Body, Theme.Bad, _details.ClientSize.Width - 40);
                 err.Location = new Point(16, 18);
                 var again = Theme.Secondary("Try again"); again.Location = new Point(16, err.Bottom + 12);
                 again.Click += (s, ev) => ShowDetails(modId);
@@ -473,7 +490,7 @@ namespace SkinManager.App
             cancel.Click += (s, e) => _download?.Cancel();
             button.Click += async (s, e) =>
             {
-                if (_download != null) { MessageBox.Show(FindForm(), "Another download is still going. Wait for it to finish first.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                if (_download != null) { MessageBox.Show(FindForm(), "Another download is still going (see the bar at the bottom of the page). Wait for it to finish, or cancel it there.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 button.Visible = false; bar.Visible = status.Visible = cancel.Visible = true; bar.Value = 0;
                 var cts = _download = new CancellationTokenSource();
                 var paths = new List<string>(); Exception error = null;
@@ -490,9 +507,11 @@ namespace SkinManager.App
                             {
                                 BeginInvoke((Action)(() =>
                                 {
+                                        string t = $"Downloading {at + 1} of {files.Count}... {SizeText(before + done)} of {SizeText(all)}";
+                                    DownloadShow(d.Mod.Name + ": " + t.ToLowerInvariant(), (int)Math.Min(1000, (before + done) * 1000 / all));
                                     if (bar.IsDisposed) return;
                                     bar.Value = (int)Math.Min(1000, (before + done) * 1000 / all);
-                                    status.Text = $"Downloading {at + 1} of {files.Count}... {SizeText(before + done)} of {SizeText(all)}";
+                                    status.Text = t;
                                 }));
                             }
                             catch (InvalidOperationException) { }
@@ -508,14 +527,14 @@ namespace SkinManager.App
                     }
                 }
                 catch (Exception ex) { error = ex; }
-                finally { _download = null; cts.Dispose(); }
+                finally { _download = null; cts.Dispose(); DownloadHide(); }
                 if (IsDisposed) return;
                 if (!box.IsDisposed) { button.Visible = true; bar.Visible = status.Visible = cancel.Visible = false; }
                 if (error is OperationCanceledException) return;
                 if (error != null)
                 {
                     Program.Trace("download failed: " + error);
-                    MessageBox.Show(FindForm(), error is GbException ? error.Message : "The download failed: " + error.Message, "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(FindForm(), error is GbException ? error.Message : "The download failed. " + Friendly.Explain(error), "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 InstallAllRequested?.Invoke(paths, new SkinSource { ModId = d.Mod.Id, FileId = 0, ModName = d.Mod.Name, Author = d.Mod.Author, PageUrl = d.Mod.ProfileUrl, ThumbUrl = d.Mod.ThumbUrl });
@@ -558,7 +577,7 @@ namespace SkinManager.App
             cancel.Click += (s, e) => _download?.Cancel();
             button.Click += async (s, e) =>
             {
-                if (_download != null) { MessageBox.Show(FindForm(), "Another download is still going. Wait for it to finish first.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                if (_download != null) { MessageBox.Show(FindForm(), "Another download is still going (see the bar at the bottom of the page). Wait for it to finish, or cancel it there.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 button.Visible = false; bar.Visible = status.Visible = cancel.Visible = true; bar.Value = 0;
                 status.Text = "Starting download...";
                 var cts = _download = new CancellationTokenSource();
@@ -572,23 +591,25 @@ namespace SkinManager.App
                         {
                             BeginInvoke((Action)(() =>
                             {
+                                string t = total > 0 ? $"Downloading... {SizeText(done)} of {SizeText(total)}" : $"Downloading... {SizeText(done)}";
+                                DownloadShow(d.Mod.Name + ": " + t.ToLowerInvariant(), total > 0 ? (int)Math.Min(1000, done * 1000 / total) : 0);
                                 if (bar.IsDisposed) return;
                                 bar.Value = total > 0 ? (int)Math.Min(1000, done * 1000 / total) : 0;
-                                status.Text = total > 0 ? $"Downloading... {SizeText(done)} of {SizeText(total)}" : $"Downloading... {SizeText(done)}";
+                                status.Text = t;
                             }));
                         }
                         catch (InvalidOperationException) { }
                     }, cts.Token), cts.Token);
                 }
                 catch (Exception ex) { error = ex; }
-                finally { _download = null; cts.Dispose(); }
+                finally { _download = null; cts.Dispose(); DownloadHide(); }
                 if (IsDisposed) return;
                 if (!box.IsDisposed) { button.Visible = v.Kind != GbVerdictKind.OtherSite; bar.Visible = status.Visible = cancel.Visible = false; }
                 if (error is OperationCanceledException) return;
                 if (error != null)
                 {
                     Program.Trace("download failed: " + error);
-                    MessageBox.Show(FindForm(), error is GbException ? error.Message : "The download failed: " + error.Message, "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(FindForm(), error is GbException ? error.Message : "The download failed. " + Friendly.Explain(error), "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 var source = new SkinSource { ModId = d.Mod.Id, FileId = f.Id, ModName = d.Mod.Name, Author = d.Mod.Author, PageUrl = d.Mod.ProfileUrl, ThumbUrl = d.Mod.ThumbUrl };

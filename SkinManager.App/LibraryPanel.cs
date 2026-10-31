@@ -22,7 +22,7 @@ namespace SkinManager.App
         void Delete(InstalledSkin s);
         void InstallDownload(DownloadInfo d);
         void GoToStore();
-        Image SlotPicture(InstalledSkin s);      // P+'s select-screen picture for that slot (for skins without their own)
+        System.Threading.Tasks.Task<Image> SlotPictureAsync(InstalledSkin s);   // P+'s select-screen picture for that slot (for skins without their own)
         string SourceOf(InstalledSkin s);        // the download it came from, if still on this PC
         void AddMore(InstalledSkin s);           // add other costumes from the same download
         bool IsOn(InstalledStage s);
@@ -75,6 +75,8 @@ namespace SkinManager.App
         readonly ComboBox _sortBy = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat };
         static readonly string[] Sorts = { "Favorites first", "Recently added", "Name (A to Z)", "Biggest on the SD card" };
         List<DownloadInfo> _downloads = new List<DownloadInfo>();
+        bool _filterOnly;   // the next Refresh only applies the search/filters (the mods and downloads haven't changed)
+        void Filter() { _filterOnly = true; Refresh(); }
 
         readonly ToolTip _tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
 
@@ -87,12 +89,15 @@ namespace SkinManager.App
             _who.SelectedIndex = 0;
             _who.BackColor = Theme.Panel; _who.ForeColor = Theme.Text;
             _search.BackColor = Theme.Panel; _search.ForeColor = Theme.Text;
-            _search.TextChanged += (s, e) => Refresh();
+            // searching waits until typing stops for a moment (each search rebuilds every card)
+            var typing = new Timer { Interval = 250 };
+            typing.Tick += (s, e) => { typing.Stop(); Filter(); };
+            _search.TextChanged += (s, e) => { typing.Stop(); typing.Start(); };
             Theme.Cue(_search, "Search by name, author or character");
             foreach (var so in Sorts) _sortBy.Items.Add("Sort: " + so);
             _sortBy.SelectedIndex = 0; _sortBy.BackColor = Theme.Panel; _sortBy.ForeColor = Theme.Text;
-            _sortBy.SelectedIndexChanged += (s, e) => Refresh();
-            _who.SelectedIndexChanged += (s, e) => Refresh();
+            _sortBy.SelectedIndexChanged += (s, e) => Filter();
+            _who.SelectedIndexChanged += (s, e) => Filter();
             _allOff.Click += (s, e) => { if (_textureMode) { foreach (var p in VisibleTextures().Where(x => x.Enabled).ToList()) _host.SetOn(p, false); return; } if (_stageMode) _host.SetOn(VisibleStages(), false); else _host.SetOn(Visible_Skins(), false); };
             _allOn.Click += (s, e) => TurnAllOn();
             _kindSkins.Click += (s, e) => { _stageMode = false; _musicMode = false; _textureMode = false; Refresh(); };
@@ -284,8 +289,15 @@ namespace SkinManager.App
         public new void Refresh()
         {
             _ownMusic.Visible = _musicMode;
-            if (_host.Lib == null) { ShowEmpty("Brawl Online isn't set up on this PC yet."); return; }
-            try { _downloads = DownloadInfo.All(_host.DataFolder); } catch { _downloads = new List<DownloadInfo>(); }
+            if (_host.Lib == null)
+            {
+                ShowEmpty("Brawl Online isn't set up on this PC yet, so there's no P+ SD card for mods.\r\n\r\nOpen Brawl Online once and let it finish setting up Project+, then open this app again. " +
+                          "(Making mods in your own Dolphin instead? Settings > \"Use my own Dolphin's SD card\".)", button: false);
+                return;
+            }
+            // the downloads folder is read again unless only the search or a filter changed
+            if (!_filterOnly) try { _downloads = DownloadInfo.All(_host.DataFolder); } catch { _downloads = new List<DownloadInfo>(); }
+            _filterOnly = false;
             var all = Skins.Where(Matches).ToList();
             var dls = NotInstalled().Where(Matches).ToList();
             int on = all.Count(_host.IsOn);
@@ -453,9 +465,10 @@ namespace SkinManager.App
             }
         }
 
-        void ShowEmpty(string text)
+        void ShowEmpty(string text, bool button = true)
         {
-            bool clean = _host.OnCleanCard && !_textureMode;
+            bool clean = button && _host.OnCleanCard && !_textureMode;
+            _emptyButton.Visible = button;
             if (clean) text = "The clean card (no mods) is in place, for playing P+ exactly as it comes. Your mods are safe on your other card.\r\n\r\nClick \"Launch modded\" at the top to play with them, or switch back here.";
             _emptyButton.Text = clean ? "Back to my mods" : "Open the Mod Store";
             _grid.Visible = false; _empty.Visible = true;
@@ -545,7 +558,17 @@ namespace SkinManager.App
             if (_pictures.TryGetValue(key, out var img)) return img;
             string png = Path.Combine(_host.Lib.SkinFolder(s.Id), PictureKind.SelectPortrait + ".png");
             try { if (File.Exists(png)) using (var tmp = Image.FromFile(png)) return _pictures[key] = new Bitmap(tmp); } catch { }
-            try { return _host.SlotPicture(s); } catch { return null; }
+            LoadSlotPicture(s, card);
+            return null;
+        }
+
+        /// <summary>P+'s picture for the skin's slot, read in the background: the card shows it when it's ready.</summary>
+        async void LoadSlotPicture(InstalledSkin s, LibCard card)
+        {
+            Image img = null;
+            try { img = await _host.SlotPictureAsync(s); } catch { }
+            if (img == null || card.IsDisposed) return;
+            card.Picture = img; card.Invalidate();
         }
 
         /// <summary>Swaps the card's picture for a drawing of the skin's 3D model (made once, kept in the skin's folder).</summary>

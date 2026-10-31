@@ -88,8 +88,8 @@ namespace SkinManager.Core
             if (ext == ".obj") return LoadObj(path);
             if (ext == ".dae") return LoadDae(path);
             if (ext == ".glb" || ext == ".gltf") return LoadGltf(path);
-            if (ext == ".fbx") throw new InvalidOperationException("FBX files can't be read yet. Download the model as GLB or OBJ instead (Tripo3D and most sites offer both).");
-            throw new InvalidOperationException("The model swapper reads .glb, .gltf, .obj and .dae files. Most 3D programs and sites (Tripo3D, Blender) can save one of those.");
+            if (ext == ".fbx") throw new InvalidOperationException("FBX files can't be read yet. Save or download the model as GLB or OBJ instead (most 3D programs and sites offer both).");
+            throw new InvalidOperationException("The model swapper reads .glb, .gltf, .obj and .dae files. Most 3D programs and sites (Blender, for example) can save one of those.");
         }
 
         static float F(string s) => float.Parse(s, NumberStyles.Float, CultureInfo.InvariantCulture);

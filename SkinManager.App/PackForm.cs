@@ -130,9 +130,9 @@ namespace SkinManager.App
             var panel = new Panel { Width = 1040, Height = 112, BackColor = Theme.Panel, Margin = new Padding(0, 0, 0, 8) };
             r.Tick = new CheckBox { Location = new Point(14, 44), Size = new Size(22, 22), Checked = tick };
             r.Model = new PictureBox { Location = new Point(44, 6), Size = new Size(80, 100), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Back };
-            var name = Theme.Label(c.Variant != "" ? $"{c.Character.Name} • {c.Variant}" : $"{c.Character.Name} • file {c.NumberText}", Theme.Heading);
+            var name = Theme.Label(c.Variant != "" ? $"{c.Character.Name} • {c.Variant}" : $"{c.Character.Name} • costume {c.NumberText}", Theme.Heading);
             name.Location = new Point(136, 10);
-            var sub = Theme.Label($"File {c.NumberText}" + (c.Files.Count > 1 ? $" + {c.Files.Count - 1} extra file(s)" : "") + (c.Folder != "" ? $"  •  folder: {c.Folder}" : ""), Theme.Small, Theme.Muted);
+            var sub = Theme.Label($"Costume {c.NumberText} in the download" + (c.Files.Count > 1 ? $" (with {c.Files.Count - 1} extra file{(c.Files.Count == 2 ? "" : "s")} it needs)" : "") + (c.Folder != "" ? $"  •  from its \"{c.Folder}\" folder" : ""), Theme.Small, Theme.Muted);
             sub.Location = new Point(138, 36);
             r.Status = Theme.Label("Checking which slots it fits...", Theme.Small, Theme.Muted);
             r.Status.Location = new Point(138, 58); r.Status.AutoSize = false; r.Status.Size = new Size(420, 44);
@@ -190,7 +190,7 @@ namespace SkinManager.App
                 catch (Exception e)
                 {
                     if (IsDisposed) return;
-                    r.Status.Text = "Couldn't read this costume: " + e.Message; r.Status.ForeColor = Theme.Bad;
+                    r.Status.Text = "Couldn't read this costume: " + Friendly.Explain(e); r.Status.ForeColor = Theme.Bad;
                     r.Tick.Checked = false; r.Tick.Enabled = false;
                     r.Fits = new Dictionary<CostumeSlot, CheckResult>();
                     continue;
@@ -341,7 +341,7 @@ namespace SkinManager.App
                     if (plan.CanInstall) plans.Add(plan);
                     else problems.Add($"{plan.Name}: " + string.Join("; ", plan.Checks.Where(c => !c.Passed).Select(c => c.Title)));
                 }
-                catch (Exception e) { problems.Add($"{costume.Label}: {e.Message}"); }
+                catch (Exception e) { problems.Add($"{costume.Label}: {Friendly.Explain(e)}"); }
                 if (IsDisposed) return;
             }
             if (problems.Count > 0)

@@ -35,7 +35,8 @@ namespace SkinManager.App
         readonly MoveView _view = new MoveView();
         readonly ComboView _combo = new ComboView { Visible = false };
         readonly DiView _di = new DiView { Visible = false };
-        readonly Button _tabMoves = Theme.Secondary("Moves && hitboxes"), _tabCombos = Theme.Secondary("Launch && combos"), _tabDi = Theme.Secondary("How to DI");
+        readonly Button _tabMoves = Theme.Secondary("Moves && hitboxes"), _tabCombos = Theme.Secondary("Launch && combos"), _tabDi = Theme.Secondary("How to DI"), _tabSure = Theme.Secondary("How accurate");
+        readonly AccuracyView _sure = new AccuracyView { Visible = false };
         readonly Dictionary<string, ModelPreview.MoveCamera> _cams = new Dictionary<string, ModelPreview.MoveCamera>();
         readonly FlowLayoutPanel _chips = new FlowLayoutPanel { BackColor = Color.Transparent, WrapContents = false, Height = 30 };
         string _filter = "All";
@@ -45,11 +46,15 @@ namespace SkinManager.App
         {
             _installer = installer;
             Dock = DockStyle.Fill; Padding = new Padding(28, 18, 16, 8);
-            Controls.AddRange(new Control[] { _title, _who, _note, _strip, _chips, _list, _view, _combo, _di, _tabMoves, _tabCombos, _tabDi });
+            Controls.AddRange(new Control[] { _title, _who, _note, _strip, _chips, _list, _view, _combo, _di, _sure, _tabMoves, _tabCombos, _tabDi, _tabSure });
             _tabMoves.Click += (s, e) => ShowTab(0);
             _tabCombos.Click += (s, e) => ShowTab(1);
             _tabDi.Click += (s, e) => ShowTab(2);
-            Theme.Toggle(_tabMoves, true); Theme.Toggle(_tabCombos, false); Theme.Toggle(_tabDi, false);
+            _tabSure.Click += (s, e) => ShowTab(3);
+            new ToolTip().SetToolTip(_tabSure, "Which numbers are read straight from P+'s files, which needed an assumption, and what isn't drawn");
+            _sure.WholeCastRequested += CheckWholeCast;
+            _sure.FighterPicked += c => ShowFighter(c);
+            Theme.Toggle(_tabMoves, true); Theme.Toggle(_tabCombos, false); Theme.Toggle(_tabDi, false); Theme.Toggle(_tabSure, false);
             foreach (var t in FrameDataBook.Tabs)
             {
                 var b = Theme.Secondary(t); b.Margin = new Padding(0, 0, 5, 0); b.Font = Theme.Small; b.Padding = new Padding(4, 1, 4, 1); b.AutoSizeMode = AutoSizeMode.GrowAndShrink; b.MinimumSize = new Size(0, 26);
@@ -65,6 +70,7 @@ namespace SkinManager.App
             _view.HurtboxesChanged += () => { ClearFrames(); if (_move != null) ShowMove(_move); };
             Resize += (s, e) => Arrange();
             VisibleChanged += (s, e) => { if (Visible && _cast == null) Start(); };
+            _note.Click += (s, e) => { if (_cast == null) Start(); };
             Arrange();
         }
 
@@ -75,7 +81,8 @@ namespace SkinManager.App
             _who.Location = new Point(28, 32); _who.AutoSize = true;
             _note.Location = new Point(30, 64); _note.Size = new Size(w, 18);
             _strip.Location = new Point(28, 86); _strip.Width = w; _strip.Height = _strip.Needed(w);
-            _tabDi.Location = new Point(28 + w - _tabDi.PreferredSize.Width, 24);
+            _tabSure.Location = new Point(28 + w - _tabSure.PreferredSize.Width, 24);
+            _tabDi.Location = new Point(_tabSure.Left - 8 - _tabDi.PreferredSize.Width, 24);
             _tabCombos.Location = new Point(_tabDi.Left - 8 - _tabCombos.PreferredSize.Width, 24);
             _tabMoves.Location = new Point(_tabCombos.Left - 8 - _tabMoves.PreferredSize.Width, 24);
             int top = _strip.Bottom + 10;
@@ -83,19 +90,22 @@ namespace SkinManager.App
             _chips.Location = new Point(28, top); _chips.Size = new Size(listW, 28);
             _list.Location = new Point(28, top + 32); _list.Size = new Size(listW, Math.Max(200, h - top - 44));
             _view.Location = new Point(28 + listW + 14, top); _view.Size = new Size(w - listW - 14, Math.Max(200, h - top - 12));
-            _combo.Bounds = _view.Bounds; _di.Bounds = _view.Bounds;
+            _combo.Bounds = _view.Bounds; _di.Bounds = _view.Bounds; _sure.Bounds = _view.Bounds;
         }
 
+        bool _starting;
         async void Start()
         {
-            _cast = new List<Character>();
-            _note.Text = "Reading the fighters from your P+ card…";
+            if (_starting) return;
+            _starting = true;
+            _note.Text = "Reading the fighters from your P+ card…"; _note.ForeColor = Theme.Muted; _note.Cursor = Cursors.Default;
             try
             {
                 var inst = _installer();
-                if (inst == null) { _note.Text = "Pick your Brawl Online folder first (Settings)."; return; }
+                if (inst == null) { Failed("Brawl Online isn't set up on this PC yet, so there's no P+ SD card to read the fighters from. Open Brawl Online once, then click here."); return; }
                 var cast = await Task.Run(() => { using (var card = inst.OpenCard()) return FrameDataBook.Available(card); });
                 var art = await Task.Run(() => StatsArt.Get(_installer));
+                if (cast.Count == 0) { Failed("No fighters were found on your P+ SD card. Is P+ fully set up in Brawl Online? Click here to look again."); return; }
                 _cast = cast;
                 _strip.Set(cast, art);
                 _combo.SetCast(cast, cast.FirstOrDefault(c => c.Name == "Fox") ?? cast.FirstOrDefault());
@@ -103,9 +113,17 @@ namespace SkinManager.App
                 _di.SetCast(cast, _diChar);
                 Arrange();
                 _note.Text = $"{cast.Count} fighters, read straight from P+'s own files on your card. FAF = the first frame you can act again.";
-                if (cast.Count > 0) ShowFighter(cast.FirstOrDefault(c => c.Name == "Fox") ?? cast[0]);
+                ShowFighter(cast.FirstOrDefault(c => c.Name == "Fox") ?? cast[0]);
             }
-            catch (Exception e) { Program.Log("frame data", e); _note.Text = "Couldn't read the fighters: " + e.Message; }
+            catch (Exception e) { Program.Log("frame data", e); Failed("Couldn't read the fighters from your SD card. " + SkinManager.Core.Friendly.Explain(e) + " Click here to try again."); }
+            finally { _starting = false; }
+        }
+
+        /// <summary>The page couldn't start: says why, and clicking the line tries again (so does coming back to the page).</summary>
+        void Failed(string why)
+        {
+            _cast = null;
+            _note.Text = why; _note.ForeColor = Theme.Warn; _note.Cursor = Cursors.Hand;
         }
 
         async void ShowFighter(Character c)
@@ -123,23 +141,58 @@ namespace SkinManager.App
                     book = await Task.Run(() => { using (var card = inst.OpenCard()) return FrameDataBook.Load(card, c); });
                     lock (_books) _books[c.FilePrefix] = book;
                 }
-                catch (Exception e) { Program.Log("frame data " + c.Name, e); _list.Show(null, "Couldn't read " + c.Name + ": " + e.Message); return; }
+                catch (Exception e) { Program.Log("frame data " + c.Name, e); if (_strip.Selected == c) _list.Show(null, "Couldn't read " + c.Name + "'s moves. " + SkinManager.Core.Friendly.Explain(e) + " Click " + c.Name + " again to retry."); return; }
             }
             if (_strip.Selected != c) return;   // picked someone else meanwhile
             _book = book;
             _list.Show(book, null);
+            ShowSure();
             var first = book.Entries.FirstOrDefault();
             if (first != null) ShowMove(first);
         }
 
         bool _combos, _diOn;
+        bool _sureOn;
         void ShowTab(int tab)
         {
-            _combos = tab == 1; _diOn = tab == 2;
-            Theme.Toggle(_tabMoves, tab == 0); Theme.Toggle(_tabCombos, _combos); Theme.Toggle(_tabDi, _diOn);
-            _view.Visible = tab == 0; _combo.Visible = _combos; _di.Visible = _diOn;
+            _combos = tab == 1; _diOn = tab == 2; _sureOn = tab == 3;
+            Theme.Toggle(_tabMoves, tab == 0); Theme.Toggle(_tabCombos, _combos); Theme.Toggle(_tabDi, _diOn); Theme.Toggle(_tabSure, _sureOn);
+            _view.Visible = tab == 0; _combo.Visible = _combos; _di.Visible = _diOn; _sure.Visible = _sureOn;
             if (_combos) ShowCombos();
             if (_diOn) ShowDi();
+            if (_sureOn) ShowSure();
+        }
+
+        void ShowSure()
+        {
+            if (!_sureOn) return;
+            if (_book == null) { _sure.Status("Pick a fighter."); return; }
+            _sure.Show(_book);
+        }
+
+        /// <summary>Every fighter's accuracy counts (each fighter read in the background; ones already open are reused).</summary>
+        async void CheckWholeCast()
+        {
+            if (_cast == null || _cast.Count == 0) return;
+            var inst = _installer(); if (inst == null) return;
+            var rows = new List<(Character, int, int, int)>();
+            _sure.ShowCast(rows, _cast.Count);
+            foreach (var c in _cast.ToList())
+            {
+                FighterBook book;
+                lock (_books) _books.TryGetValue(c.FilePrefix, out book);
+                try
+                {
+                    // (read just for this and let go: keeping every fighter's models would take a lot of memory)
+                    if (book == null) book = await Task.Run(() => { using (var card = inst.OpenCard()) return FrameDataBook.Load(card, c); });
+                    var lines = FrameDataAccuracy.For(book);
+                    book = null;
+                    rows.Add((c, lines.Count(l => l.Level == Sureness.Exact), lines.Count(l => l.Level == Sureness.Approximate), lines.Count(l => l.Level == Sureness.NotDrawn)));
+                }
+                catch (Exception e) { Program.Log("accuracy " + c.Name, e); }
+                if (!_sureOn || IsDisposed) return;   // left the tab: stop
+                _sure.ShowCast(rows, _cast.Count);
+            }
         }
 
         /// <summary>The DI side: the move's pictures (with where everything is in them) and the fighter being hit.</summary>
@@ -252,7 +305,7 @@ namespace SkinManager.App
                     }
                     GifWriter.Save(d.FileName, labelled, 2); _note.Text = "Saved " + Path.GetFileName(d.FileName) + ".";
                 }
-                catch (Exception e) { _note.Text = "Couldn't save it: " + e.Message; }
+                catch (Exception e) { _note.Text = "Couldn't save it: " + Friendly.Explain(e); }
                 finally { foreach (var b in labelled) b.Dispose(); }
             }
         }
@@ -365,7 +418,7 @@ namespace SkinManager.App
                 using (var t = new SolidBrush(Theme.Text)) g.DrawString(mv.Name, Theme.BodyBold, t, new RectangleF(12, y + 8, cStart - 30, 20), clip);
                 string start = d.FirstHit > 0 ? d.FirstHit.ToString() : "—";
                 using (var t = new SolidBrush(d.FirstHit > 0 ? Theme.Text : Theme.Muted)) g.DrawString(start, Theme.BodyBold, t, cStart, y + 8);
-                var act = d.Active.Count > 0 ? d.ActiveText : d.Projectiles.Count > 0 ? "shot " + d.Projectiles[0].ActiveText : d.Intangible.Count > 0 ? "inv. " + d.IntangibleText : "";
+                var act = d.Active.Count > 0 ? d.ActiveText : d.Projectiles.Count > 0 ? "shot " + d.Projectiles[0].ActiveText : d.Intangible.Count > 0 ? "invincible " + d.IntangibleText : "";
                 using (var t = new SolidBrush(d.Active.Count > 0 ? Color.FromArgb(255, 140, 130) : Color.FromArgb(140, 170, 255))) g.DrawString(act, Theme.Small, t, new RectangleF(cAct, y + 10, cFaf - cAct - 6, 18), clip);
                 using (var t = new SolidBrush(Theme.Text)) g.DrawString(d.Faf.ToString(), Theme.Body, t, cFaf, y + 8);
             }
@@ -377,7 +430,7 @@ namespace SkinManager.App
     {
         FighterBook _book; MoveEntry _move; string _status;
         public List<Bitmap> Pictures;
-        int _frame; bool _playing = true; int _speedIndex = 0; float _acc;
+        int _frame, _hold; bool _playing = true; int _speedIndex = 0; float _acc;
         static readonly float[] Speeds = { 1f, 0.5f, 0.25f };
         static readonly string[] SpeedNames = { "1×", "½×", "¼×" };
         public bool Hurtboxes = true;
@@ -406,7 +459,13 @@ namespace SkinManager.App
                 _acc += Speeds[_speedIndex] * (_timer.Interval / (1000f / 60));
                 if (_acc < 1) return;
                 int steps = (int)_acc; _acc -= steps;
-                _frame = (_frame + steps) % Pictures.Count;
+                if (_hold > 0) { _hold--; return; }
+                for (int k = 0; k < steps; k++)
+                {
+                    _frame = (_frame + 1) % Pictures.Count;
+                    // a hit that's out for only a frame or three (Fox's shine) would flash by: stay on it a moment
+                    if (_move != null && _move.Data.Active.Any(a => a.From == _frame + 1 && a.To - a.From < 3)) { _hold = Math.Max(1, 400 / Math.Max(1, _timer.Interval)); break; }
+                }
                 Invalidate();
             };
             _timer.Start();
@@ -453,7 +512,7 @@ namespace SkinManager.App
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             using (var bg = new SolidBrush(Color.FromArgb(200, 20, 22, 28))) using (var path = StatsArt.Round(_pic, 10)) g.FillPath(bg, path);
             if (_move == null) return;
-            var d = _move.Data;
+            var d = _move.Data; var mvNote = _move.Note;
             int n = Math.Max(1, d.Frames.Count);
             var f = _frame < d.Frames.Count ? d.Frames[_frame] : null;
             if (Pictures != null && _frame < Pictures.Count)
@@ -473,10 +532,18 @@ namespace SkinManager.App
             for (int i = 0; i < d.Frames.Count; i++)
             {
                 var fr = d.Frames[i];
-                Color c = fr.Hitboxes.Any(h => !h.Grab) ? Theme.Bad : fr.Hitboxes.Any() ? Color.FromArgb(170, 80, 255) : fr.Body != 0 ? Color.FromArgb(90, 150, 255) : d.Iasa > 0 && fr.Frame >= d.Iasa ? Color.FromArgb(70, Theme.Good) : Color.FromArgb(70, 255, 255, 255);
+                Color c = fr.After ? Color.FromArgb(40, 255, 255, 255) : fr.Hitboxes.Any(h => !h.Grab) ? Theme.Bad : fr.Hitboxes.Any() ? Color.FromArgb(170, 80, 255) : fr.Body != 0 ? Color.FromArgb(90, 150, 255) : d.Iasa > 0 && fr.Frame >= d.Iasa ? Color.FromArgb(70, Theme.Good) : Color.FromArgb(70, 255, 255, 255);
                 using (var b = new SolidBrush(c)) g.FillRectangle(b, _strip.X + i * cw + (cw > 4 ? 0.5f : 0), _strip.Y, Math.Max(1, cw - (cw > 4 ? 1 : 0)), _strip.Height);
             }
-            foreach (var p in d.Projectiles)
+            // a gold line under the frames a projectile can hit on
+            foreach (var p in d.Projectiles.Where(x => x.Flight != null))
+                for (int k = 0; k < p.Flight.Hits.Count; k++)
+                    if (p.Flight.Hits[k].Any(h => !h.Grab))
+                    {
+                        int i = p.Flight.Start + k - 1; if (i < 0 || i >= d.Frames.Count) continue;
+                        using (var b = new SolidBrush(Theme.Accent)) g.FillRectangle(b, _strip.X + i * cw, _strip.Bottom + 1, Math.Max(1, cw), 3);
+                    }
+            foreach (var p in d.Projectiles.Where(x => !x.Unknown))
             {
                 // a little gold marker where a projectile comes out
                 float px = _strip.X + (p.Frame - 1) * cw + cw / 2;
@@ -492,14 +559,16 @@ namespace SkinManager.App
                 ("First actionable", d.Faf.ToString()),
                 ("Total", d.Total.ToString()),
             };
-            if (d.LandingLag > 0) cols.Add(("Landing lag", $"{d.LandingLag} ({d.LandingLag / 2} L-cancelled)"));
+            if (d.LandingLag > 0) cols.Add(("Landing lag", $"{d.LandingLag} ({d.LandingLag / 2} if you L-cancel)"));
             if (d.Intangible.Count > 0) cols.Add(("Intangible", d.IntangibleText));
-            foreach (var p in d.Projectiles) cols.Add((p.Name.StartsWith("Projectile") ? "Projectile" : "Spawned hitbox", $"out on frame {p.Frame}, hits {p.ActiveText}" + (p.Data.Lingers ? " (+ = keeps going until it hits or vanishes)" : "")));
+            foreach (var p in d.Projectiles) cols.Add((p.Name.StartsWith("Projectile") ? "Projectile" : "Spawned hitbox",
+                (p.Flight != null ? $"{p.Name}: hits {p.ActiveText}" + (p.Flight.About != null ? " · " + p.Flight.About : "") : p.Unknown ? $"{p.Name}: when is up to the game, hits on {p.ActiveText}" : $"out on frame {p.Frame}, hits {p.ActiveText}") + (p.Flight == null && p.Data.Lingers ? " (+ = keeps going until it hits or vanishes)" : "")));
+            if (mvNote != null) cols.Add(("Note", mvNote));
             if (d.Throw != null) cols.Add(("Throw", $"{d.Throw.DamageText} · {d.Throw.Angle}° · BKB {d.Throw.Bkb} · KBG {d.Throw.Kbg}" + (d.ThrowFrame > 0 ? $" · released frame {d.ThrowFrame}" : "")));
             int x = 0, colW = Math.Max(110, Width / Math.Min(4, cols.Count));
             for (int i = 0; i < cols.Count; i++)
             {
-                bool wide = cols[i].k == "Throw" || cols[i].k == "Projectile" || cols[i].k == "Spawned hitbox";
+                bool wide = cols[i].k == "Throw" || cols[i].k == "Projectile" || cols[i].k == "Spawned hitbox" || cols[i].k == "Note";
                 if (x + colW > Width + 4 || (wide && x > 0)) { x = 0; y += 44; }
                 using (var m = new SolidBrush(Theme.Muted)) g.DrawString(cols[i].k.ToUpperInvariant(), Theme.Small, m, x, y);
                 using (var t = new SolidBrush(Theme.Text)) g.DrawString(cols[i].v, Theme.BodyBold, t, new RectangleF(x, y + 16, wide ? Width : colW - 8, 20), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
@@ -536,6 +605,10 @@ namespace SkinManager.App
                         }
                         y += 20;
                     }
+                    // what the short column names mean, for anyone who doesn't play competitively
+                    if (y + 18 < Height)
+                        g.DrawString("BKB = knockback at 0%  ·  KBG = how much more it knocks back as damage goes up  ·  WKB = the same knockback at any %  ·  SHIELD = extra damage to shields",
+                            Theme.Small, m, new RectangleF(0, y + 4, Width, 32));
                 }
             }
         }

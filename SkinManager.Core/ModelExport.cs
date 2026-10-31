@@ -1,5 +1,5 @@
 // P+'s own model of a costume as a 3D file (GLB) anyone's 3D tools can open: its shape in the default pose (arms
-// out), its pictures (textures) and how they wrap around it. For re-texturing tools (Meshy and the like): paint a new
+// out), its pictures (textures) and how they wrap around it. For painting a new look in a 3D program: paint it
 // look onto P+'s exact shape, then bring it back with the Model Swapper: it fits the skeleton perfectly.
 using System;
 using System.Collections.Generic;

@@ -19,7 +19,7 @@ namespace SkinManager.App
         readonly Action<string> _install;   // opens a folder with the usual "add a skin" steps
 
         readonly Button _choose = Theme.Primary("Choose a model...");
-        readonly Label _file = Theme.Label("No model chosen yet. It can be a .glb, .gltf, .obj or .dae file (Tripo3D: download as GLB).", Theme.Body, Theme.Muted);
+        readonly Label _file = Theme.Label("No model chosen yet. It can be a .glb, .gltf, .obj or .dae file (save it as GLB if you can).", Theme.Body, Theme.Muted);
         readonly ComboBox _character = Combo(200), _slot = Combo(200), _detail = Combo(230), _pose = Combo(180);
         readonly CheckBox _standUp = new CheckBox { Text = "It's lying down: stand it up", AutoSize = true, ForeColor = Theme.Text, Font = Theme.Body };
         readonly Button _left = Theme.Secondary("⟲ Turn"), _right = Theme.Secondary("Turn ⟳");
@@ -65,9 +65,10 @@ namespace SkinManager.App
             Dock = DockStyle.Fill; Padding = new Padding(28, 18, 16, 8); AutoScroll = true;
             var title = Theme.Label("Model Swapper (beta)", Theme.Title); title.Location = new Point(28, 14);
             var wip = Theme.Label("⚠  Work in progress: results depend a lot on the model, and some moves can still stretch it. Check it in a few poses before playing online.", Theme.Small, Theme.Warn);
-            wip.AutoSize = false; wip.Size = new Size(760, 18);
-            title.SizeChanged += (s, e) => wip.Location = new Point(title.Right + 14, 22);
-            wip.Location = new Point(title.Right + 14, 22);
+            // beside the title, wrapping onto a second line rather than running off the page
+            void PlaceWip() { wip.Location = new Point(title.Right + 14, 16); wip.Size = new Size(Math.Max(300, 960 - wip.Left), 32); }
+            wip.AutoSize = false; PlaceWip();
+            title.SizeChanged += (s, e) => PlaceWip();
             var hint = Theme.Label("Put a model from another game or a 3D program on a P+ character. It keeps P+'s own skeleton and moves with P+'s animations,\r\nso hits stay the same for both players. Only use models you're allowed to use, and credit whoever made them.", Theme.Small, Theme.Muted);
             hint.Location = new Point(30, 50); hint.AutoSize = false; hint.Size = new Size(900, 40);
 
@@ -142,12 +143,19 @@ namespace SkinManager.App
             _slot.Items.Clear();
             var c = _character.SelectedItem as Character;
             if (c == null) return;
+            var installer = _installer();
+            if (installer == null) { _status.Text = "Brawl Online isn't set up on this PC yet, so there are no P+ costumes to put a model on. Open Brawl Online once, then come back."; _status.ForeColor = Theme.Warn; return; }
             try
             {
-                using (var card = _installer()?.OpenCard())
-                    if (card != null) foreach (var s in PPlusCard.ReadSlots(card, c)) _slot.Items.Add(new SlotItem { Slot = s, Text = $"costume {s.Index + 1} (Fit{c.FilePrefix}{s.FileNumber:00}{(s.OnCard ? "" : ", from the disc")})" });
+                using (var card = installer.OpenCard())
+                    foreach (var s in PPlusCard.ReadSlots(card, c)) _slot.Items.Add(new SlotItem { Slot = s, Text = $"costume {s.Index + 1}{(s.OnCard ? "" : " (P+'s own, from the game disc)")}" });
             }
-            catch { }
+            catch (Exception e)
+            {
+                Program.Log("model swapper costumes", e);
+                _status.Text = "Couldn't read " + c.Name + "'s costumes from your SD card. " + Friendly.Explain(e); _status.ForeColor = Theme.Warn;
+                return;
+            }
             // start on a costume that's on the SD card (the others are read from the Brawl disc)
             int first = _slot.Items.Cast<SlotItem>().ToList().FindIndex(i => i.Slot.OnCard);
             if (_slot.Items.Count > 0) _slot.SelectedIndex = Math.Max(0, first);
@@ -211,9 +219,9 @@ namespace SkinManager.App
                 MessageBox.Show(FindForm(),
                     $"Saved: {Path.GetFileName(path)} ({tris:N0} triangles, with its pictures).\r\n\r\n" +
                     "This is P+'s exact model, so anything you make from it keeps P+'s proportions. To give it a new look:\r\n\r\n" +
-                    "1. Open a re-texturing tool (for example Meshy's \"AI Texturing\") and upload this file.\r\n" +
-                    "2. Describe the look you want, or give it a picture to copy.\r\n" +
-                    "3. Download the result as GLB.\r\n" +
+                    "1. Open this file in a 3D program (Blender, for example).\r\n" +
+                    "2. Paint or change its pictures (textures) to the look you want. Keep its shape and pose.\r\n" +
+                    "3. Save the result as GLB.\r\n" +
                     $"4. Here in the Model Swapper: Choose a model, pick that file, and keep {c.Name} and the same costume selected.\r\n\r\n" +
                     "Because the shape is P+'s own, it lines up with the skeleton by itself: no dots to place.",
                     "Save P+ Model as 3D", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -223,13 +231,13 @@ namespace SkinManager.App
             {
                 Program.Log("save model 3d", e);
                 _status.Text = before;
-                MessageBox.Show(FindForm(), "The model couldn't be saved: " + e.Message, "Save P+ Model as 3D", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(FindForm(), "The model couldn't be saved: " + Friendly.Explain(e), "Save P+ Model as 3D", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { _export3d.Enabled = true; }
         }
 
         /// <summary>The chosen P+ costume from the front, side and back, true to size, to make a matching model from
-        /// with an AI 3D tool (Tripo3D and the like) or by hand.</summary>
+        /// in a 3D program.</summary>
         async void SavePictures()
         {
             var c = _character.SelectedItem as Character;
@@ -263,8 +271,8 @@ namespace SkinManager.App
                 File.WriteAllText(Path.Combine(folder, "How to use these.txt"),
                     $"{name}: P+'s costume in its default pose (arms out), drawn from the front, the side and the back.\r\n" +
                     "All three are the same scale and have no perspective, so its proportions are true: use them as the reference for a new model.\r\n\r\n" +
-                    "In a 3D model maker (like Tripo3D): use the front picture, or front + side + back if it takes several views. Ask for the same pose (T-pose, arms out).\r\n" +
-                    "Download the result as GLB (or OBJ), then open it in P+ Modding Tool > Model Swapper and pick this same character and slot.\r\n\r\n" +
+                    "In your 3D program: use the front picture, or front + side + back, as a guide. Keep the same pose (T-pose, arms out).\r\n" +
+                    "Save the result as GLB (or OBJ), then open it in P+ Modding Tool > Model Swapper and pick this same character and slot.\r\n\r\n" +
                     $"Height in P+'s units: {r.Height:0.0} (the swapper sizes the new model to this by itself).\r\n");
                 _status.Text = "Saved. The pictures are in the folder that just opened.";
                 try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(folder) { UseShellExecute = true }); } catch { }
@@ -273,7 +281,7 @@ namespace SkinManager.App
             {
                 Program.Log("saving P+ model pictures", e);
                 _status.Text = before;
-                MessageBox.Show(FindForm(), "The pictures couldn't be saved: " + e.Message, "Save P+ Model Pictures", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(FindForm(), "The pictures couldn't be saved: " + Friendly.Explain(e), "Save P+ Model Pictures", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { _pictures.Enabled = true; }
         }
@@ -307,7 +315,7 @@ namespace SkinManager.App
             }
             catch (Exception e)
             {
-                _file.Text = "That model couldn't be read: " + e.Message;
+                _file.Text = "That model couldn't be read: " + Friendly.Explain(e);
                 _file.ForeColor = Theme.Bad;
             }
         }
@@ -387,7 +395,7 @@ namespace SkinManager.App
                 Swap(_mine, mine);
                 _built = built;
                 _status.Text = $"{built.Triangles:N0} triangles, {built.Pictures} picture(s), {built.Costume.Length / 1024:N0} KB.\r\n" +
-                    $"{built.Mixes} bone blends (P+'s own costume uses {built.MixBudget}; more would crash the game).\r\n" +
+                    $"{built.Mixes} ways the model bends between joints (P+'s own costume uses {built.MixBudget}; more would crash the game).\r\n" +
                     (built.Notes.Count > 0 ? string.Join("\r\n", built.Notes) + "\r\n" : "") +
                     (made.Own ? "\r\nThis is P+'s own shape (re-textured): it fits the skeleton exactly and moves just like P+'s costume. No lining up needed.\r\n\r\n"
                               : "\r\nLooks wrong? Turn it, stand it up or change its size above, then look at it in a few poses.\r\n\r\n") +
@@ -400,7 +408,7 @@ namespace SkinManager.App
             {
                 if (gen != _gen) return;
                 Program.Trace("swap failed: " + e);
-                _status.Text = "That didn't work: " + e.Message;
+                _status.Text = "That didn't work: " + Friendly.Explain(e);
                 _status.ForeColor = Theme.Bad;
             }
         }
@@ -453,7 +461,7 @@ namespace SkinManager.App
             if (_built == null || c == null || slot == null) return;
             if (_built.Mixes > _built.MixBudget)
             {
-                MessageBox.Show(FindForm(), $"This model needs {_built.Mixes} bone blends and P+'s own costume has {_built.MixBudget}. The game can't load that many and would crash, so it wasn't made into a costume.", "Model Swapper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(FindForm(), $"This model bends between its joints in {_built.Mixes} different ways, and P+'s own costume has {_built.MixBudget}. The game can't load that many and would crash, so it wasn't made into a costume. A simpler model (or the Detail setting set lower) fixes this.", "Model Swapper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             string name = Path.GetFileNameWithoutExtension(_path);

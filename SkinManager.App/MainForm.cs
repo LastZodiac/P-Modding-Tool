@@ -37,7 +37,20 @@ namespace SkinManager.App
         List<InstalledSkin> _tooBig = new List<InstalledSkin>();
         Button _putBack;
         List<InstalledStage> _overwrittenStages = new List<InstalledStage>();
-        bool _busy;
+        bool _busy
+        {
+            get => Program.Busy;
+            set
+            {
+                Program.Busy = value;
+                if (!value && _afterCardWork.Count > 0)   // what had to wait for the card (a finished download): now
+                {
+                    var todo = _afterCardWork.ToList(); _afterCardWork.Clear();
+                    BeginInvoke((Action)(() => { foreach (var a in todo) a(); }));
+                }
+            }
+        }
+        readonly List<Action> _afterCardWork = new List<Action>();
         readonly string _openOnStart;   // a skin dropped on the app's icon
 
         // pages
@@ -202,11 +215,15 @@ namespace SkinManager.App
         {
             bool ok = Hotkeys.Set(Handle, _look.Stats && _look.Card ? _look.HotkeyText : "Off");
             if (!ok) Program.Trace("hotkey " + _look.HotkeyText + " is taken by another program");
+            Program.HotkeyProblem = ok ? null : $"Another program already uses {_look.HotkeyText}, so it can't open the overlay. Pick a different key:";
         }
 
+        DateTime _historyFailedAt;
         async void LoadCardHistory()
         {
+            if (DateTime.Now - _historyFailedAt < TimeSpan.FromSeconds(30)) return;
             _historyLoading = true;
+            Program.HistoryProblem = null;
             try
             {
                 var install = _install; var installer = _installer;
@@ -221,7 +238,14 @@ namespace SkinManager.App
                 if (_card != null) { _card.History = _cardHistory; _card.Art = art; _card.Refresh2(); }
                 if (_full != null) { _full.History = _cardHistory; _full.Art = art; _full.Invalidate(); }
             }
-            catch (Exception e) { Program.Log("opponent card history", e); }
+            catch (Exception e)
+            {
+                Program.Log("opponent card history", e);
+                // said on the card instead of "Reading..." forever; tried again a bit later, not on every change to the game's log
+                Program.HistoryProblem = "Couldn't read your match history. " + Friendly.Explain(e);
+                _historyFailedAt = DateTime.Now;
+                _card?.Invalidate(); _full?.Invalidate();
+            }
             finally { _historyLoading = false; }
         }
         Action _statsToggle;
@@ -333,8 +357,8 @@ namespace SkinManager.App
             turnOff.Click += (s, e) =>
             {
                 var c = new Installer.Change(); c.StageDisable.AddRange(_unsafe);
-                Run(c, "Turned off. To keep their looks, open My Mods, use \"Add more from this download\" on them and pick \"Use its looks on P+'s ...\": that version is safe online.");
-                _unsafeBanner.Visible = false;
+                if (Run(c, "Turned off. To keep their looks, open My Mods, use \"Add more from this download\" on them and pick \"Use its looks on P+'s ...\": that version is safe online."))
+                    _unsafeBanner.Visible = false;
             };
             _unsafeBanner.Controls.Add(_unsafeText); _unsafeBanner.Controls.Add(turnOff);
             _unsafeBanner.Resize += (s, e) => { turnOff.Location = new Point(_unsafeBanner.Width - turnOff.Width - 18, (_unsafeBanner.Height - turnOff.Height) / 2); _unsafeText.Width = turnOff.Left - 30; };
@@ -344,9 +368,13 @@ namespace SkinManager.App
             var save = new Button { Text = "Save to SD card", FlatStyle = FlatStyle.Flat, BackColor = Theme.AccentText, ForeColor = Theme.Accent, Font = Theme.BodyBold, AutoSize = true, Padding = new Padding(12, 4, 12, 4), Cursor = Cursors.Hand };
             save.FlatAppearance.BorderSize = 0;
             save.Click += (s, e) => SavePending();
-            var undo = new Button { Text = "Undo", FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Theme.AccentText, Font = Theme.Body, AutoSize = true, Cursor = Cursors.Hand };
+            var undo = new Button { Text = "Discard changes", FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Theme.AccentText, Font = Theme.Body, AutoSize = true, Cursor = Cursors.Hand };
             undo.FlatAppearance.BorderColor = Theme.AccentText;
-            undo.Click += (s, e) => { _pending.Clear(); PendingChanged(); };
+            undo.Click += (s, e) =>
+            {
+                if (MessageBox.Show(this, "Forget the switches you haven't saved yet? Your SD card stays exactly as it is.", "Discard changes", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                _pending.Clear(); PendingChanged();
+            };
             _saveBar.Controls.Add(_saveText); _saveBar.Controls.Add(save); _saveBar.Controls.Add(undo);
             _saveBar.Resize += (s, e) =>
             {
@@ -364,7 +392,7 @@ namespace SkinManager.App
             BuildSlotsPage();
             _swap = new SwapPanel(() => _installer, folder => AddSkin(folder)) { Visible = false };
             _look.ApplyOverlay();
-            _settings = new SettingsPanel(_look, () => { _look.ApplyOverlay(); _card?.Invalidate(); _report?.Invalidate(); _full?.Invalidate(); _backdrop.Apply(_look); _statsToggle?.Invoke(); ApplyHotkey(); Invalidate(true); }) { Visible = false };
+            _settings = new SettingsPanel(_look, () => { _look.ApplyOverlay(); _card?.Invalidate(); _report?.Invalidate(); _full?.Invalidate(); _backdrop.Apply(_look); _statsToggle?.Invoke(); ApplyHotkey(); Invalidate(true); }) { Visible = false, SaveFirst = () => SavedFirst() };
             _content.Controls.Add(_library); _content.Controls.Add(_store); _content.Controls.Add(_slotsPage); _content.Controls.Add(_swap); _content.Controls.Add(_settings);
             _credits = new CreditsPanel { Visible = false }; _content.Controls.Add(_credits);
             _stats = new StatsPanel(() => _install, () => _installer) { Visible = false }; _content.Controls.Add(_stats);
@@ -412,7 +440,9 @@ namespace SkinManager.App
             Activated += (s, e) => { if (_install != null && !_busy) UpdateStatus(); };
             FormClosing += (s, e) =>
             {
-                if (_pending.Count == 0 || _busy) return;
+                // never in the middle of changing the SD card (a save, an undo, a card switch): stopping half way could leave it half done
+                if (_busy) { e.Cancel = true; if (e.CloseReason != CloseReason.WindowsShutDown) MessageBox.Show(this, "The app is still changing your SD card. Wait for it to finish, then close it.", "One moment", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                if (_pending.Count == 0) return;
                 var answer = MessageBox.Show(this, $"You switched {_pending.Count} skin(s) on or off but didn't save that to your SD card yet.\r\n\r\nSave before closing?", "Save changes?", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                 if (answer == DialogResult.Cancel) { e.Cancel = true; return; }
                 if (answer == DialogResult.Yes) { e.Cancel = true; if (SavePending()) BeginInvoke((Action)Close); }
@@ -535,6 +565,22 @@ namespace SkinManager.App
                     BeginInvoke((Action)(() => { ShowPage(_settings); _settings.PickDolphin(); }));
                 return;
             }
+            try { StartWithCard(); }
+            catch (Exception e)
+            {
+                // a damaged mods list (or a card that can't be read) mustn't leave the app half set up and crashing later
+                Program.Log("startup", e);
+                _lib = null; _installer = null;
+                _status.Text = "Couldn't load your mods. " + Friendly.Explain(e); _status.ForeColor = Theme.Bad;
+                _addButton.Enabled = false;
+                MessageBox.Show(this, "The app couldn't load your list of mods:\r\n\r\n" + Friendly.Explain(e) +
+                    "\r\n\r\nYour SD card wasn't changed. Reporting it (Settings > Report a problem) gets it fixed; Frame Data and the Stat Tracker still work.",
+                    "P+ Modding Tool", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        void StartWithCard()
+        {
             _cards = new Cards(_install, CardData);
             _lastSave = new LastSave(CardData);
             _launchClean.Visible = _install.OwnCard;
@@ -559,25 +605,53 @@ namespace SkinManager.App
             CheckModUpdates();
             RescanHand();
             CheckAppUpdate(false);
-            BeginInvoke((Action)(() => SelfUpdate.OfferShortcuts(this)));
+            // one question at a time: the shortcuts offer waits for a start when nothing else had to be said
+            if (!_saidAtStart) BeginInvoke((Action)(() => SelfUpdate.OfferShortcuts(this)));
             if (_openOnStart != null) BeginInvoke((Action)(() => AddSkin(_openOnStart)));
         }
 
+        bool _saidAtStart;   // a message was already shown at startup
+
         string CardName => _install != null && !_install.OwnCard ? "Your Dolphin's SD card (not used online)" : _cards?.HasBig == true ? Cards.Label(_cards.Active) : "Your P+ SD card";
 
-        void UpdateStatus()
+        bool _statusRunning, _statusAgain;
+        /// <summary>The header's line about the SD card (free space, whether Brawl Online is open). Read in the background:
+        /// it runs every time the window comes back into focus, so it must never make the window wait.</summary>
+        async void UpdateStatus()
         {
+            if (_installer == null || _install == null) return;
+            if (_statusRunning) { _statusAgain = true; return; }
+            _statusRunning = true;
             try
             {
-                using (var card = _installer.OpenCard()) _space = SkinManager.Core.Space.Measure(card, _lib);
-                bool running = _install.IsRunning(out string what);
+                var installer = _installer; var install = _install; var lib = _lib;
+                var (space, running, what) = await Task.Run(() =>
+                {
+                    using (var card = installer.OpenCard())
+                    {
+                        var sp = SkinManager.Core.Space.Measure(card, lib);
+                        bool r = install.IsRunning(out string w);
+                        return (sp, r, w);
+                    }
+                });
+                if (IsDisposed) return;
+                _space = space;
                 _library.ShowSpace(_space);
                 if (_updateNote != null && !running) { _status.Text = $"{CardName}: {SkinManager.Core.Space.MB(_space.Usable)} free for mods   •   {_updateNote}"; _status.ForeColor = Theme.Warn; return; }
                 _status.Text = $"{CardName}: {SkinManager.Core.Space.MB(_space.Usable)} free for mods   •   " +
-                    (running ? $"Close {what} to change skins" : "Ready");
+                    (running ? $"Close {what} to change mods" : "Ready");
                 _status.ForeColor = running ? Theme.Warn : Theme.Muted;
             }
-            catch (Exception e) { _status.Text = "Could not read the SD card: " + e.Message; _status.ForeColor = Theme.Bad; }
+            catch (Exception e)
+            {
+                Program.Log("reading the SD card", e);
+                if (!IsDisposed) { _status.Text = "Couldn't read the SD card. " + Friendly.Explain(e); _status.ForeColor = Theme.Bad; }
+            }
+            finally
+            {
+                _statusRunning = false;
+                if (_statusAgain && !IsDisposed) { _statusAgain = false; UpdateStatus(); }
+            }
         }
 
         /// <summary>Looks for a newer version of the app on its releases page (asked: right now, and says so when there's none).</summary>
@@ -615,7 +689,7 @@ namespace SkinManager.App
             {
                 Program.Log("updating the app", e);
                 _appText.Text = before;
-                MessageBox.Show(this, "The update couldn't be downloaded: " + e.Message + "\r\n\r\nNothing was changed. You can try again later.", "App updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "The update couldn't be downloaded: " + Friendly.Explain(e) + "\r\n\r\nNothing was changed. You can try again later.", "App updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 button.Enabled = true;
             }
         }
@@ -747,7 +821,9 @@ namespace SkinManager.App
                     del.Click += (s, e) =>
                     {
                         if (!CardsCanChange()) return;
-                        try { _cards.DeleteClean(); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                        if (MessageBox.Show(this, "Delete the clean card (P+ with no mods)? Your mods and your normal SD card aren't touched. The app makes a new clean card the next time you use \"Launch unmodded\".",
+                            "Delete the clean card", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                        try { _cards.DeleteClean(); } catch (Exception ex) { MessageBox.Show(this, Friendly.Explain(ex), "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                         UpdateStatus();
                     };
                     menu.Items.Add(del);
@@ -777,6 +853,7 @@ namespace SkinManager.App
                 if (old.Length > 1 && old[1] != (v.Dolphin ?? "")) lines.Add($"Its Dolphin: {old[1]} → {v.Dolphin}");
                 if (old.Length > 2 && old[2] != (v.PPlus ?? "")) lines.Add($"Project+: {old[2]} → {v.PPlus}. Your mods were checked against it; if any were replaced by the update, the yellow bar at the top puts them back after checking them again.");
                 if (lines.Count > 0)
+                    _saidAtStart = true;
                     BeginInvoke((Action)(() => MessageBox.Show(this, "Updated since you last opened the app:\r\n\r\n• " + string.Join("\r\n• ", lines), "Updates", MessageBoxButtons.OK, MessageBoxIcon.Information)));
             }
             Task.Run(() =>
@@ -834,7 +911,7 @@ namespace SkinManager.App
                 "Texture pack", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             TexturePack pack = null;
             var error = WithProgress(report => pack = _textures.Add(folder, name, source, sourcePath, report));
-            if (error != null) { MessageBox.Show(this, error.Message, "Couldn't add the textures", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (error != null) { MessageBox.Show(this, Friendly.Explain(error), "Couldn't add the textures", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             _library.Refresh();
             MessageBox.Show(this, $"Added \"{pack.Name}\". You'll see it the next time you play from Brawl Online.\r\n\r\nIt's in My Mods > Textures, where you can turn it off or on.", "Texture pack", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -843,14 +920,14 @@ namespace SkinManager.App
         {
             if (_busy) return;
             var error = WithProgress(report => _textures.SetOn(p, on, report));
-            if (error != null) MessageBox.Show(this, error.Message, "Couldn't change the textures", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (error != null) MessageBox.Show(this, Friendly.Explain(error), "Couldn't change the textures", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             _library.Refresh();
         }
 
         public void Delete(TexturePack p)
         {
             if (MessageBox.Show(this, $"Delete the texture pack \"{p.Name}\"?", "Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            try { _textures.Delete(p); } catch (Exception e) { MessageBox.Show(this, e.Message, "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            try { _textures.Delete(p); } catch (Exception e) { MessageBox.Show(this, Friendly.Explain(e), "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             _library.Refresh();
         }
 
@@ -890,7 +967,7 @@ namespace SkinManager.App
                 path = GameBanana.Download(f, GameBanana.DownloadFolder(Program.DataFolder, modId),
                     (done, total) => report($"Downloading {f.Name}", total > 0 ? (int)Math.Min(100, done * 100 / total) : 0), System.Threading.CancellationToken.None);
             });
-            if (error != null) { MessageBox.Show(this, (error is GbException ? error.Message : "The update didn't download: " + error.Message), "Couldn't update", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (error != null) { MessageBox.Show(this, (error is GbException ? error.Message : "The update didn't download: " + Friendly.Explain(error)), "Couldn't update", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (f == null || path == null)
             {
                 _updates.Remove(fileId); _library.Refresh();
@@ -921,6 +998,9 @@ namespace SkinManager.App
         string CardData => _install == null || _install.OwnCard ? Program.DataFolder : OtherCards.DataFolderFor(Program.DataFolder, _install.CardPath);
         Installer NewInstaller() => new Installer(_install, _lib) { Undo = _lastSave, CardName = _cards?.Active ?? Cards.Normal };
 
+        /// <summary>"Undo last save" from Settings.</summary>
+        public void UndoLastSaveAsked() { if (_install == null || _cards == null) { MessageBox.Show(this, "There's no save to undo yet.", "Undo last save"); return; } UndoLastSave(); }
+
         void UndoLastSave()
         {
             if (!CardsCanChange()) return;
@@ -932,7 +1012,7 @@ namespace SkinManager.App
             var error = WithProgress(report => _lastSave.Undo(_install, _lib, _cards.Active, report));
             ReloadLibrary();
             UpdateStatus();
-            if (error != null) MessageBox.Show(this, error.Message + "\r\n\r\nYour SD card wasn't changed.", "Couldn't undo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (error != null) MessageBox.Show(this, Problem(error, "Your SD card wasn't changed."), "Couldn't undo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             else MessageBox.Show(this, "Done: your SD card and mods are back to how they were before your last save.", "Undo last save", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
@@ -945,6 +1025,36 @@ namespace SkinManager.App
             }
             return SavedFirst();
         }
+
+        /// <summary>Runs slow work (opening a download, reading the SD card) off the window's thread, with a small "working"
+        /// window so the app stays responsive and can't be clicked into a half-done state. Its error is thrown here.</summary>
+        T Wait<T>(string message, Func<T> work)
+        {
+            T result = default(T); Exception error = null;
+            using (var progress = new ProgressForm(message, marquee: true))
+            {
+                progress.Shown += async (s, e) =>
+                {
+                    try { result = await Task.Run(work); }
+                    catch (Exception ex) { error = ex; }
+                    progress.Close();
+                };
+                progress.ShowDialog(this);
+            }
+            if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+            return result;
+        }
+
+        /// <summary>The P+ release Brawl Online has (its files, to compare cards with); null when it can't be read.</summary>
+        PPlusRelease CurrentRelease()
+        {
+            try { return Versions.Release(_install, Versions.Read(_install).PPlus); }
+            catch (Exception e) { Program.Log("reading the P+ version", e); return null; }
+        }
+
+        /// <summary>What went wrong with a card job, in plain words: and whether the card changed (a job that got past
+        /// changing the card says so itself).</summary>
+        static string Problem(Exception e, string unchanged) => e is SavedButException ? e.Message : Friendly.Explain(e) + "\r\n\r\n" + unchanged;
 
         /// <summary>Runs a long card job with the progress window; returns the error, if any.</summary>
         Exception WithProgress(Action<Action<string, int>> job)
@@ -962,7 +1072,7 @@ namespace SkinManager.App
                 progress.ShowDialog(this);
             }
             _busy = false;
-            if (error != null) Program.Trace("card job failed: " + error);
+            if (error != null) { Program.Trace("card job failed: " + error); Program.Log("card job", error); }
             return error;
         }
 
@@ -978,7 +1088,7 @@ namespace SkinManager.App
                 "Make a big card", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (answer != DialogResult.Yes) return;
             var error = WithProgress(report => _cards.MakeBig(report));
-            if (error != null) { MessageBox.Show(this, error.Message + "\r\n\r\nNothing was changed.", "Couldn't make the big card", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (error != null) { MessageBox.Show(this, Problem(error, "Nothing was changed."), "Couldn't make the big card", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (MessageBox.Show(this, "The big card is ready. Switch to it now?", "Big card", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 SwitchCard(Cards.Big);
         }
@@ -988,7 +1098,7 @@ namespace SkinManager.App
             if (!CardsCanChange()) return;
             if (MessageBox.Show(this, "Delete the big card and the mods list that goes with it? The mods' downloads stay in My Mods' Downloaded tab.", "Delete the big card",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-            try { _cards.DeleteBig(); } catch (Exception e) { MessageBox.Show(this, e.Message, "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            try { _cards.DeleteBig(); } catch (Exception e) { MessageBox.Show(this, Friendly.Explain(e), "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             UpdateStatus();
         }
 
@@ -998,7 +1108,7 @@ namespace SkinManager.App
             if (to == _cards.Active) return true;
             if (!CardsCanChange()) return false;
             var notes = new List<string>();
-            var release = Versions.Release(_install, Versions.Read(_install).PPlus);
+            var release = CurrentRelease();
             var error = WithProgress(report =>
             {
                 // the card coming in may have missed P+ updates while it was put away
@@ -1012,7 +1122,7 @@ namespace SkinManager.App
                 report("Switching cards", 100);
                 _cards.Switch(to);
             });
-            if (error != null) { MessageBox.Show(this, error.Message + "\r\n\r\nThe card in use wasn't changed.", "Couldn't switch cards", MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
+            if (error != null) { MessageBox.Show(this, Problem(error, "The card in use wasn't changed."), "Couldn't switch cards", MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
             ReloadLibrary();
             UpdateStatus();
             if (quiet && notes.Count == 0) return true;
@@ -1073,7 +1183,7 @@ namespace SkinManager.App
                 var dolphin = new[] { Path.Combine(_install.OtherDolphin, "Dolphin.exe"), Path.Combine(Path.GetDirectoryName(_install.OtherDolphin) ?? "", "Dolphin.exe") }.FirstOrDefault(File.Exists);
                 if (dolphin == null) { MessageBox.Show(this, "Your mods are saved on your Dolphin's SD card. Open your Dolphin as usual to play with them.", "Your Dolphin", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dolphin) { WorkingDirectory = Path.GetDirectoryName(dolphin), UseShellExecute = true }); }
-                catch (Exception e) { MessageBox.Show(this, "Couldn't open your Dolphin: " + e.Message, "Your Dolphin", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception e) { MessageBox.Show(this, "Couldn't open your Dolphin: " + Friendly.Explain(e), "Your Dolphin", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 return;
             }
             string exe = FindLauncher();
@@ -1092,16 +1202,16 @@ namespace SkinManager.App
                         "It takes about 2 GB on the drive Brawl Online is on and a minute or two. After that, switching between modded and unmodded is instant, and your mods stay where they are.\r\n\r\nMake it now?",
                         "Clean card", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                     if (!CardsCanChange()) return;
-                    var release = Versions.Release(_install, Versions.Read(_install).PPlus);
+                    var release = CurrentRelease();
                     var libs = new List<Library> { new Library(_cards.LibraryFolder(Cards.Normal)) };
                     if (Directory.Exists(_cards.LibraryFolder(Cards.Big))) libs.Add(new Library(_cards.LibraryFolder(Cards.Big)));
                     var error = WithProgress(report => _cards.MakeClean(release, libs, report));
-                    if (error != null) { MessageBox.Show(this, error.Message + "\r\n\r\nYour SD card wasn't changed.", "Couldn't make the clean card", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                    if (error != null) { MessageBox.Show(this, Problem(error, "Your SD card wasn't changed."), "Couldn't make the clean card", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
                 }
                 if (!SwitchCard(Cards.Clean, quiet: true)) return;
             }
             try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe) }); }
-            catch (Exception e) { MessageBox.Show(this, "Brawl Online didn't open: " + e.Message, "Launch", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            catch (Exception e) { MessageBox.Show(this, "Brawl Online didn't open: " + Friendly.Explain(e), "Launch", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             _status.Text = $"Opened Brawl Online with the {Cards.Label(_cards.Active).ToLowerInvariant()}.";
             _status.ForeColor = Theme.Good;
         }
@@ -1120,7 +1230,7 @@ namespace SkinManager.App
             if (error != null)
             {
                 Program.Log("checking stages before launch", error);
-                return MessageBox.Show(this, "The app couldn't check your stage mods before launching (" + error.Message + ").\r\n\r\n" +
+                return MessageBox.Show(this, "The app couldn't check your stage mods before launching (" + Friendly.Explain(error) + ").\r\n\r\n" +
                     "If a stage mod doesn't match P+, online games on it go out of sync. Launch anyway?", "Launch modded",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
             }
@@ -1200,12 +1310,12 @@ namespace SkinManager.App
                         var release = fresh ? CardBaseline.Make(card, CardData, libs) : CardBaseline.For(card, _install, CardData, libs);
                         HandMods.Last = HandMods.Scan(card, release, libs, System.IO.Path.Combine(CardData, "Cache", "card-files-" + _cards.Active + ".json"));
                     }
-                    _library.ShowHand(HandMods.Last);
                 }
                 catch (Exception e) { Program.Log("looking for mods put on by hand", e); }
-                return HandMods.Last;
+                return HandMods.Last;   // (runs in the background: the window is updated once it's closed)
             }))
                 f.ShowDialog(this);
+            if (HandMods.Last != null) _library.ShowHand(HandMods.Last);
         }
 
         bool SavedFirst()
@@ -1361,14 +1471,14 @@ namespace SkinManager.App
 
         public void Delete(InstalledStage s)
         {
-            string text = s.Enabled
-                ? $"Delete \"{s.Name}\" from My Mods?\r\n\r\nIt's on right now, so P+'s own {s.Target.Label} goes back."
-                : $"Delete \"{s.Name}\" from My Mods?\r\n\r\nIt's off, so nothing on your SD card changes.";
+            string text = $"Delete \"{s.Name}\" from My Mods?\r\n\r\n" + (s.Enabled ? $"It's on right now, so P+'s own {s.Target.Label} goes back. " : "It's off, so nothing on your SD card changes. ") +
+                          AgainLine(SourceOf(s));
             if (MessageBox.Show(this, text, "Delete stage", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _pending.Remove(s.Id);
             if (!s.Enabled)
             {
-                _lib.Stages.Remove(s); _lib.Save();
+                _lib.Stages.Remove(s);
+                if (!SaveList()) { _lib.Stages.Add(s); return; }
                 try { Directory.Delete(_lib.StageFolder(s.Id), true); } catch { }
                 PendingChanged();
                 return;
@@ -1431,16 +1541,15 @@ namespace SkinManager.App
 
         public void Delete(InstalledSkin s)
         {
-            string text = s.Enabled
-                ? $"Delete \"{s.Name}\" from My Mods?\r\n\r\nIt's on right now, so P+'s own costume goes back in {s.Character.Name}'s costume {s.SlotIndex + 1}."
-                : $"Delete \"{s.Name}\" from My Mods?\r\n\r\nIt's off, so nothing on your SD card changes.";
+            string text = $"Delete \"{s.Name}\" from My Mods?\r\n\r\n" + (s.Enabled ? $"It's on right now, so P+'s own costume goes back in {s.Character.Name}'s costume {s.SlotIndex + 1}. " : "It's off, so nothing on your SD card changes. ") +
+                          AgainLine(SourceOf(s));
             if (MessageBox.Show(this, text, "Delete skin", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _pending.Remove(s.Id);
             if (!s.Enabled)
             {
                 // nothing on the card: just forget it
                 _lib.Skins.Remove(s);
-                _lib.Save();
+                if (!SaveList()) { _lib.Skins.Add(s); return; }
                 try { Directory.Delete(_lib.SkinFolder(s.Id), true); } catch { }
                 PendingChanged();
                 return;
@@ -1461,6 +1570,18 @@ namespace SkinManager.App
         }
 
         /// <summary>The download a skin came from, if it's still on this PC.</summary>
+        /// <summary>Whether a deleted mod can come back: from its download, or not at all.</summary>
+        static string AgainLine(string source) => source != null
+            ? "Its download stays, so you can add it again later (My Mods > Downloaded, or the file you added it from)."
+            : "Its download isn't on this PC any more, so this can't be undone.";
+
+        /// <summary>Writes the list of mods; says so if it can't (nothing is lost: the list in memory is put back by the caller).</summary>
+        bool SaveList()
+        {
+            try { _lib.Save(); return true; }
+            catch (Exception e) { Program.Log("save list", e); MessageBox.Show(this, Friendly.Explain(e) + "\r\n\r\nNothing was deleted.", "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
+        }
+
         public string SourceOf(InstalledSkin s)
         {
             if (!string.IsNullOrEmpty(s.SourcePath) && (File.Exists(s.SourcePath) || Directory.Exists(s.SourcePath))) return s.SourcePath;
@@ -1491,20 +1612,43 @@ namespace SkinManager.App
 
         static string BaseName(string name) => System.Text.RegularExpressions.Regex.Replace(name ?? "", @"\s+(\(.*\)|#\w+)$", "");
 
-        public Image SlotPicture(InstalledSkin s)
+        /// <summary>P+'s select-screen picture for the slot a skin is in (for skins without their own): read off the window's
+        /// thread, so My Mods never waits on the SD card.</summary>
+        public async Task<Image> SlotPictureAsync(InstalledSkin s)
         {
             var c = s.Character;
             // P+'s own picture for the slot (saved when a skin first replaced it), else what the card shows now
             var original = _lib.OriginalPicture(c.CspFilePath, c.CspTextureName(s.SlotIndex));
             if (original != null) return original;
-            if (!_pictureCache.TryGetValue(c.SlotListId, out var pics))
-                using (var card = _installer.OpenCard())
+            var look = await ReadCharacter(c);
+            return look.Pictures.TryGetValue(c.CspTextureName(s.SlotIndex), out var p) ? p : null;
+        }
+
+        /// <summary>A character's costume slots and select-screen pictures as they are on the SD card. Read in the background
+        /// (one read per character at a time); the pictures are kept until a save changes them. Only touched on the window's thread.</summary>
+        Task<(List<CostumeSlot> Slots, Dictionary<string, Bitmap> Pictures)> ReadCharacter(Character c)
+        {
+            if (_reading.TryGetValue(c.SlotListId, out var running)) return running;
+            _pictureCache.TryGetValue(c.SlotListId, out var known);
+            var installer = _installer;
+            var task = Task.Run(() =>
+            {
+                using (var card = installer.OpenCard())
                 {
                     var slots = PPlusCard.ReadSlots(card, c);
-                    _pictureCache[c.SlotListId] = pics = Cosmetics.ReadPictures(card.ReadFile(c.CspFilePath), slots.Select(x => c.CspTextureName(x.Index)));
+                    return (slots, known ?? Cosmetics.ReadPictures(card.ReadFile(c.CspFilePath), slots.Select(x => c.CspTextureName(x.Index))));
                 }
-            return pics.TryGetValue(c.CspTextureName(s.SlotIndex), out var p) ? p : null;
+            });
+            _reading[c.SlotListId] = task;
+            task.ContinueWith(t =>
+            {
+                _reading.Remove(c.SlotListId);
+                if (t.Status == TaskStatus.RanToCompletion) _pictureCache[c.SlotListId] = t.Result.Item2;
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+            return task;
         }
+        readonly Dictionary<int, Task<(List<CostumeSlot> Slots, Dictionary<string, Bitmap> Pictures)>> _reading = new Dictionary<int, Task<(List<CostumeSlot> Slots, Dictionary<string, Bitmap> Pictures)>>();
+        int _showing;   // which ShowCharacter is the latest (an older one that finishes later is ignored)
 
         // ----- costume slots page -----
 
@@ -1523,34 +1667,30 @@ namespace SkinManager.App
 
         Character Current => _characters.SelectedItem as Character;
 
-        void ShowCharacter(bool refreshPictures = false)
+        async void ShowCharacter(bool refreshPictures = false)
         {
             var c = Current;
             if (c == null || _installer == null || !_slotsPage.Visible) return;
             if (refreshPictures) _pictureCache.Remove(c.SlotListId);
             Program.Trace("show " + c.Name);
+            int me = ++_showing;
             _charTitle.Text = c.Name;
+            _charHint.Text = "Reading the costumes on your SD card...";
             _slots.SuspendLayout();
             foreach (Control old in _slots.Controls) old.Dispose();
             _slots.Controls.Clear();
+            _slots.ResumeLayout();
             List<CostumeSlot> slots;
             Dictionary<string, Bitmap> pics;
-            try
-            {
-                using (var card = _installer.OpenCard())
-                {
-                    slots = PPlusCard.ReadSlots(card, c);
-                    if (!_pictureCache.TryGetValue(c.SlotListId, out pics))
-                        _pictureCache[c.SlotListId] = pics = Cosmetics.ReadPictures(card.ReadFile(c.CspFilePath), slots.Select(s => c.CspTextureName(s.Index)));
-                }
-            }
+            try { (slots, pics) = await ReadCharacter(c); }
             catch (Exception e)
             {
-                Program.Trace("read failed: " + e);
-                _charHint.Text = "Could not read this character from the SD card: " + e.Message;
-                _slots.ResumeLayout();
+                Program.Trace("read failed: " + e); Program.Log("costume slots", e);
+                if (me == _showing) _charHint.Text = "Couldn't read " + c.Name + " from your SD card. " + Friendly.Explain(e);
                 return;
             }
+            if (me != _showing || IsDisposed || Current != c) return;   // another character was picked meanwhile
+            _slots.SuspendLayout();
             Program.Trace($"slots {slots.Count}, pictures {pics.Count}");
             _charHint.Text = $"{slots.Count} costumes, in the order the character select screen shows them, as they are on your SD card now. Click one of your skins to turn it off.";
             foreach (var s in slots)
@@ -1616,7 +1756,8 @@ namespace SkinManager.App
 
         void AddSkin(string path, SkinSource source = null, List<string> files = null)
         {
-            if (_busy) return;
+            // a download that finishes while the SD card is being changed: its turn comes right after
+            if (_busy) { _afterCardWork.Add(() => AddSkin(path, source, files)); return; }
             if (path != null && MusicImport.IsAudio(path) && _installer != null) { AddOwnMusic(new List<string> { path }); return; }
             if (_installer == null)
             {
@@ -1631,20 +1772,21 @@ namespace SkinManager.App
             string folder;
             try
             {
-                Cursor = Cursors.WaitCursor;
-                folder = files != null ? Archives.OpenAll(files) : Archives.Open(path);
                 string name = Path.GetFileNameWithoutExtension(path.TrimEnd('\\', '/'));
-                pkg = SkinPackage.Scan(folder, source?.ModName ?? name);
+                (folder, pkg) = Wait("Opening " + (source?.ModName ?? name), () =>
+                {
+                    var f = files != null ? Archives.OpenAll(files) : Archives.Open(path);
+                    return (f, SkinPackage.Scan(f, source?.ModName ?? name));
+                });
                 pkg.Source = source;
                 pkg.SourcePath = originalPath;
             }
             catch (Exception e)
             {
-                Program.Trace("open failed: " + e);
-                MessageBox.Show(this, e.Message, "Couldn't open that skin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Program.Trace("open failed: " + e); Program.Log("opening a mod", e);
+                MessageBox.Show(this, Friendly.Explain(e), "Couldn't open that mod", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            finally { Cursor = Cursors.Default; }
             Program.Trace($"package: {pkg.Costumes.Count} costumes, {pkg.StageFiles.Count} stages, {pkg.Pictures.Count} pictures");
             if (pkg.Costumes.Count == 0 && pkg.StageFiles.Count == 0 && pkg.SongFiles.Count > 0)
             {
@@ -1699,7 +1841,10 @@ namespace SkinManager.App
             while (true)
             {
                 PackageCostume start;
-                using (var pack = new PackForm(_installer, _lib, pkg, Replacing()))
+                PackForm made;
+                try { made = new PackForm(_installer, _lib, pkg, Replacing()); }
+                catch (Exception e) { Program.Log("costume pack", e); MessageBox.Show(this, "Couldn't show the costumes in this download. " + Friendly.Explain(e), "Couldn't open it", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                using (var pack = made)
                 {
                     var answer = pack.ShowDialog(this);
                     if (answer == DialogResult.OK && pack.Plans.Count > 0)
@@ -1808,7 +1953,7 @@ namespace SkinManager.App
                 progress.ShowDialog(this);
             }
             _busy = false;
-            if (error == null) _pending.Clear();
+            if (error == null || error is SavedButException) _pending.Clear();   // the card has these changes now
             _pictureCache.Clear();
             PendingChanged();
             ShowCharacter(refreshPictures: true);
@@ -1816,12 +1961,16 @@ namespace SkinManager.App
             if (error != null)
             {
                 Program.Trace("apply failed: " + error);
-                MessageBox.Show(this, error.Message + "\r\n\r\nNothing was changed on your SD card.", "Couldn't finish", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Program.Log("save", error);
+                if (error is SavedButException) MessageBox.Show(this, error.Message, "Saved, with a problem", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else MessageBox.Show(this, Friendly.Explain(error) + "\r\n\r\nNothing was changed on your SD card.", "Couldn't save", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             else if (doneMessage != null)
             {
                 var notes = _installer.Notes.ToList();
                 string undoLine = _installer.UndoNote ?? "Changed your mind? Profile ▾ > Undo last save puts it back.";
+                int stayedOff = notes.Count(n => n.Contains("stayed off"));   // asked to go on, but couldn't: the count above includes them
+                if (stayedOff > 0) doneMessage = stayedOff == 1 ? "Saved, but one mod you turned on couldn't go on, so it stayed off (why is below)." : $"Saved, but {stayedOff} mods you turned on couldn't go on, so they stayed off (why is below).";
                 MessageBox.Show(this, doneMessage + "\r\n\r\n" + undoLine + (notes.Count > 0 ? "\r\n\r\nP+ has changed since some of your mods were made:\r\n• " + string.Join("\r\n• ", notes) : ""),
                     "Done", MessageBoxButtons.OK, notes.Any(n => n.Contains("turned off") || n.Contains("stayed off")) ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             }
@@ -1837,8 +1986,12 @@ namespace SkinManager.App
     {
         readonly Label _text = Theme.Label("Starting...", Theme.Body);
         readonly ProgressBar _bar = new ProgressBar { Width = 380, Height = 14, Maximum = 100 };
-        public ProgressForm()
+        /// <summary>message: what it's doing; marquee: no percentage, just "working" (for work that can't say how far along it is).</summary>
+        public ProgressForm(string message = null, bool marquee = false)
         {
+            if (message != null) _text.Text = message + "...";
+            if (marquee) { _bar.Style = ProgressBarStyle.Marquee; _bar.MarqueeAnimationSpeed = 30; }
+            _text.AutoSize = false; _text.Size = new Size(380, 30); _text.AutoEllipsis = true;
             Text = "Working"; FormBorderStyle = FormBorderStyle.FixedDialog; ControlBox = false;
             StartPosition = FormStartPosition.CenterParent; BackColor = Theme.Back; ForeColor = Theme.Text;
             ClientSize = new Size(420, 100); ShowInTaskbar = false; AutoScaleMode = AutoScaleMode.Dpi;

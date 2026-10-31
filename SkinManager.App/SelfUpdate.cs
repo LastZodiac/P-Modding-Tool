@@ -3,6 +3,7 @@
 // become *.old, the new ones move in, and the app starts again; the *.old files are deleted on the next start.
 // Also: shortcuts on the desktop and in the Start menu.
 using System;
+using SkinManager.Core;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -82,7 +83,7 @@ namespace SkinManager.App
                     // put everything back as it was
                     foreach (var m in Enumerable.Reverse(moved))
                         try { if (File.Exists(m.Target)) File.Delete(m.Target); if (m.Old != null) File.Move(m.Old, m.Target); } catch { }
-                    MessageBox.Show("The update couldn't be put in (" + e.Message + "). The app stays as it was.", "Update the app", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("The update couldn't be put in (" + Friendly.Explain(e) + "). The app stays as it was.", "Update the app", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
                 Clear(drop);
@@ -157,7 +158,7 @@ namespace SkinManager.App
             if (MessageBox.Show(owner, "Put a shortcut to P+ Modding Tool on your desktop and in the Start menu?\r\n\r\n(You can do this later in Settings too.)", "Shortcuts",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             try { MakeShortcut(DesktopShortcut); MakeShortcut(StartMenuShortcut); }
-            catch (Exception e) { MessageBox.Show(owner, "The shortcuts couldn't be made: " + e.Message, "Shortcuts", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (Exception e) { MessageBox.Show(owner, "The shortcuts couldn't be made: " + Friendly.Explain(e), "Shortcuts", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Windows.Forms;
+using SkinManager.Core;
 
 namespace SkinManager.App
 {
@@ -9,15 +10,19 @@ namespace SkinManager.App
         /// <summary>Downloads are unpacked into a temp folder to be read; ones older than half a day are no longer needed.</summary>
         static void CleanTemp()
         {
-            try
+            // "PPlusSkinManager" is the folder versions before the rename (1.0.0) used: nothing reads it any more
+            foreach (var name in new[] { "PPlusModdingTool", "PPlusSkinManager" })
             {
-                var dir = new System.IO.DirectoryInfo(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "PPlusModdingTool"));
-                if (!dir.Exists) return;
-                var cutoff = DateTime.Now.AddHours(-12);
-                foreach (var d in dir.GetDirectories()) if (d.LastWriteTime < cutoff) try { d.Delete(true); } catch { }
-                foreach (var f in dir.GetFiles()) if (f.LastWriteTime < cutoff) try { f.Delete(); } catch { }
+                try
+                {
+                    var dir = new System.IO.DirectoryInfo(System.IO.Path.Combine(System.IO.Path.GetTempPath(), name));
+                    if (!dir.Exists) continue;
+                    var cutoff = DateTime.Now.AddHours(-12);
+                    foreach (var d in dir.GetDirectories()) if (d.LastWriteTime < cutoff) try { d.Delete(true); } catch { }
+                    foreach (var f in dir.GetFiles()) if (f.LastWriteTime < cutoff) try { f.Delete(); } catch { }
+                }
+                catch { }
             }
-            catch { }
         }
 
         [STAThread]   // Windows' file dialogs, drag and drop and autocomplete only work on a single-threaded (STA) main thread
@@ -47,6 +52,18 @@ namespace SkinManager.App
         /// <summary>Running under the UI tests (they set SKINMANAGER_TRACE).</summary>
         public static bool Testing => Environment.GetEnvironmentVariable("SKINMANAGER_TRACE") != null;
 
+        /// <summary>Why the match history couldn't be read (shown on the overlays instead of "Reading..."); null when fine.</summary>
+        public static string HistoryProblem;
+
+        /// <summary>Why the overlay's hotkey couldn't be set (another program has it); null when it works.</summary>
+        public static string HotkeyProblem;
+
+        /// <summary>The app is changing the SD card right now (a save, an undo, a card switch).</summary>
+        public static bool Busy;
+
+        /// <summary>What a crash message can promise about the SD card.</summary>
+        static string CardLine => Busy ? "It happened while the SD card was being changed: check My Mods to see whether the change went through." : "Your SD card was not changed.";
+
         public static string DataFolder => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
 
         /// <summary>Notes an error the app recovered from in Data\errors.log (to find out later what went wrong).</summary>
@@ -62,7 +79,7 @@ namespace SkinManager.App
             using (var f = new Form { Text = "P+ Modding Tool", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterScreen, ClientSize = new System.Drawing.Size(520, 210), BackColor = Theme.Back, ForeColor = Theme.Text, Font = Theme.Body, TopMost = true })
             {
                 var text = new Label { AutoSize = false, Location = new System.Drawing.Point(18, 16), Size = new System.Drawing.Size(484, 120), ForeColor = Theme.Text,
-                    Text = "Something went wrong:\r\n\r\n" + e?.Message + "\r\n\r\nYour SD card was not changed. Reporting it gets it fixed: it takes a few seconds." };
+                    Text = "Something went wrong:\r\n\r\n" + Friendly.Explain(e) + "\r\n\r\n" + CardLine + " Reporting it gets it fixed: it takes a few seconds." };
                 var report = Theme.Primary("Report it"); report.Location = new System.Drawing.Point(18, 156);
                 var ok = Theme.Secondary("Close"); ok.Location = new System.Drawing.Point(410, 156); ok.DialogResult = DialogResult.OK;
                 report.Click += (s, a2) => { f.Hide(); BugReport.Show(null, e); f.Close(); };
@@ -83,7 +100,7 @@ namespace SkinManager.App
             try { ShowCrash(e); }
             catch
             {
-                MessageBox.Show("Something went wrong:\r\n\r\n" + e?.Message + "\r\n\r\nYour SD card was not changed. The details were saved to Data\\errors.log.",
+                MessageBox.Show("Something went wrong:\r\n\r\n" + Friendly.Explain(e) + "\r\n\r\n" + CardLine + " The details were saved to Data\\errors.log.",
                     "P+ Modding Tool", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }

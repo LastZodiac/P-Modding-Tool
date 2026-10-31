@@ -107,7 +107,7 @@ namespace SkinManager.App
 
         void SetHeader(string title, string hint, string next)
         {
-            _stepTitle.Text = title; _stepHint.Text = hint; _next.Text = next;
+            _stepTitle.Text = title; _stepHint.Text = hint; _stepHint.ForeColor = Theme.Muted; _next.Text = next;
             var foot = _next.Parent; foot?.PerformLayout();
             if (foot != null) { _next.Location = new Point(foot.Width - _next.Width - 24, (foot.Height - _next.Height) / 2); _back.Location = new Point(_next.Left - _back.Width - 10, _next.Top); }
         }
@@ -162,10 +162,20 @@ namespace SkinManager.App
             _next.Enabled = false;
             var grid = Grid();
             List<CostumeSlot> slots; Dictionary<string, Bitmap> pics;
-            using (var card = _installer.OpenCard())
+            try
             {
-                slots = PPlusCard.ReadSlots(card, c);
-                pics = Cosmetics.ReadPictures(card.ReadFile(c.CspFilePath), slots.Select(s => c.CspTextureName(s.Index)));
+                using (var card = _installer.OpenCard())
+                {
+                    slots = PPlusCard.ReadSlots(card, c);
+                    pics = Cosmetics.ReadPictures(card.ReadFile(c.CspFilePath), slots.Select(s => c.CspTextureName(s.Index)));
+                }
+            }
+            catch (Exception e)
+            {
+                Program.Log("add skin: costumes", e);
+                _stepHint.Text = "Couldn't read " + c.Name + "'s costumes from your SD card. " + Friendly.Explain(e) + " Go Back, or close this and try again.";
+                _stepHint.ForeColor = Theme.Warn;
+                return;
             }
             var tiles = new Dictionary<CostumeSlot, SlotTile>();
             foreach (var s in slots)
@@ -194,7 +204,10 @@ namespace SkinManager.App
                 if (IsDisposed || _step != 1) return;
                 if (t.IsFaulted)
                 {
-                    _stepHint.Text = "Could not check the skin: " + t.Exception.GetBaseException().Message;
+                    Program.Log("add skin: fit check", t.Exception);
+                    foreach (var tile in tiles.Values) { tile.Badge = "Couldn't check"; tile.BadgeColor = Theme.Warn; tile.Invalidate(); }
+                    _stepHint.Text = "Couldn't check which costumes this skin fits. " + Friendly.Explain(t.Exception.GetBaseException()) + " Go Back and pick the skin again to retry.";
+                    _stepHint.ForeColor = Theme.Warn;
                     return;
                 }
                 int fits = 0;
@@ -345,7 +358,7 @@ namespace SkinManager.App
                 {
                     if (IsDisposed || _step != 3) return;
                     list.Controls.Clear();
-                    if (t.IsFaulted) { list.Controls.Add(Theme.Label("Could not check the skin: " + t.Exception.GetBaseException().Message, Theme.Body, Theme.Bad)); return; }
+                    if (t.IsFaulted) { list.Controls.Add(Theme.Label("Could not check the skin: " + Friendly.Explain(t.Exception.GetBaseException()), Theme.Body, Theme.Bad)); return; }
                     Plan = t.Result;
                     foreach (var check in Plan.Checks.GroupBy(x => x.Title + x.Passed).Select(g => g.First()))
                     {

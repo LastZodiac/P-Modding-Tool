@@ -45,7 +45,7 @@ namespace SkinManager.App
             Card(g, top);
             double pulse = 0.5 + 0.5 * Math.Sin(DateTime.Now.TimeOfDay.TotalSeconds * 4);
             using (var b = new SolidBrush(live ? Color.FromArgb((int)(140 + 115 * pulse), 235, 64, 52) : Color.FromArgb(90, 160, 160, 170))) g.FillEllipse(b, 16, y + 15, 16, 16);
-            string status = !Following ? "Not following a game: the overlay's add-on is off, or Brawl Online wasn't found."
+            string status = !Following ? "Not following a game: turn on the Stat Tracker in Settings (Add-ons), and make sure Brawl Online is set up on this PC."
                 : s == null || s.Phase == MatchPhase.None ? "Waiting for a match. Start one in Brawl Online and this fills in live."
                 : s.Phase == MatchPhase.Searching ? "Searching for a match…"
                 : s.Phase == MatchPhase.Found ? "Match found, connecting…"

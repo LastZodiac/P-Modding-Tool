@@ -281,7 +281,7 @@ namespace SkinManager.App
             using (var border = new Pen(OverlayLook.Accent, 2)) g.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
             var h = History; var s = State;
             Text(g, $"Press {Hotkey} to close", Theme.Small, Theme.Muted, new RectangleF(Width - 200, Height - 24, 186, 18));
-            if (h == null) { Text(g, "Reading your match history…", Theme.Heading, Theme.Text, new RectangleF(20, 20, Width - 40, 30)); return; }
+            if (h == null) { Text(g, Program.HistoryProblem ?? "Reading your match history…", Theme.Heading, Theme.Text, new RectangleF(20, 20, Width - 40, 30)); return; }
             bool match = s != null && s.OpponentName != null && s.Phase != MatchPhase.None && s.Phase != MatchPhase.Searching;
             if (match) Opponent(g, h, s); else Yourself(g, h);
         }

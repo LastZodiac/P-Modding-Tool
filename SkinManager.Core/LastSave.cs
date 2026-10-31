@@ -120,12 +120,21 @@ namespace SkinManager.Core
                 }
                 catch { try { if (File.Exists(newPath)) File.Delete(newPath); } catch { } throw; }
             }
+            // the card is back now: a problem from here on must say so
             progress?.Invoke("Putting the mods list back", 97);
-            foreach (var part in Parts)
+            try
             {
-                string mine = Path.Combine(lib.Folder, part), saved = Path.Combine(_folder, part);
-                Clear(mine);
-                if (File.Exists(saved) || Directory.Exists(saved)) CopyPart(saved, mine);
+                foreach (var part in Parts)
+                {
+                    string mine = Path.Combine(lib.Folder, part), saved = Path.Combine(_folder, part);
+                    Clear(mine);
+                    if (File.Exists(saved) || Directory.Exists(saved)) CopyPart(saved, mine);
+                }
+            }
+            catch (Exception e)
+            {
+                throw new SavedButException("Your SD card is back to how it was before your last save, but the app couldn't put its list of mods back (" +
+                                            Friendly.Explain(e) + "). Close and reopen the app: if My Mods looks wrong after that, report it from Settings > Report a problem.", e);
             }
             Clear(_folder);   // the card it was taken from is gone; nothing to go back to now
             progress?.Invoke("Done", 100);

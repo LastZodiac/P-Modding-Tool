@@ -199,9 +199,9 @@ Set `SKINMANAGER_GB_BASE` / `SKINMANAGER_GB_IMAGES` to point the app at a local 
 ## Launch protection
 - MainForm.StagesSafeToLaunch: "Launch modded" re-checks stage mods (Installer.UnsafeStages) and will not open Brawl Online while one fails; one click turns them off, saves and launches. Confirmed by Brawl Online logs: every desync (GHZ x2, Dream Land x3) was on the two flagged stages; 20 games on other custom stages had none.
 
-## Model Swapper: GLB/glTF and pictures for AI
+## Model Swapper: GLB/glTF and reference pictures
 - ModelSwapGltf.cs: .glb/.gltf (scene transforms, materials -> parts, base colour pictures saved as PNG to temp, plain colour as a 4x4 picture; Draco/meshopt refused with a plain message). Tested: OBJ, GLB and glTF of the same model load identically.
-- ModelPreview.RenderViews + "Save pictures for AI...": front/side/back, one shared scale, no perspective, default pose, 1024 px on white, plus a how-to with the height.
+- ModelPreview.RenderViews + "Save P+ Model Pictures": front/side/back, one shared scale, no perspective, default pose, 1024 px on white, plus a how-to with the height.
 
 ## Model Swapper: rigging by the skeleton
 - ModelSwapRig.cs: each point follows the nearest body-bone segments (joint to next joint), up to 3 blended (1/d^4 within 1.35x of the closest). Left out: bones with no weights, attachments (names ending in M), soft parts (skirt, hair, cape, tail, ear, coat...), fingers and face bones. The old way (nearest P+ costume point) made jeans follow Peach's dress bones. ModelSwap.UseSkeleton switches back.
@@ -226,7 +226,7 @@ Set `SKINMANAGER_GB_BASE` / `SKINMANAGER_GB_IMAGES` to point the app at a local 
 - LineUp now turns each body part onto P+'s bone (rotation + stretch along the bone, normals turned too) instead of
   smearing by translation. Middle-line dots only slide up/down. Fit centres on the legs (lower quarter), not the outline.
 - Dots are now placed automatically (ModelSwap.AutoMarks): limbs measured slice by slice, body middle from the thighs, and
-  the DEPTH of every joint (Tripo models sat ~1.5 units in front of the skeleton, invisible from the front view; that was
+  the DEPTH of every joint (some downloaded models sat ~1.5 units in front of the skeleton, invisible from the front view; that was
   the main cause of the mangling). "Place the dots for me" re-measures; right-click puts a dot back on its measured spot.
 - Arm rule (SkeletonRig.Weights): an arm bone can't take points nearer the body's middle than its own joint, so hair down
   the back and jacket sides aren't lifted with the arm (fixed up smash on the kpop model).

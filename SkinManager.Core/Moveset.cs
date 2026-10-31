@@ -33,7 +33,9 @@ namespace SkinManager.Core
     public sealed class Article
     {
         public int Offset, Id, Group, Bone, Slot;   // Slot: its place in the fighter-specific offsets (-1 = the entry article)
+        public int ParamsAt;                        // its own parameter block (the game's "m_param", header +0x34; 0 = none)
         public List<Subaction> Subactions = new List<Subaction>();
+        public List<List<MoveEvent>> Actions = new List<List<MoveEvent>>();   // its actions' entry scripts (timers, what it turns into)
         public bool HasHitbox => Subactions.Any(s => s.Main.Any(e => e.Id == 0x06000D00 || e.Id == 0x06150F00));
     }
 
@@ -48,7 +50,17 @@ namespace SkinManager.Core
         public List<Article> Articles = new List<Article>();
         /// <summary>A fighter attribute (0x00..0x2DC), as a float or an int.</summary>
         public float Attr(int off) => F(AttributesAt + off);
+        /// <summary>A number from an article's own parameter block (byte offset), as a float or an int; NaN / int.MinValue if it has none.</summary>
+        public float ArticleF(Article a, int off) => a == null || a.ParamsAt <= 0 ? float.NaN : F(a.ParamsAt + off);
+        public int ArticleI(Article a, int off) => a == null || a.ParamsAt <= 0 ? int.MinValue : I(a.ParamsAt + off);
+        /// <summary>A number from one of the fighter's own parameter blocks (the data section's extra offsets, by slot).</summary>
+        public float FighterF(int slot, int off) { int at = FighterBlock(slot); return at <= 0 ? float.NaN : F(at + off); }
+        public int FighterI(int slot, int off) { int at = FighterBlock(slot); return at <= 0 ? int.MinValue : I(at + off); }
+        int FighterBlock(int slot) { if (!Sections.TryGetValue("data", out int data) || slot < 0) return 0; int at = I(data + 124 + slot * 4); return at > 16 && at < _d.Length ? at : 0; }
         public int AttrInt(int off) => I(AttributesAt + off);
+        /// <summary>A number anywhere in the data (an offset a parameter points to: a table of speeds...).</summary>
+        public float RawF(int at) => F(at);
+        public int RawI(int at) => I(at);
         public List<(float X, float Y, float Z, float SX, float SY, float SZ, float Radius, int Bone, int Zone)> HurtBoxes = new List<(float, float, float, float, float, float, float, int, int)>();
 
         /// <summary>Model visibility: [reference][switch][group] = bone indices; and each switch's group shown by default.</summary>
@@ -174,26 +186,36 @@ namespace SkinManager.Core
                 if (Environment.GetEnvironmentVariable("SKINMANAGER_DEBUG_ARTICLES") != null && at > 0 && at + 52 <= _d.Length) Console.WriteLine($"slot {slot} @{at}: " + string.Join(" ", Enumerable.Range(0, 13).Select(k => I(at + k * 4))));
                 if (at <= 0 || at + 52 > _d.Length || at % 4 != 0) continue;
                 int id = I(at), grp = I(at + 4), bone = I(at + 8), sFlags = I(at + 16), sMain = I(at + 24);
-                if (id < 0 || id > 1480 || grp < -1 || grp > 255 || bone < -1 || bone > 32767) continue;
+                if (id < -1 || id > 1480 || grp < -1 || grp > 255 || bone < -1 || bone > 32767) continue;
                 if (!Ok(I(at + 12)) || !Ok(sFlags) || !Ok(I(at + 20)) || !Ok(sMain) || !Ok(I(at + 28)) || !Ok(I(at + 32)) || !Ok(I(at + 36))) continue;
-                if (sMain <= 0 || sFlags <= 0) continue;
+                // an article with no scripts of its own still counts (Link's bow): the game numbers articles by their place
+                if (Enumerable.Range(3, 10).All(k => I(at + k * 4) == 0)) continue;
                 for (int k = 12; k < 52; k += 4) if (I(at + k) > 0) all.Add(I(at + k));
                 if (found.Any(f => f.Offset == at)) continue;
-                found.Add(new Article { Offset = at, Id = id, Group = grp, Bone = bone, Slot = slot });
+                int pa = at + 56 <= _d.Length ? I(at + 52) : 0;
+                found.Add(new Article { Offset = at, Id = id, Group = grp, Bone = bone, Slot = slot, ParamsAt = pa > 16 && pa < _d.Length && pa % 4 == 0 ? pa : 0 });
             }
             foreach (var a in found)
             {
                 int sFlags = I(a.Offset + 16), sMain = I(a.Offset + 24);
-                int nMain = (all.Where(x => x > sMain).DefaultIfEmpty(_d.Length).Min() - sMain) / 4;
-                int nFlags = (all.Where(x => x > sFlags).DefaultIfEmpty(_d.Length).Min() - sFlags) / 8;
+                int nMain = sMain <= 0 ? int.MaxValue : (all.Where(x => x > sMain).DefaultIfEmpty(_d.Length).Min() - sMain) / 4;
+                int nFlags = sFlags <= 0 ? 0 : (all.Where(x => x > sFlags).DefaultIfEmpty(_d.Length).Min() - sFlags) / 8;
                 int n = Math.Min(Math.Min(nMain, nFlags), 200);
                 for (int i = 0; i < n; i++)
                 {
-                    var s = new Subaction { Index = i, Flags = _d[sFlags + i * 8 + 1], ScriptOffset = I(sMain + i * 4) };
+                    var s = new Subaction { Index = i, Flags = _d[sFlags + i * 8 + 1], ScriptOffset = sMain <= 0 ? 0 : I(sMain + i * 4) };
                     int nameAt = I(sFlags + i * 8 + 4);
                     s.Animation = nameAt > 0 && nameAt < _d.Length ? Str(nameAt) : null;
+                    if (s.Animation != null && (s.Animation.Length > 40 || s.Animation.Any(ch => ch < 0x20 || ch > 0x7E))) break;   // past its list
                     if (s.ScriptOffset > 0 && s.ScriptOffset < _d.Length) s.Main = Script(s.ScriptOffset, 0);
                     a.Subactions.Add(s);
+                }
+                // its actions: flags (16 bytes each) and their entry scripts
+                int aFlags = I(a.Offset + 12), aStart = I(a.Offset + 20);
+                if (aFlags > 0 && aStart > 0 && aStart < _d.Length)
+                {
+                    int na = Math.Min(64, (all.Where(x => x > aFlags).DefaultIfEmpty(_d.Length).Min() - aFlags) / 16);
+                    for (int k = 0; k < na; k++) { int so = I(aStart + k * 4); a.Actions.Add(so > 0 && so < _d.Length ? Script(so, 0) : new List<MoveEvent>()); }
                 }
                 Articles.Add(a);
             }

@@ -91,7 +91,9 @@ namespace SkinManager.Core
                     {
                         // Only Brawl Online's own Dolphin uses the card; another Dolphin on this PC does not.
                         string file = ProcessPath(p);
-                        if (file == null || file.StartsWith(NetplayFolder, StringComparison.OrdinalIgnoreCase)) { what = "Brawl Online's game window"; return true; }
+                        // (one whose folder Windows won't tell: it might be Brawl Online's, so it counts, and the message says so)
+                        if (file == null) { what = "the Dolphin window that's open (the app can't tell whether it's Brawl Online's)"; return true; }
+                        if (file.StartsWith(NetplayFolder, StringComparison.OrdinalIgnoreCase)) { what = "Brawl Online's game window"; return true; }
                         if (OtherDolphin != null && file.StartsWith(OtherDolphin, StringComparison.OrdinalIgnoreCase)) { what = "your Dolphin"; return true; }
                     }
                 }

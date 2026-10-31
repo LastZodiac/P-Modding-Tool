@@ -90,7 +90,7 @@ namespace SkinManager.App
                 var r = await Task.Run(() => { using (var card = _installer.OpenCard()) return (Songs.All(card), card.FreeBytes, Songs.StageTrackLists(card)); });
                 _songs = r.Item1; _free = r.Item2; map = r.Item3;
             }
-            catch (Exception e) { _summary.Text = "Couldn't read P+'s track lists: " + e.Message; _summary.ForeColor = Theme.Bad; return; }
+            catch (Exception e) { _summary.Text = "Couldn't read P+'s track lists: " + Friendly.Explain(e); _summary.ForeColor = Theme.Bad; return; }
             if (IsDisposed) return;
             _filling = true;
             // which stage is this music for? the stage files it came with, else a stage named in the download's name
@@ -101,6 +101,11 @@ namespace SkinManager.App
             _filter.Items.Add(Every);
             foreach (var l in lists) _filter.Items.Add(l);
             _filter.SelectedItem = pick ?? Every;
+            if (_pkg.SongFiles.Count > 120)
+            {
+                var more = Theme.Label($"This download has {_pkg.SongFiles.Count} songs: the first 120 are shown here. Add the rest by opening it again after this.", Theme.Small, Theme.Warn);
+                more.Margin = new Padding(0, 0, 0, 8); _list.Controls.Add(more);
+            }
             foreach (var f in _pkg.SongFiles.Take(120))
             {
                 var row = new Row { File = f, Size = new FileInfo(f).Length };
@@ -197,23 +202,29 @@ namespace SkinManager.App
             _layoutFoot();
         }
 
-        void Install()
+        async void Install()
         {
+            // what's picked is read here; checking each song (it reads and converts it) happens in the background
+            var picked = _rows.Select(r => (r.File, Song: Chosen(r), Add: AddTo(r))).Where(x => x.Song != null || x.Add != null).ToList();
+            string was = _install.Text; _install.Enabled = false; _install.Text = "Checking...";
             var plans = new List<StagePlan>(); var problems = new List<string>();
-            foreach (var r in _rows)
+            await System.Threading.Tasks.Task.Run(() =>
             {
-                var s = Chosen(r); var add = AddTo(r);
-                if (s == null && add == null) continue;
-                try
+                foreach (var (file, song, add) in picked)
                 {
-                    StagePlan plan;
-                    if (s != null) plan = _installer.PlanSong(_pkg, r.File, s);
-                    else using (var card = _installer.OpenCard()) plan = _installer.PlanNewSong(card, _pkg, r.File, add.Replace(' ', '_') + ".tlst", add);
-                    if (_pkg.SongFiles.Count == 1 && !string.IsNullOrEmpty(_pkg.Name)) plan.Name = _pkg.Name;
-                    if (plan.CanInstall) plans.Add(plan); else problems.Add($"{Path.GetFileName(r.File)}: " + string.Join("; ", plan.Checks.Where(c => !c.Passed).Select(c => c.Title)));
+                    try
+                    {
+                        StagePlan plan;
+                        if (song != null) plan = _installer.PlanSong(_pkg, file, song);
+                        else using (var card = _installer.OpenCard()) plan = _installer.PlanNewSong(card, _pkg, file, add.Replace(' ', '_') + ".tlst", add);
+                        if (_pkg.SongFiles.Count == 1 && !string.IsNullOrEmpty(_pkg.Name)) plan.Name = _pkg.Name;
+                        if (plan.CanInstall) plans.Add(plan); else problems.Add($"{Path.GetFileName(file)}: " + string.Join("; ", plan.Checks.Where(c => !c.Passed).Select(c => c.Title)));
+                    }
+                    catch (Exception e) { problems.Add($"{Path.GetFileName(file)}: {SkinManager.Core.Friendly.Explain(e)}"); }
                 }
-                catch (Exception e) { problems.Add($"{Path.GetFileName(r.File)}: {e.Message}"); }
-            }
+            });
+            if (IsDisposed) return;
+            _install.Text = was; _install.Enabled = true;
             if (problems.Count > 0)
             {
                 string text = "These can't be installed:\r\n\r\n" + string.Join("\r\n", problems.Take(12));

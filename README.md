@@ -53,9 +53,11 @@ Put a 3D model from another game or a 3D program (.glb, .gltf, .obj, .dae) on a 
 ### 🎯 Frame Data
 Like a frame data site, for the **whole P+ cast**, read straight from P+'s own files:
 - Every move played **frame by frame** with its **hitboxes and hurtboxes**: startup, active frames, first actionable frame, landing lag (and L-cancelled), damage, angle, knockback, shield damage.
-- **Projectiles** and spawned hitboxes (lasers, arrows, Fox's side B...), throws, dodges and ledge options.
+- **Projectiles** and spawned hitboxes (lasers, arrows, boomerangs, missiles, PK moves, charge shots at no charge and full charge...), throws, dodges and ledge options. Every special has a row, with a note when its hitbox isn't in the fighter's files (Link's bombs are items).
 - **Launch & combos**: where a hit sends your opponent at any percent and DI, hitstun, frame advantage on hit and on shield, and a chart of the **true combos** each move leads into at every percent.
 - **How to DI**: drag your fighter onto the move as it plays. It picks out the hitbox that would hit you there, shows where it sends you, and draws the stick: which way to hold to **survive**, which way to **get out of combos**, and how to **SDI**. With the percent each DI kills you at.
+- Moves are worked out the way the game runs them: their conditions, variables and each fighter's own settings, the scripts of the fighter's actions (where P+ puts many hitboxes and timers), and projectiles flying their whole path.
+- **How accurate**: for each fighter (or the whole cast at once), which rows are read straight from P+'s scripts, which needed an assumption and which, and what isn't drawn because the game's code decides it.
 - Save any move as a **GIF**.
 
 ![Frame data](docs/frame-data.png)

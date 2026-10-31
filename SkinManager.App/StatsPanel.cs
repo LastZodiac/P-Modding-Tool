@@ -304,7 +304,7 @@ namespace SkinManager.App
                 catch (Exception e)
                 {
                     Program.Log("reading the match history", e);
-                    _profile.Big = "Your match history couldn't be read"; _profile.Small = e.Message; _profile.Invalidate();
+                    _profile.Big = "Your match history couldn't be read"; _profile.Small = Friendly.Explain(e); _profile.Invalidate();
                 }
                 finally { _refresh.Enabled = true; }
             } while (_again);
