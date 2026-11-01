@@ -21,6 +21,7 @@ namespace SkinManager.App
         public SkinPlan Plan { get; private set; }
         readonly Dictionary<PackageCostume, Bitmap> _renders = new Dictionary<PackageCostume, Bitmap>();
         string _modelCsp;   // a select-screen picture made from the 3D model, for skins that came without one
+        readonly Dictionary<PictureKind, string> _modelHeads = new Dictionary<PictureKind, string>();   // stock icon / in-match portrait made from the model's head
 
         /// <summary>Draws the costume's 3D model (in the background) and hands it over when ready.</summary>
         async void RenderModel(PackageCostume c, Action<Bitmap> done)
@@ -150,7 +151,7 @@ namespace SkinManager.App
         void Choose(PackageCostume c)
         {
             if (c == _costume) return;
-            _costume = c; _slot = null; _pictures.Clear(); _modelCsp = null; _askedModel = false;   // pictures belong to the costume picked
+            _costume = c; _slot = null; _pictures.Clear(); _modelCsp = null; _modelHeads.Clear(); _askedModel = false; _askedHead = false;   // pictures belong to the costume picked
         }
 
         // ----- step 1: which slot -----
@@ -278,7 +279,7 @@ namespace SkinManager.App
             var state = Theme.Label("", Theme.Small, Theme.Muted); state.Location = new Point(x + 2, 28); state.AutoSize = false; state.Size = new Size(540, 28);
             var choose = Theme.Secondary("Choose a picture...");
             var fromModel = Theme.Secondary("Make one from the 3D model");
-            fromModel.Visible = kind == PictureKind.SelectPortrait;
+            fromModel.Visible = true;
             var none = Theme.Secondary("Keep P+'s picture");
             var pick = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300, BackColor = Theme.Panel, ForeColor = Theme.Text, FlatStyle = FlatStyle.Flat, Visible = false };
             choose.Location = new Point(x, 56);
@@ -294,6 +295,7 @@ namespace SkinManager.App
                 state.Text = path == null
                     ? $"None chosen: P+'s current {Cosmetics.Describe(kind)} stays."
                     : path == _modelCsp ? "Made from the skin's 3D model (no picture for this costume came with the skin)."
+                    : _modelHeads.TryGetValue(kind, out var mh) && path == mh ? "Made from the skin's 3D model: its head, close up."
                     : $"{Path.GetFileName(path)}" + (ImageSize(path) == size ? "" : $"  (it will be fitted to {size.Width}x{size.Height})");
                 none.Visible = path != null;
             }
@@ -315,6 +317,7 @@ namespace SkinManager.App
             none.Click += (s, e) => { _pictures[kind] = null; Refresh(); };
             void UseModel()
             {
+                if (kind != PictureKind.SelectPortrait) { UseHead(); return; }
                 RenderModel(_costume, b =>
                 {
                     if (_modelCsp == null)
@@ -326,16 +329,31 @@ namespace SkinManager.App
                     _pictures[kind] = _modelCsp; Refresh();
                 });
             }
+            async void UseHead()
+            {
+                if (_modelHeads.TryGetValue(kind, out var have)) { _pictures[kind] = have; Refresh(); return; }
+                var c = _costume; if (c?.Main == null) return;
+                bool stock = kind == PictureKind.StockIcon;
+                var bmp = await Task.Run(() => { try { return ModelPreview.RenderHead(File.ReadAllBytes(c.Main.Path), stock ? 128 : 96, stock ? 128 : 112, stock ? 0 : 0.35f); } catch { return null; } });
+                if (IsDisposed || c != _costume) return;
+                if (bmp == null) { state.Text = "The app couldn't find the model's head to make this picture from."; return; }
+                string png = Path.Combine(Path.GetTempPath(), "PPlusModdingTool", "model-" + kind + "-" + Guid.NewGuid().ToString("N") + ".png");
+                Directory.CreateDirectory(Path.GetDirectoryName(png));
+                using (bmp) using (var small = Smaller(bmp, size.Width, size.Height)) small.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+                _modelHeads[kind] = png; _pictures[kind] = png; Refresh();
+            }
             fromModel.Click += (s, e) => UseModel();
             row.Controls.AddRange(new Control[] { box, name, state, choose, none, pick, fromModel });
             // no select-screen picture came with this costume: show the model there by default
             if (kind == PictureKind.SelectPortrait && _pictures[kind] == null && candidates.Count == 0 && !_askedModel) { _askedModel = true; UseModel(); }
+            // the same for the stock icon: one made from the model's head matches the skin better than P+'s
+            if (kind == PictureKind.StockIcon && _pictures[kind] == null && candidates.Count == 0 && !_askedHead) { _askedHead = true; UseModel(); }
             Refresh();
             if (candidates.Count > 1 && _pictures[kind] == null) state.Text = $"This skin has {candidates.Count} of these; pick the one for this color.";
             return row;
         }
 
-        bool _askedModel;
+        bool _askedModel, _askedHead;
 
         static Size ImageSize(string path)
         {

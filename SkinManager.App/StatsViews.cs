@@ -175,6 +175,41 @@ namespace SkinManager.App
             int y = 0;
             if (games.Count == 0) { Text(g, "No 1-on-1 games here yet. Play some online and they show up here.", Theme.Body, Theme.Muted, new RectangleF(4, 8, w, 24)); ContentHeight = 40; return; }
 
+            // ---- your last session: the games that ran on from your latest one (no gap of 45 minutes or more)
+            {
+                int first = games.Count - 1;
+                while (first > 0 && (games[first].Game.Start - games[first - 1].Game.Start).TotalMinutes < 45) first--;
+                var ses = games.Skip(first).ToList();
+                var rec = MatchHistory.Count(ses); var usual = MatchHistory.Count(games);
+                var opps = ses.GroupBy(x => x.Them.UserId).Select(o => (Name: o.Last().Them.Name, Char: o.GroupBy(x => x.Them.Character).OrderByDescending(c => c.Count()).First().Key, Rec: MatchHistory.Count(o)))
+                    .OrderByDescending(o => o.Rec.Games).ToList();
+                int oppRows = Math.Min(4, opps.Count), cardH = 96 + oppRows * 26 + (opps.Count > oppRows ? 18 : 0);
+                var card = new RectangleF(0, y, w, cardH);
+                Card(g, card);
+                var start = ses[0].Game.Start.ToLocalTime(); var end = ses.Last().Game.Start.ToLocalTime();
+                string when = start.Date == DateTime.Now.Date ? "today" : start.Date == DateTime.Now.Date.AddDays(-1) ? "yesterday" : start.ToString("ddd MMM d");
+                Caps(g, $"Your last session · {when}, {start:h:mm tt} · {ses.Count} game{(ses.Count == 1 ? "" : "s")}", 16, y + 12, w - 32);
+                Text(g, rec.ToString(), Theme.Bold(22f), RecordTable.RateColor(rec.Rate), new RectangleF(16, y + 32, 120, 36));
+                double sd = rec.Rate - usual.Rate;
+                Text(g, $"{rec.Percent} won" + (ses.Count < 3 ? "" : Math.Abs(sd) < 0.03 ? " · about your usual" : $" · {(sd > 0 ? "▲" : "▼")} {Math.Abs(sd) * 100:0}% vs your usual {usual.Percent}"),
+                    Theme.Body, ses.Count < 3 || Math.Abs(sd) < 0.03 ? Theme.Muted : sd > 0 ? Theme.Good : Theme.Bad, new RectangleF(120, y + 40, w - 136, 22));
+                string played = string.Join(", ", ses.GroupBy(x => x.Me.Character).OrderByDescending(c => c.Count()).Select(c => Fighters.Name(c.Key) + (c.Count() > 1 ? " ×" + c.Count() : "")));
+                Text(g, "You played " + played, Theme.Small, Theme.Muted, new RectangleF(16, y + 70, w - 32, 18));
+                float oy = y + 92;
+                for (int i = 0; i < oppRows; i++)
+                {
+                    var o = opps[i];
+                    var head = Data.Head?.Invoke(o.Char);
+                    if (head != null) g.DrawImage(head, new RectangleF(16, oy, 22, 22));
+                    Text(g, "vs " + o.Name, Theme.Body, Theme.Text, new RectangleF(44, oy + 2, w * 0.5f, 20));
+                    Text(g, o.Rec.ToString() + (o.Rec.Wins > o.Rec.Losses ? "  won the set" : o.Rec.Wins < o.Rec.Losses ? "  lost the set" : "  even"), Theme.BodyBold,
+                        o.Rec.Wins > o.Rec.Losses ? Theme.Good : o.Rec.Wins < o.Rec.Losses ? Theme.Bad : Theme.Muted, new RectangleF(w * 0.5f, oy + 2, w * 0.5f - 16, 20), Right);
+                    oy += 26;
+                }
+                if (opps.Count > oppRows) Text(g, $"and {opps.Count - oppRows} more", Theme.Small, Theme.Muted, new RectangleF(44, oy, 300, 18));
+                y += cardH + 14;
+            }
+
             // ---- form: your win rate over your recent games
             var form = new RectangleF(0, y, w, 196);
             Card(g, form);
@@ -673,18 +708,19 @@ namespace SkinManager.App
     {
         public StatsData Data;
         public long? Game;
-        public event Action<string> ShowReplay;
-        RectangleF _replayButton;
+        public event Action<string> ShowReplay, WatchReplay;
+        RectangleF _replayButton, _watchButton;
 
         protected override void Clicked(Point p, MouseButtons b)
         {
             if (_replayButton.Contains(p) && Game != null) ShowReplay?.Invoke(Data.Games.First(x => x.Game.Id == Game).Game.File);
+            if (_watchButton.Contains(p) && Game != null) WatchReplay?.Invoke(Data.Games.First(x => x.Game.Id == Game).Game.File);
         }
-        protected override void Hover(Point p) => Cursor = _replayButton.Contains(p) ? Cursors.Hand : Cursors.Default;
+        protected override void Hover(Point p) => Cursor = _replayButton.Contains(p) || _watchButton.Contains(p) ? Cursors.Hand : Cursors.Default;
 
         protected override void Draw(Graphics g, int w)
         {
-            _replayButton = RectangleF.Empty;
+            _replayButton = _watchButton = RectangleF.Empty;
             if (Data == null) return;
             var x = Data.Games.FirstOrDefault(m => m.Game.Id == Game);
             if (x.Game == null) { Card(g, new RectangleF(0, 0, w, 80)); Text(g, "Click a game to see how it went.", Theme.Body, Theme.Muted, new RectangleF(16, 28, w - 32, 24)); ContentHeight = 84; return; }
@@ -777,7 +813,14 @@ namespace SkinManager.App
                 Text(g, d.Killer < 0 ? how : (mine ? "with " : "to ") + how, Theme.Body, Theme.Muted, new RectangleF(76 + w * 0.5f, ry, w * 0.5f - 90, 20));
             }
             y += (int)list.Height + 14;
-            _replayButton = new RectangleF(0, y, 190, 32);
+            // watch it in Brawl Online's replay player, or just find the file
+            if (!string.IsNullOrEmpty(x.Game.File))
+            {
+                _watchButton = new RectangleF(0, y, 170, 32);
+                Card(g, _watchButton, Theme.Accent);
+                Text(g, "▶  Watch this game", Theme.BodyBold, Theme.AccentText, new RectangleF(_watchButton.X, y + 7, _watchButton.Width, 20), Center);
+            }
+            _replayButton = new RectangleF(_watchButton.IsEmpty ? 0 : _watchButton.Right + 10, y, 190, 32);
             Card(g, _replayButton, Color.FromArgb(230, 44, 48, 60));
             Text(g, "Show the replay file", Theme.BodyBold, Theme.Text, new RectangleF(_replayButton.X, y + 7, _replayButton.Width, 20), Center);
             ContentHeight = y + 40;

@@ -59,6 +59,28 @@ namespace SkinManager.App
         [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         static readonly bool OnWindows = Type.GetType("Mono.Runtime") == null && Environment.OSVersion.Platform == PlatformID.Win32NT;
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr hWnd, IntPtr rect, IntPtr region, uint flags);
+
+        /// <summary>Changes what a panel shows (scrolls it) with drawing off, then draws it and everything in it once,
+        /// right away. Windows' own scrolling copies the old pixels along and patches the rest, which smears see-through
+        /// panels when they move fast.</summary>
+        public static void Repaint(Control c, Action change)
+        {
+            if (OnWindows && c.IsHandleCreated && c.Visible)
+            {
+                SendMessage(c.Handle, 0x000B, IntPtr.Zero, IntPtr.Zero);   // WM_SETREDRAW off
+                try { change(); }
+                finally
+                {
+                    SendMessage(c.Handle, 0x000B, (IntPtr)1, IntPtr.Zero);
+                    RedrawWindow(c.Handle, IntPtr.Zero, IntPtr.Zero, 0x1 | 0x4 | 0x80 | 0x100 | 0x400);   // invalidate, erase, all children, now, frame
+                }
+                return;
+            }
+            change();
+            c.Invalidate(true); c.Update();
+        }
+
         /// <summary>Stops a control drawing until the result is disposed (then it's drawn once, whole): for rebuilding a
         /// list of cards without the half-built list flashing up.</summary>
         public static IDisposable Freeze(Control c) => new Frozen(c);

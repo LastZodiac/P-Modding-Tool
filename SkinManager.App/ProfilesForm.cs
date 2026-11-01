@@ -14,9 +14,12 @@ namespace SkinManager.App
     {
         readonly Library _lib;
         readonly Func<string, bool> _switch; readonly Action _new; readonly Action<string> _rename, _copy, _delete;
+        /// <summary>Share (the profile's name; null: P+ as it comes) and open someone's shared setup; set before showing.</summary>
+        public Action<string> Share; public Action OpenShared;
         readonly ProfileList _list = new ProfileList();
         readonly Button _use = Theme.Primary("Switch to it"), _ren = Theme.Secondary("Rename..."), _cp = Theme.Secondary("Copy..."),
-                        _del = Theme.Secondary("Delete..."), _add = Theme.Secondary("New profile..."), _close = Theme.Secondary("Close");
+                        _del = Theme.Secondary("Delete..."), _add = Theme.Secondary("New profile..."), _close = Theme.Secondary("Close"),
+                        _share = Theme.Secondary("Share..."), _open = Theme.Secondary("Open a shared one...");
         readonly Label _note = Theme.Label("", Theme.Small, Theme.Muted);
 
         public ProfilesForm(Library lib, Func<string, bool> switchTo, Action create, Action<string> rename, Action<string> copy, Action<string> delete)
@@ -24,19 +27,22 @@ namespace SkinManager.App
             _lib = lib; _switch = switchTo; _new = create; _rename = rename; _copy = copy; _delete = delete;
             Text = "Your profiles"; BackColor = Theme.Back; ForeColor = Theme.Text; Font = Theme.Body;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false; ShowInTaskbar = false;
-            StartPosition = FormStartPosition.CenterParent; AutoScaleMode = AutoScaleMode.Dpi; ClientSize = new Size(600, 440);
+            StartPosition = FormStartPosition.CenterParent; AutoScaleMode = AutoScaleMode.Dpi; ClientSize = new Size(600, 520);
             var intro = Theme.Label("A profile is a set of mods that are on. Switching to one turns exactly its mods on (one save to your SD card). Your mods always stay in My Mods.", Theme.Small, Theme.Muted);
             intro.AutoSize = false; intro.Location = new Point(18, 14); intro.Size = new Size(564, 36);
-            _list.Location = new Point(18, 56); _list.Size = new Size(400, 360);
+            _list.Location = new Point(18, 56); _list.Size = new Size(400, 440);
             int bx = 432, by = 56;
-            foreach (var b in new[] { _use, _ren, _cp, _del, _add })
+            foreach (var b in new[] { _use, _ren, _cp, _del, _add, _share, _open })
             {
-                b.AutoSize = false; b.Size = new Size(150, 34); b.Location = new Point(bx, by); by += b == _del ? 58 : 42;
+                b.AutoSize = false; b.Size = new Size(150, 34); b.Location = new Point(bx, by); by += b == _del || b == _add ? 58 : 42;
             }
+            var tip = new ToolTip();
+            tip.SetToolTip(_share, "Saves this profile's mods as a small file to send to a friend: they open it here and get the same mods from GameBanana.");
+            tip.SetToolTip(_open, "Opens a setup a friend shared (a .ppsetup file) and shows which of its mods you have.");
             _del.ForeColor = Theme.Bad;
-            _close.AutoSize = false; _close.Size = new Size(150, 34); _close.Location = new Point(bx, 382);
-            _note.AutoSize = false; _note.Location = new Point(bx, 280); _note.Size = new Size(156, 96);
-            Controls.AddRange(new Control[] { intro, _list, _use, _ren, _cp, _del, _add, _close, _note });
+            _close.AutoSize = false; _close.Size = new Size(150, 34); _close.Location = new Point(bx, 462);
+            _note.AutoSize = false; _note.Location = new Point(bx, 390); _note.Size = new Size(156, 66);
+            Controls.AddRange(new Control[] { intro, _list, _use, _ren, _cp, _del, _add, _share, _open, _close, _note });
             CancelButton = _close; _close.DialogResult = DialogResult.Cancel;
             _list.Changed += Update2;
             _list.Activated += () => { if (_use.Enabled) _use.PerformClick(); };
@@ -45,6 +51,8 @@ namespace SkinManager.App
             _cp.Click += (s, e) => { _copy(_list.SelectedName); Fill(); };
             _del.Click += (s, e) => { _delete(_list.SelectedName); Fill(); };
             _add.Click += (s, e) => { _new(); Fill(); };
+            _share.Click += (s, e) => Share?.Invoke(_list.SelectedName);
+            _open.Click += (s, e) => { OpenShared?.Invoke(); Fill(); };
             Fill();
             _list.Select(_lib.ActiveProfile ?? ProfileList.AsItComes);
         }
@@ -63,7 +71,7 @@ namespace SkinManager.App
             bool locked = r == null || r.Locked;
             _use.Enabled = r != null && !r.InUse;
             _use.Text = r != null && r.InUse ? "In use" : "Switch to it";
-            _ren.Enabled = _cp.Enabled = _del.Enabled = !locked;
+            _ren.Enabled = _cp.Enabled = _del.Enabled = _share.Enabled = !locked;
             _note.Text = r == null ? "" : r.Locked ? "P+ as it comes is always here: it can't be renamed or deleted." : r.InUse ? "This is the profile in use." : "";
         }
     }

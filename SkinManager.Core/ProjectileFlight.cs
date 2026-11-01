@@ -80,7 +80,7 @@ namespace SkinManager.Core
                     if (f.Start <= 0) f.Start = p.Frame > 0 ? p.Frame : e.Data.CodeShots.Count > 0 ? e.Data.CodeShots.Min() : e.Data.Shots.Select(x => x.Frame).DefaultIfEmpty(1).Min();
                     p.Flight = f;
                 }
-                catch { }
+                catch (Exception ex) { if (Environment.GetEnvironmentVariable("SKINMANAGER_DEBUG_FLIGHT") != null) Console.WriteLine("flight failed: " + ex); }
             }
             // the flight covers the thing's whole life (a boomerang's way back, a missile bursting): its other scripts listed
             // on their own are dropped, but not the same thing at another charge (no charge / full charge)

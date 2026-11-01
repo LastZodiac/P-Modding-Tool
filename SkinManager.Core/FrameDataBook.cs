@@ -32,6 +32,7 @@ namespace SkinManager.Core
         public Body Body;                                   // weight, gravity, size... and the standing body
         public Dictionary<MoveData, List<FramePlace>> Places; // where each move's hitboxes are (read when combos are first asked for)
         public Moveset Item;                                // an item the fighter makes, its own scripts (R.O.B.'s gyro)
+        public List<(string Move, string Name, Moveset Scripts)> Items = new List<(string, string, Moveset)>();   // items a special pulls out (Link's bomb)
         public float ItemGravity = float.NaN, ItemMaxFall, ItemAirFriction, ItemGroundFriction;   // ...and how it moves (P+'s item settings)
 
         /// <summary>Works out where every move's hitboxes are (a few seconds the first time).</summary>
@@ -131,8 +132,59 @@ namespace SkinManager.Core
                             if (!book.Lengths.ContainsKey(ch.Name)) book.Lengths[ch.Name] = ch.FrameCount;
             }
             if (c.FilePrefix == "Robot") ReadGyro(card, c, book);
+            ReadItems(card, c, book);
             Build(book);
             return book;
+        }
+
+        // Items a special pulls out: their scripts are P+'s item data. Link's and Toon Link's bombs are the fighter's own
+        // (fighter/<name>/ITEM/Itm<Name>00Param.pac), the rest are shared (item/ItmCommonParam.pac).
+        static readonly (string Fighter, string Move, string Name, string Common)[] ItemMoves =
+        {
+            ("Link", "SpecialLw", "bomb", null), ("ToonLink", "SpecialLw", "bomb", null),
+            ("Snake", "SpecialN", "grenade", "ItmSnakeGrenadeParam"), ("Peach", "SpecialLw", "turnip", "ItmPeachDaikonParam"),
+            ("Diddy", "SpecialN", "peanut", "ItmDiddyPeanutsParam"),
+        };
+
+        static void ReadItems(Fat32Image card, Character c, FighterBook book)
+        {
+            foreach (var it in ItemMoves.Where(x => x.Fighter == c.FilePrefix))
+                try
+                {
+                    string dir = c.FighterFolderPath; int k = dir.IndexOf("/fighter/", StringComparison.OrdinalIgnoreCase);
+                    byte[] file = it.Common == null ? card.ReadFile(dir + "/ITEM/Itm" + c.FilePrefix + "00Param.pac") : k < 0 ? null : card.ReadFile(dir.Substring(0, k) + "/item/ItmCommonParam.pac");
+                    if (file == null) continue;
+                    lock (BrawlGate.Lock)
+                        using (var tmp = new TempFile(".pac", file))
+                        using (var root = NodeFactory.FromFile(null, tmp.Path))
+                        {
+                            var node = it.Common == null ? root.Children.FirstOrDefault() : root.Children.FirstOrDefault(x => string.Equals(x.Name, it.Common, StringComparison.OrdinalIgnoreCase))?.Children.FirstOrDefault();
+                            if (node == null) continue;
+                            var src = node.WorkingUncompressed;
+                            var bytes = new byte[src.Length];
+                            System.Runtime.InteropServices.Marshal.Copy((IntPtr)src.Address, bytes, 0, src.Length);
+                            var m = Moveset.ItemParam(bytes);
+                            if (m != null) book.Items.Add((it.Move, it.Name, m));
+                        }
+                }
+                catch { }
+        }
+
+        /// <summary>The item's hitboxes, listed on the move that pulls it out: one per part of its scripts that hits
+        /// ("Throw": when it's thrown; "Born": when it blows up).</summary>
+        static void ItemHits(FighterBook b)
+        {
+            foreach (var (move, name, m) in b.Items)
+                foreach (var e in b.Entries.Where(x => x.Parts.FirstOrDefault()?.Replace("Air", "") is string p && p.StartsWith(move) && x.Note != null && x.Note.Contains("item")))
+                    foreach (var s in m.Subactions.Where(x => x.Main.Any(IsHit)))
+                    {
+                        var hits = FrameData.Run(m, s.Animation ?? name, new[] { s }, a => 60).Hits.Where(h => !h.Grab).ToList();
+                        if (hits.Count == 0) continue;
+                        string what = string.Equals(s.Animation, "Throw", StringComparison.OrdinalIgnoreCase) ? name + ", thrown"
+                                    : string.Equals(s.Animation, "Born", StringComparison.OrdinalIgnoreCase) ? name + " blast" : name;
+                        var data = new MoveData { Name = what }; data.Hits.AddRange(hits);
+                        e.Data.Projectiles.Add(new Projectile { Name = what, Item = true, Data = data });
+                    }
         }
 
         // R.O.B.'s gyro is an item: its hitboxes are in /item/ItmCommonParam.pac (ItmRobotGyroParam), how it moves in
@@ -287,11 +339,29 @@ namespace SkinManager.Core
                 var nm = SpecialName(l);
                 b.Entries.Add(new MoveEntry { Group = nm.StartsWith("Neutral B") ? "Neutral B" : nm.StartsWith("Side B") ? "Side B" : nm.StartsWith("Up B") ? "Up B" : "Down B", Name = nm, Parts = new[] { l }, Data = d });
             }
+            // Kirby's stone: the falling and landing hits are in two scripts of their own (played by his down B's code
+            // when he turns to stone in the air and when he lands), not in the down B scripts
+            if (b.Character.FilePrefix == "Kirby")
+                foreach (var (anim, pose, name) in new[] { ("DummySpecialLwToAir", "SpecialAirLw2", "Down B stone, falling"), ("DummySpecialLwToGround", "SpecialLw2", "Down B stone, landing") })
+                {
+                    var s = m.Subactions.FirstOrDefault(x => x.Animation == anim);
+                    if (s == null || !b.Lengths.ContainsKey(pose) || b.Entries.Any(e => e.Parts.Contains(pose))) continue;
+                    // no animation of their own: drawn on the stone pose, as long as the script goes (at least 30 frames)
+                    var d = FrameData.Run(m, pose, new[] { s.Index }, x => Math.Max(30, Len(x)), St(), ActOf);
+                    if (d.Hits.Count == 0) continue;
+                    d.Animation = pose; int poseLen = Math.Max(1, Len(pose));
+                    foreach (var f in d.Frames) { f.Animation = pose; f.AnimFrame = Math.Min(f.AnimFrame, poseLen); }
+                    b.Entries.Add(new MoveEntry { Group = "Down B", Name = name, Parts = new[] { pose }, Data = d,
+                        Note = anim.EndsWith("Air") ? "The stone's hit while it drops: it stays out until Kirby lands." : null, NoteIsInfo = true });
+                }
             foreach (var e in b.Entries) AddLaunched(b, e);
+            foreach (var e in b.Entries.Where(x => x.Note == null && x.Data.Hits.Count == 0))
+                if (Harmless.FirstOrDefault(n => n.Fighter == b.Character.FilePrefix && NoteFits(n.Move, e.Parts[0].Replace("Air", ""))) is var hn && hn.Text != null) { e.Note = hn.Text; e.NoteIsInfo = true; }
             foreach (var e in b.Entries.Where(x => x.Note == null))
                 if (Notes.FirstOrDefault(n => n.Fighter == b.Character.FilePrefix && NoteFits(n.Move, e.Parts[0].Replace("Air", ""))) is var note && note.Text != null) e.Note = note.Text;
                 else if (e.Sets) e.Note = "Puts out something that only hits later, when it's set off.";
                 else if (e.Group.EndsWith(" B") && e.Data.Hits.Count == 0 && e.Data.Projectiles.Count == 0 && e.Data.Intangible.Count == 0 && !FighterMotion.Moves(b, e)) e.Note = "No hitbox in this move's own files (the game's code handles what it does).";
+            ItemHits(b);
             // Olimar's smashes and aerials: the Pikmin do the hitting
             if (b.Character.FilePrefix == "Pikmin") PikminAttacks(b);
             // Sheik's chain: its four hitboxes (special hitboxes 0-3, no bone of their own) are put on the chain's links by the
@@ -570,8 +640,10 @@ namespace SkinManager.Core
             ("PokeFushigisou", "SpecialS", 4, "Move:razor leaf"),
             ("Robot", "SpecialN", 8, "Fly:laser|FlyMax:laser, full charge"),
             ("Wario", "SpecialS", 4, "SpecialSDrive:bike"),
-            ("Ike", "SpecialHi2", 7, "Fly:sword"),
+            // (not Ike's sword in up B: the game only throws it in his Final Smash; in Aether his own hitboxes do the hitting)
             ("Snake", "AttackHi4", 7, "Impact:mortar shell"),
+            ("Sonic", "SpecialHi", 6, "Fall:spring"), ("Knuckles", "SpecialHi", 6, "Fall:spring"),
+            ("Zelda", "SpecialS", 7, "Move:Din's Fire blast"),
         };
 
         // what an article is, when its scripts don't say (its hitboxes are in its action's script, under no name)
@@ -582,11 +654,12 @@ namespace SkinManager.Core
 
         static readonly (string Fighter, string Move, string Text)[] Notes =
         {
-            ("Link", "SpecialLw", "Pulls out a bomb. Bombs are items: their hitbox is set by the game, not this fighter's files."),
-            ("ToonLink", "SpecialLw", "Pulls out a bomb. Bombs are items: their hitbox is set by the game, not this fighter's files."),
-            ("Snake", "SpecialN", "Grenades are items: their hitbox is set by the game, not this fighter's files."),
-            ("Peach", "SpecialLw", "Turnips are items: how they fly and hit is set by the game's item data, not Peach's files."),
-            ("Diddy", "SpecialN", "Peanuts are items: how they fly and hit is set by the game's item data, not Diddy's files."),
+            ("Link", "SpecialLw", "Pulls out a bomb (an item). It hits when it blows up: thrown at someone, or when its fuse runs out. Its numbers are from P+'s item data."),
+            ("ToonLink", "SpecialLw", "Pulls out a bomb (an item). It hits when it blows up: thrown at someone, or when its fuse runs out. Its numbers are from P+'s item data."),
+            ("Snake", "SpecialN", "The grenade is an item: it blows up when its fuse runs out, thrown or not. Its numbers are from P+'s item data."),
+            ("Peach", "SpecialLw", "Pulls a turnip (an item). It hits when thrown; how hard depends on its face and how fast it's going, so its damage shows as ?."),
+            ("Diddy", "SpecialN", "Peanuts are items: they fly farther the longer you charge. Their numbers are from P+'s item data."),
+            ("Pikmin", "SpecialS", "Throws a Pikmin. It sticks to whoever it touches and hits them over and over; how hard and how long depends on its colour, which the game's code decides, so its hits aren't drawn."),
             ("Dedede", "SpecialS", "Waddle Dees, Doos and Gordos are thrown helpers: their own moves aren't shown here."),
             ("GameWatch", "SpecialN", "The food flies along one of five set arcs picked at random."),
             ("PokeZenigame", "SpecialN", "Shown tapped. Holding B charges first, then shoots more, faster water."),
@@ -598,6 +671,15 @@ namespace SkinManager.Core
             ("Marth", "SpecialLw$", "A counter: it only hits when something hits it first. The counterattack is the \"Down B hit\" row."),
             ("Roy", "SpecialLw$", "A counter: it only hits when something hits it first. The counterattack is the \"Down B hit\" row."),
             ("Ike", "SpecialLw$", "A counter: it only hits when something hits it first. The counterattack is the \"Down B hit\" row."),
+        };
+
+        // moves that really don't hit (nothing for the app to draw): the note says what they do instead
+        static readonly (string Fighter, string Move, string Text)[] Harmless =
+        {
+            ("Pikmin", "SpecialN", "Plucks a Pikmin from the ground. Plucking doesn't hit anyone."),
+            ("Mewtwo", "SpecialHi", "Teleports. It doesn't hit anyone."),
+            ("Kirby", "SpecialLw1$", "Turns Kirby to stone. The stone's hits are on the \"stone, falling\" and \"stone, landing\" rows."),
+            ("Pikmin", "SpecialLw", "Whistles the Pikmin back into line behind Olimar. The whistle doesn't hit anyone."),
         };
 
         // a note's move: "SpecialS" covers every piece of side B (start, end...); "SpecialLw$" only that exact piece

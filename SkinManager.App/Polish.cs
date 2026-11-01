@@ -41,21 +41,15 @@ namespace SkinManager.App
             base.OnBackColorChanged(e);
         }
 
-        /// <summary>What's behind the button (so the rounded corners blend in): the parent draws itself here.</summary>
-        protected override void OnPaintBackground(PaintEventArgs e)
+        /// <summary>The button's window is cut to its rounded shape, so whatever is around it is drawn by what's around
+        /// it (never a dark box behind the corners); inside, what's behind it is drawn first so the soft edge blends.</summary>
+        protected override void OnPaintBackground(PaintEventArgs e) => BackPicture.Behind(this, e.Graphics);
+        Rectangle Shape => new Rectangle(0, 0, Width - 1, Height - 1);
+        protected override void OnSizeChanged(EventArgs e)
         {
-            var parent = Parent;
-            if (parent == null) { using (var b = new SolidBrush(Theme.Back)) e.Graphics.FillRectangle(b, ClientRectangle); return; }
-            var g = e.Graphics; var state = g.Save();
-            try
-            {
-                g.TranslateTransform(-Left, -Top);
-                var pe = new PaintEventArgs(g, new Rectangle(Left, Top, Width, Height));
-                InvokePaintBackground(parent, pe);
-                InvokePaint(parent, pe);
-            }
-            catch { g.Restore(state); state = g.Save(); using (var b = new SolidBrush(parent.BackColor.A == 255 ? parent.BackColor : Theme.Back)) g.FillRectangle(b, ClientRectangle); }
-            finally { g.Restore(state); }
+            base.OnSizeChanged(e);
+            if (Width < 4 || Height < 4) return;
+            using (var p = Theme.Rounded(new Rectangle(0, 0, Width, Height), Radius)) { var old = Region; Region = new Region(p); old?.Dispose(); }
         }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -84,9 +78,8 @@ namespace SkinManager.App
             if (_down && Enabled) baseColor = Mix(baseColor, Color.Black, 0.12f);
             bool bright = baseColor.GetBrightness() > 0.45f;
 
-            var r = new Rectangle(1, 1, Width - 3, Height - 4);
+            var r = Shape;
             if (r.Width < 4 || r.Height < 4) return;
-            if (_down) r.Offset(0, 1);
             using (var path = Theme.Rounded(r, Radius))
             {
                 var top = Mix(baseColor, Color.White, bright ? 0.16f : 0.07f);
@@ -151,7 +144,14 @@ namespace SkinManager.App
                 m.Result = IntPtr.Zero;
                 return;
             }
-            if (m.Msg == 0x0115) _timer.Stop();   // WM_VSCROLL: the scrollbar is being used
+            if (m.Msg == 0x0115)   // WM_VSCROLL: the scrollbar is being used: no glide, and drawn whole each step
+            {
+                _timer.Stop();
+                var msg = m;
+                Theme.Repaint(_c, () => base.WndProc(ref msg));
+                m.Result = msg.Result;
+                return;
+            }
             base.WndProc(ref m);
         }
 
@@ -163,10 +163,8 @@ namespace SkinManager.App
             if (Math.Abs(_goal - _pos) < 0.75f) { _pos = _goal; _timer.Stop(); }
             int y = (int)Math.Round(_pos);
             if (y == -_c.AutoScrollPosition.Y) return;
-            _c.AutoScrollPosition = new Point(-_c.AutoScrollPosition.X, y);
-            // see-through panels: what's behind each card moved, so everything is drawn again (cheap: see BackPicture)
-            if (_c.BackColor.A < 255) _c.Invalidate(true);
-            _c.Update();
+            // drawn whole each step (see Theme.Repaint): no smearing however fast it goes
+            Theme.Repaint(_c, () => _c.AutoScrollPosition = new Point(-_c.AutoScrollPosition.X, y));
         }
     }
 
@@ -186,6 +184,9 @@ namespace SkinManager.App
             box.MouseLeave += (s, e) => { _hover = false; box.Invalidate(); };
             box.SelectedIndexChanged += (s, e) => box.Invalidate();
             box.EnabledChanged += (s, e) => box.Invalidate();
+            // cut to its rounded shape, so the corners show what's around it
+            void Shape() { if (box.Width < 8 || box.Height < 8 || box.DropDownStyle != ComboBoxStyle.DropDownList) return; using (var p = Theme.Rounded(new Rectangle(0, 0, box.Width, box.Height), 6)) { var old = box.Region; box.Region = new Region(p); old?.Dispose(); } }
+            box.SizeChanged += (s, e) => Shape(); Shape();
         }
 
         public static void Attach(ComboBox box)
@@ -225,8 +226,7 @@ namespace SkinManager.App
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     var full = new Rectangle(0, 0, _box.Width, _box.Height);
-                    var under = _box.Parent?.BackColor ?? Theme.Back;
-                    using (var b = new SolidBrush(under.A == 0 ? Theme.Back : under)) g.FillRectangle(b, full);
+                    BackPicture.Behind(_box, g);
                     var r = new Rectangle(0, 0, _box.Width - 1, _box.Height - 1);
                     using (var path = Theme.Rounded(r, 6))
                     {

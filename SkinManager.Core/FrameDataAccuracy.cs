@@ -29,6 +29,7 @@ namespace SkinManager.Core
                 foreach (var p in d.Projectiles)
                 {
                     string name = p.Name;
+                    if (p.Item) continue;   // its numbers are P+'s item data; the move's note says when it hits
                     if (p.Flight != null)
                     {
                         string about = p.Flight.About ?? "";
@@ -41,7 +42,7 @@ namespace SkinManager.Core
                 if (FighterMotion.Moves(b, e)) approx.Add("how far the fighter travels is drawn with no stick held");
                 if (e.Note != null && !e.NoteIsInfo && !e.Note.StartsWith("The fighter")) approx.Add(e.Note.TrimEnd('.'));
                 bool drawsNothing = !d.Hits.Any() && !d.Projectiles.Any(p => p.Flight != null || !p.Unknown) && d.Intangible.Count == 0;
-                var level = notDrawn.Count > 0 || drawsNothing && e.Note != null ? Sureness.NotDrawn : approx.Count > 0 ? Sureness.Approximate : Sureness.Exact;
+                var level = notDrawn.Count > 0 || drawsNothing && e.Note != null && !e.NoteIsInfo ? Sureness.NotDrawn : approx.Count > 0 ? Sureness.Approximate : Sureness.Exact;
                 string why = level == Sureness.Exact
                     ? (e.Extra ? "Read straight from P+'s scripts (a move outside the usual list, found in the fighter's files)." : "Read straight from P+'s scripts for this move.")
                     : string.Join("; ", notDrawn.Concat(approx).Distinct()) + ".";

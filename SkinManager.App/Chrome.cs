@@ -144,36 +144,78 @@ namespace SkinManager.App
         }
     }
 
+    /// <summary>A panel that keeps a picture of what's behind it (see BackPicture).</summary>
+    interface IGlass { BackPicture Back { get; } }
+
     sealed class BackPicture : IDisposable
     {
         Bitmap _bmp; Point _at; Size _size; int _gen = -1;
+        Action<PaintEventArgs> _build;
 
-        public void Paint(Control owner, PaintEventArgs e, Action<PaintEventArgs> build)
+        bool Ensure(Control owner)
         {
             var size = owner.ClientSize;
-            if (size.Width <= 0 || size.Height <= 0) return;
+            if (size.Width <= 0 || size.Height <= 0 || _build == null) return false;
             var at = BackCache.OffsetInForm(owner);
             if (_bmp == null || at != _at || size != _size || _gen != BackCache.Generation)
             {
-                _bmp?.Dispose();
-                _bmp = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-                using (var g = Graphics.FromImage(_bmp)) build(new PaintEventArgs(g, new Rectangle(Point.Empty, size)));
+                if (_bmp == null || _bmp.Size != size) { _bmp?.Dispose(); _bmp = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb); }
+                using (var g = Graphics.FromImage(_bmp)) { g.Clear(Color.Transparent); _build(new PaintEventArgs(g, new Rectangle(Point.Empty, size))); }
                 _at = at; _size = size; _gen = BackCache.Generation;
             }
+            return true;
+        }
+
+        public void Paint(Control owner, PaintEventArgs e, Action<PaintEventArgs> build)
+        {
+            _build = build;
+            if (!Ensure(owner)) return;
             var clip = e.ClipRectangle;
-            clip.Intersect(new Rectangle(Point.Empty, size));
+            clip.Intersect(new Rectangle(Point.Empty, _size));
             if (clip.Width > 0 && clip.Height > 0) e.Graphics.DrawImage(_bmp, clip, clip, GraphicsUnit.Pixel);
+        }
+
+        /// <summary>Draws the part at (x, y) of the panel, w by h, at 0,0 of g. False if it isn't ready.</summary>
+        public bool DrawAt(Control owner, Graphics g, int x, int y, int w, int h)
+        {
+            try
+            {
+                if (!Ensure(owner)) return false;
+                g.DrawImage(_bmp, new Rectangle(0, 0, w, h), new Rectangle(x, y, w, h), GraphicsUnit.Pixel);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Draws what's behind a control (in its own coordinates), found directly: the nearest see-through
+        /// panel's picture, or the nearest solid color. Used by rounded buttons and boxes, whose corners must show
+        /// exactly what's around them (going through Windows' own see-through painting left them black).</summary>
+        public static void Behind(Control c, Graphics g)
+        {
+            int x = 0, y = 0, w = c.Width, h = c.Height;
+            for (Control p = c; p.Parent != null;)
+            {
+                x += p.Left; y += p.Top; p = p.Parent;
+                if (p is IGlass glass && glass.Back.DrawAt(p, g, x, y, w, h)) return;
+                if (p is Form || p.BackColor.A == 255)
+                {
+                    using (var b = new SolidBrush(p.BackColor.A == 255 ? p.BackColor : Theme.Back)) g.FillRectangle(b, 0, 0, w, h);
+                    return;
+                }
+            }
+            using (var b = new SolidBrush(Theme.Back)) g.FillRectangle(b, 0, 0, w, h);
         }
 
         public void Drop() { _bmp?.Dispose(); _bmp = null; }
         public void Dispose() => Drop();
     }
 
-    class GlassPanel : Panel
+    class GlassPanel : Panel, IGlass
     {
         public int Tint = 0;   // 0..255 darkness drawn over the backdrop
         public Color TintColor = Color.FromArgb(10, 11, 16);
         readonly BackPicture _back = new BackPicture();
+        public BackPicture Back => _back;
         public GlassPanel()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -191,9 +233,10 @@ namespace SkinManager.App
     }
 
     /// <summary>A see-through grid of cards that redraws cleanly when scrolled.</summary>
-    class GlassFlow : FlowLayoutPanel
+    class GlassFlow : FlowLayoutPanel, IGlass
     {
         readonly BackPicture _back = new BackPicture();
+        public BackPicture Back => _back;
         public GlassFlow()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);

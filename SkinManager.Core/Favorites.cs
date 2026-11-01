@@ -21,6 +21,7 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public long ModId;
         [DataMember(EmitDefaultValue = false)] public string Kind;   // "skin", "stage", "music"
         [DataMember] public DateTime AddedAt;
+        [DataMember(EmitDefaultValue = false)] public List<string> Lists;   // the collections it's in (your own named lists)
     }
 
     public sealed class Favorites
@@ -56,6 +57,31 @@ namespace SkinManager.Core
             Save();
             Changed?.Invoke();
             return have == null;
+        }
+
+        // ----- collections: named lists of starred mods ("Fox skins to try", "Tournament stages") -----
+
+        /// <summary>Every collection's name, in the order they were first made.</summary>
+        public List<string> Collections => _items.OrderBy(f => f.AddedAt).Where(f => f.Lists != null).SelectMany(f => f.Lists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        public bool InCollection(string key, string list) => _items.Any(f => f.Key == key && f.Lists != null && f.Lists.Contains(list, StringComparer.OrdinalIgnoreCase));
+
+        /// <summary>Puts a mod in a collection (starring it if it isn't), or takes it out (it stays starred).</summary>
+        public void SetCollection(Favorite f, string list, bool on)
+        {
+            if (string.IsNullOrWhiteSpace(list)) return;
+            var have = _items.FirstOrDefault(x => x.Key == f.Key);
+            if (have == null)
+            {
+                if (!on) return;
+                f.AddedAt = DateTime.Now; _items.Add(f); have = f;
+            }
+            have.Lists = have.Lists ?? new List<string>();
+            have.Lists.RemoveAll(x => string.Equals(x, list, StringComparison.OrdinalIgnoreCase));
+            if (on) have.Lists.Add(list.Trim());
+            if (have.Lists.Count == 0) have.Lists = null;
+            Save();
+            Changed?.Invoke();
         }
 
         void Save()

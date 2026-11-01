@@ -125,7 +125,7 @@ namespace SkinManager.App
         }
 
         int BaseHeight => 196 + (_p.NewBadges.Count > 0 ? 70 : 0) + Math.Min(2, _p.NewBests.Count) * 20 + (_s != null && _s.BestComboHits >= 2 ? 22 : 0);
-        int CoachHeight => _coach == null || !_coach.Any ? 0 : 30 + Math.Min(2, _coach.Tips.Count) * 46 + Math.Min(1, _coach.Facts.Count) * 36 + (_coach.Combo != null ? 36 : 0);
+        int CoachHeight => _coach == null || !_coach.Any ? 0 : 30 + Math.Min(2, _coach.Tips.Count) * 46 + Math.Min(1, _coach.Facts.Count) * 36 + (_coach.Combo != null ? 36 : 0) + (_coach.Watch != null ? 132 : 0);
 
         public void Show(GameProgress p, GameSmash s, GamePlayer me, GamePlayer them, string stage, Func<int, int, string> name, StatsArt art, GameCoach coach = null)
         {
@@ -257,8 +257,43 @@ namespace SkinManager.App
                         y += 36;
                     }
                     if (_coach.Combo != null)
+                    {
                         using (var b = new SolidBrush(Color.FromArgb(a, OverlayLook.Accent)))
                             g.DrawString(_coach.Combo, Theme.Small, b, new RectangleF(16 + off, y, Width - 32, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+                        y += 36;
+                    }
+                    // look out for this move: their move as it hits, how much it did, and what to do on shield
+                    var wo = _coach.Watch;
+                    if (wo != null)
+                    {
+                        float tw = Since(_coachAt.AddSeconds(0.6), 0.5);
+                        int aw = (int)(255 * tw);
+                        Text(g, "LOOK OUT FOR", Theme.Bold(8.5f), Color.FromArgb(aw, Theme.Bad), new RectangleF(16 + off, y, 200, 16));
+                        y += 18;
+                        var pr = new Rectangle(16 + (int)off, (int)y, 150, 107);
+                        using (var path = Theme.Rounded(pr, 8))
+                        {
+                            using (var b = new SolidBrush(Color.FromArgb(aw / 2, 0, 0, 0))) g.FillPath(b, path);
+                            if (wo.Picture != null)
+                            {
+                                var clip = g.Clip; g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+                                var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = tw };
+                                using (var ia = new System.Drawing.Imaging.ImageAttributes()) { ia.SetColorMatrix(cm); g.DrawImage(wo.Picture, pr, 0, 0, wo.Picture.Width, wo.Picture.Height, GraphicsUnit.Pixel, ia); }
+                                g.Clip = clip;
+                            }
+                            using (var pen = new Pen(Color.FromArgb(aw, Theme.Bad), 1.5f)) g.DrawPath(pen, path);
+                        }
+                        float tx = pr.Right + 12;
+                        string who = Fighters.Name(wo.Character) + "'s " + wo.Move;
+                        Text(g, who, Theme.BodyBold, Color.FromArgb(aw, Theme.Text), new RectangleF(tx, y, Width - tx - 14, 20));
+                        string did = $"Hit you {wo.Times} time{(wo.Times == 1 ? "" : "s")} for {wo.Damage:0}%" + (wo.Stocks > 0 ? $" and took {wo.Stocks} stock{(wo.Stocks == 1 ? "" : "s")}." : ".");
+                        using (var b = new SolidBrush(Color.FromArgb(aw, Theme.Muted)))
+                            g.DrawString(did, Theme.Small, b, new RectangleF(tx, y + 22, Width - tx - 14, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+                        var advice = wo.Advice;
+                        if (advice != null)
+                            using (var b = new SolidBrush(Color.FromArgb(aw, OverlayLook.Accent)))
+                                g.DrawString(advice, Theme.Small, b, new RectangleF(tx, y + 54, Width - tx - 14, 54), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+                    }
                 }
             }
             // how long it stays

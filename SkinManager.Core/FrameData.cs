@@ -60,7 +60,8 @@ namespace SkinManager.Core
         public int Frame;              // the move's frame it comes out on (0: the game's code makes it, the script doesn't say when)
         public Article Article;
         public MoveData Data;          // its own frames, counted from when it appears
-        public bool Unknown => Frame <= 0 && Flight == null;
+        public bool Unknown => Frame <= 0 && Flight == null && !Item;
+        public bool Item;              // an item the move pulls out (Link's bomb): its hits are listed, it hits when thrown or set off
         string FlightText
         {
             get

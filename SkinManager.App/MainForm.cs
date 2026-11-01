@@ -431,6 +431,7 @@ namespace SkinManager.App
             _content.Controls.Add(_library); _content.Controls.Add(_store); _content.Controls.Add(_slotsPage); _content.Controls.Add(_swap); _content.Controls.Add(_settings);
             _credits = new CreditsPanel { Visible = false }; _content.Controls.Add(_credits);
             _stats = new StatsPanel(() => _install, () => _installer) { Visible = false }; _content.Controls.Add(_stats);
+            _stats.Launcher = FindLauncher;
             _stats.NewGame += ShowReport;
             _frameData = new FrameDataPanel(() => _installer) { Visible = false }; _content.Controls.Add(_frameData);
             _livePage = new LiveMatchPanel { Visible = false }; _content.Controls.Add(_livePage);
@@ -838,7 +839,7 @@ namespace SkinManager.App
             var add = new ToolStripMenuItem("New profile...") { ForeColor = Theme.Accent };
             add.Click += (s, e) => NewProfile();
             menu.Items.Add(add);
-            var manage = new ToolStripMenuItem("Manage profiles (rename, copy, delete)...") { ForeColor = Theme.Text };
+            var manage = new ToolStripMenuItem("Manage profiles (rename, copy, share)...") { ForeColor = Theme.Text };
             manage.Click += (s, e) => ManageProfiles();
             menu.Items.Add(manage);
             // the SD cards
@@ -1499,8 +1500,74 @@ namespace SkinManager.App
         void ManageProfiles()
         {
             if (_lib == null || _busy) return;
-            using (var f = new ProfilesForm(_lib, n => SwitchProfile(n), NewProfile, RenameProfile, CopyProfile, DeleteProfile))
+            using (var f = new ProfilesForm(_lib, n => SwitchProfile(n), NewProfile, RenameProfile, CopyProfile, DeleteProfile) { Share = ShareProfile, OpenShared = OpenSharedSetup })
                 f.ShowDialog(this);
+        }
+
+        // ----- shared setups -----
+
+        void ShareProfile(string name)
+        {
+            var p = _lib.Profiles.FirstOrDefault(x => x.Name == name);
+            if (p == null) return;
+            var setup = SharedSetup.From(_lib, p);
+            if (setup.Mods.Count == 0) { Dialog.Show(this, $"\"{name}\" has no mods on, so there's nothing to share.", "Share", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            string safe = string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+            using (var dlg = new SaveFileDialog { Title = "Save the shared setup", FileName = safe + SharedSetup.Extension, Filter = "Shared setup|*" + SharedSetup.Extension, InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                try { setup.Save(dlg.FileName); }
+                catch (Exception e) { Dialog.Show(this, "It couldn't be saved: " + Friendly.Explain(e), "Share", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                int local = setup.Mods.Count(m => !m.Fetchable);
+                Dialog.Show(this, $"Saved \"{Path.GetFileName(dlg.FileName)}\" ({setup.Mods.Count} mods).\r\n\r\nSend it to a friend. In their P+ Modding Tool: Profile → Manage profiles → \"Open a shared one...\", and they can get the same mods with a click." +
+                    (local > 0 ? $"\r\n\r\n{local} of them came from a file on this PC rather than GameBanana, so you'll need to send {(local == 1 ? "that one" : "those")} yourself." : ""),
+                    "Shared", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        void OpenSharedSetup()
+        {
+            string path;
+            using (var dlg = new OpenFileDialog { Title = "Open a shared setup", Filter = "Shared setup|*" + SharedSetup.Extension + "|All files|*.*" })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                path = dlg.FileName;
+            }
+            SharedSetup setup;
+            try { setup = SharedSetup.Open(path); }
+            catch (Exception e) { Dialog.Show(this, e is InvalidDataException ? e.Message : "It couldn't be opened: " + Friendly.Explain(e), "Shared setup", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            using (var f = new SharedSetupForm(setup, _lib, GetShared)) f.ShowDialog(this);
+        }
+
+        /// <summary>Downloads one mod of a shared setup and adds it the usual way. True when it's now in My Mods.</summary>
+        bool GetShared(SharedMod m)
+        {
+            if (_busy || !m.Fetchable) return false;
+            GbDetails d = null; GbFile f = null; string path = null;
+            var error = WithProgress(report =>
+            {
+                report("Looking up " + m.Name, 0);
+                d = GameBanana.Details(m.ModId, ModUpdates.ModelOf(m.PageUrl), contents: false);
+                f = d.Files.FirstOrDefault(x => x.Id == m.FileId);
+                if (f == null) return;
+                path = GameBanana.Download(f, GameBanana.DownloadFolder(Program.DataFolder, m.ModId),
+                    (done, total) => report($"Downloading {f.Name}", total > 0 ? (int)Math.Min(100, done * 100 / total) : 0), System.Threading.CancellationToken.None);
+            });
+            if (error != null) { Dialog.Show(this, (error is GbException ? error.Message : $"\"{m.Name}\" didn't download: " + Friendly.Explain(error)), "Couldn't get it", MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
+            if (f == null || path == null)
+            {
+                Dialog.Show(this, $"That version of \"{m.Name}\" isn't on GameBanana anymore (it may have been updated or taken down). Look for it in the Mod Store instead.", "Couldn't get it", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+            var source = new SkinSource { ModId = d.Mod.Id, FileId = f.Id, ModName = d.Mod.Name, Author = d.Mod.Author, PageUrl = d.Mod.ProfileUrl, ThumbUrl = d.Mod.ThumbUrl };
+            try
+            {
+                new DownloadInfo { ModId = d.Mod.Id, FileId = f.Id, ModName = d.Mod.Name, Author = d.Mod.Author, Category = d.Mod.Category,
+                    ThumbUrl = d.Mod.ThumbUrl, PageUrl = d.Mod.ProfileUrl, FileName = f.Name, Path = path, DownloadedAt = DateTime.Now }.Save();
+            }
+            catch { }
+            AddSkin(path, source);
+            return SharedSetup.Have(_lib, m);
         }
 
         // ----- IModHost (My Mods) -----

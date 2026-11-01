@@ -29,7 +29,60 @@ namespace SkinManager.Core
         public List<DeathTip> Tips = new List<DeathTip>();
         public List<string> Facts = new List<string>();
         public string Combo;
-        public bool Any => Tips.Count + Facts.Count > 0 || Combo != null;
+        public WatchOut Watch;
+        public bool Any => Tips.Count + Facts.Count > 0 || Combo != null || Watch != null;
+    }
+
+    /// <summary>The opponent's move that hurt you most in a game, and what to do when it hits your shield.</summary>
+    public sealed class WatchOut
+    {
+        public int Character;           // theirs
+        public string Move;             // "Forward smash"
+        public int Times; public float Damage; public int Stocks;   // how often it hit you, how much it did, stocks it took
+        public PunishReport Punish;     // it on your shield (null: not worked out)
+        public System.Drawing.Bitmap Picture;   // the move as it hits, with its hitboxes (null: not drawn)
+        public MoveEntry Entry; public FighterBook Book;
+
+        /// <summary>What to do about it, in a sentence.</summary>
+        public string Advice
+        {
+            get
+            {
+                var p = Punish;
+                if (p == null || p.Problem != null) return null;
+                if (p.Advantage >= 0) return (p.Advantage > 0 ? $"It's +{p.Advantage} on shield" : "It's even on shield") + ", so shielding it gives you no punish: move out of its way instead.";
+                var best = p.Rows.FirstOrDefault(r => r.Works);
+                return best == null ? $"It's {p.Advantage} on shield, but none of your out-of-shield options are fast enough."
+                    : $"It's {p.Advantage} on shield: punish it with {best.Name.ToLowerInvariant()}" + (best.Jump > 0 ? " out of a jump" : " out of shield") + (best.Spare > 0 ? $" ({best.Spare} frame{(best.Spare == 1 ? "" : "s")} to spare)." : " (just in time).");
+            }
+        }
+
+        /// <summary>The move of theirs that did the most damage to you (stocks it took count most).</summary>
+        public static WatchOut For(ReplayData d, int me, int them, Func<int, FighterBook> book, Func<int, int, string> moveName)
+        {
+            if (d == null || me < 0 || them < 0 || them >= d.Characters.Count) return null;
+            var hits = d.Hits.Where(h => h.Victim == me && h.Attacker == them && h.Move >= 0).ToList();
+            if (hits.Count == 0) return null;
+            var kills = d.Deaths.Where(x => x.Victim == me && x.Killer == them && x.Move >= 0).GroupBy(x => x.Move).ToDictionary(g => g.Key, g => g.Count());
+            var top = hits.GroupBy(h => h.Move)
+                .Select(g => (Move: g.Key, Times: g.Count(), Damage: g.Sum(h => h.Damage), Stocks: kills.TryGetValue(g.Key, out int k) ? k : 0))
+                .OrderByDescending(x => x.Stocks).ThenByDescending(x => x.Damage).First();
+            int ch = d.Characters[them];
+            var w = new WatchOut { Character = ch, Move = moveName(ch, top.Move), Times = top.Times, Damage = top.Damage, Stocks = top.Stocks };
+            try
+            {
+                var b = book(ch); var mine = book(d.Characters[me]);
+                var entry = b?.Entries.FirstOrDefault(e => e.Data.Subactions.Contains(top.Move));
+                if (entry != null)
+                {
+                    w.Entry = entry; w.Book = b;
+                    if (string.IsNullOrEmpty(w.Move)) w.Move = entry.Name;
+                    if (mine != null) w.Punish = SkinManager.Core.Punish.For(b, entry, mine);
+                }
+            }
+            catch { }
+            return string.IsNullOrEmpty(w.Move) ? null : w;
+        }
     }
 
     public static class DeathCoach

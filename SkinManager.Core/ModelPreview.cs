@@ -82,6 +82,59 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>The costume's head close up (for a stock icon or the in-match portrait), from the same angle as the
+        /// full picture. The head is found from the model's HeadN bone: everything above it (hair, hats, ears) within reach
+        /// sideways. shoulders: 0 = just the head (a square), more = that much of the body below it too. Null if it has no
+        /// model or no head to find.</summary>
+        public static Bitmap RenderHead(byte[] costume, int width, int height, float shoulders = 0)
+        {
+            lock (BrawlGate.Lock)
+            using (var tmp = new TempFile(".pac", costume))
+            using (var root = NodeFactory.FromFile(null, tmp.Path))
+            {
+                Installer.Quiet();
+                var model = root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().FirstOrDefault();
+                if (model == null) return null;
+                model.ApplyCHR(null, 0);
+                const float yawDeg = 22;
+                var tris = Gather(root, new[] { model }, yawDeg);
+                if (tris.Count == 0) return null;
+                float minY = float.MaxValue, maxY = float.MinValue;
+                foreach (var t in tris) foreach (var v in new[] { t.a, t.b, t.c }) { minY = Math.Min(minY, v._y); maxY = Math.Max(maxY, v._y); }
+                float tall = Math.Max(0.01f, maxY - minY);
+                var bones = model._linker?.BoneCache?.OfType<MDL0BoneNode>().ToList() ?? new List<MDL0BoneNode>();
+                var head = bones.FirstOrDefault(b => b.Name == "HeadN") ?? bones.FirstOrDefault(b => b.Name == "HeadJ" || b.Name == "Head");
+                float hx, hy;
+                if (head != null)
+                {
+                    var hp = head._frameMatrix.GetPoint();
+                    double yaw = yawDeg * Math.PI / 180;
+                    hx = (float)(hp._x * Math.Cos(yaw) + hp._z * Math.Sin(yaw)); hy = hp._y;
+                }
+                else
+                {
+                    // no head bone (Kirby, Jigglypuff: the body is the head): the whole model
+                    float a0 = float.MaxValue, a1 = float.MinValue;
+                    foreach (var t in tris) foreach (var v in new[] { t.a, t.b, t.c }) { a0 = Math.Min(a0, v._x); a1 = Math.Max(a1, v._x); }
+                    hx = (a0 + a1) / 2; hy = minY + 0.04f * tall;
+                }
+                // the head: points above the bone (a little below too: the jaw), not too far out sideways
+                float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue; int n = 0;
+                foreach (var t in tris)
+                    foreach (var v in new[] { t.a, t.b, t.c })
+                    {
+                        if (v._y < hy - 0.04f * tall || Math.Abs(v._x - hx) > (head != null ? 0.28f : 0.6f) * tall) continue;
+                        x0 = Math.Min(x0, v._x); x1 = Math.Max(x1, v._x); y0 = Math.Min(y0, v._y); y1 = Math.Max(y1, v._y); n++;
+                    }
+                if (n < 12) return null;
+                float cx = (x0 + x1) / 2, side = Math.Max(x1 - x0, y1 - y0) * 1.08f;
+                float wantH = side * (1 + shoulders), wantW = wantH * width / Math.Max(1f, height);
+                if (wantW < side) { wantW = side; wantH = wantW * height / Math.Max(1f, width); }
+                float top = y1 + side * 0.04f;
+                return Draw(tris, width, height, cx - wantW / 2, cx + wantW / 2, top - wantH, top, 1f, 1f, null);
+            }
+        }
+
         /// <summary>How much a costume's surface stretches or squashes in a pose, against its default pose: for each triangle the
         /// worst change of an edge's length. Returns the share of the surface changed by more than a third, and the average change.</summary>
         public static (float Torn, float Average) Stretch(byte[] costume, byte[] motionFile, string animation, int frame)

@@ -140,6 +140,42 @@ namespace SkinManager.Core
                 if (life <= 0 || float.IsNaN(sp)) return null;
                 return Fly(c, Straight(life, sp, 0), held ? "ShootTame" : "Shoot", $"{life} frames at {sp:0.##} a frame ({life * sp:0} units)", bone: 54, fwd: c.FF(0, 0), up: c.FF(0, 4));
             });
+
+            // ---- Sonic, Knuckles: up B spring (wnSonicGimmickJump; P+'s Knuckles runs the same code with his own copy).
+            // Made where the fighter is. On the ground it stays as a spring and doesn't hit; in the air it drops ("Fall"):
+            // starts at article param +0x10 up, gravity +0x14 a frame, falling no faster than +0x18. Its hitbox is the
+            // Fall script's.
+            foreach (var who in new[] { "Sonic", "Knuckles" })
+                Add(who, 6, c =>
+                {
+                    float vy = c.AF(0x10), g = Math.Abs(c.AF(0x14)), lim = Math.Abs(c.AF(0x18));
+                    if (float.IsNaN(vy) || float.IsNaN(g) || g <= 0 || g > 2 || float.IsNaN(lim) || lim <= 0) return null;
+                    var f = Fly(c, Ballistic(45, 0, vy, g, lim), "Fall", "used in the air, the spring drops from where you jumped and hits anyone under it (drawn falling 45 frames); used on the ground it stays as a spring and doesn't hit", start: 1);
+                    return f;
+                });
+
+            // ---- Zelda: side B, Din's Fire. The fireball (slot 6, no hitbox) is made on flag 0x22000011 at HeadN (bone 74)
+            // + (fighter param 1 +0xC forward, +0x10 up). It flies at its param +0x14 a frame, changing by +0x18 a frame (no
+            // faster than +0x1C), steered by the stick; when B is let go or its time (+0x0 frames) runs out, the blast
+            // (slot 7) comes out where it is. The blast hits for its param +0xC + +0x10 a frame the fireball flew.
+            Add("Zelda", 7, c =>
+            {
+                var ball = c.M.Articles.FirstOrDefault(x => x.Slot == 6);
+                int life = (int)Math.Round(c.M.ArticleF(ball, 0)), start = c.FlagFrame(0x22000011);
+                float sp = c.M.ArticleF(ball, 0x14), acc = c.M.ArticleF(ball, 0x18), max = c.M.ArticleF(ball, 0x1C);
+                float dmg0 = c.AF(0xC), per = c.AF(0x10);
+                if (life <= 0 || life > 300 || start <= 0 || float.IsNaN(sp) || float.IsNaN(acc)) return null;
+                if (float.IsNaN(max) || max <= 0) max = float.MaxValue;
+                var path = new System.Collections.Generic.List<(float X, float Y)>(); float x = 0, v = sp;
+                for (int k = 0; k < life; k++) { path.Add((x, 0)); x += v; v = Math.Min(max, v + acc); }
+                var blast = c.Script("Move", 12); int burst = blast.FindLastIndex(h => h.Count > 0) + 1; if (burst <= 0) return null;
+                for (int k = 0; k < burst; k++) path.Add((x, 0));
+                var f = Fly(c, path, "", $"drawn flying straight (no stick) until its time runs out ({life} frames, {x:0} units), then the blast; let go of B sooner and it blows up sooner, closer and weaker",
+                    start: start, bone: 74, fwd: c.FF(1, 0xC), up: c.FF(1, 0x10), later: (life + 1, "Move"));
+                if (!float.IsNaN(dmg0) && !float.IsNaN(per))
+                    foreach (var hs in f.Hits) for (int k = 0; k < hs.Count; k++) { var h = hs[k].Copy(); h.Damage = (float)Math.Floor(dmg0 + per * life); hs[k] = h; }
+                return f;
+            });
         }
     }
 }

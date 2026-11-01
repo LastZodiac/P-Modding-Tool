@@ -455,3 +455,57 @@ Set `SKINMANAGER_GB_BASE` / `SKINMANAGER_GB_IMAGES` to point the app at a local 
   and the jump back to where you were never show.
 - My Mods filter buttons are made once and updated (made again on every refresh, old ones were left drawn over).
 - SmoothButton: no dark drop shadow, and a faint light outline instead of the dark one (read as a black frame).
+
+## Buttons and scrolling, second round (2026-11-01, 1.2.3)
+- 1.2.2 still showed a dark box behind every rounded button on Windows: the button asked its parent to draw itself
+  behind it, and through Windows' see-through painting that came out dark. Now SmoothButton (and the dropdowns) have
+  their window cut to the rounded shape (Region), so the corners are simply not theirs, and inside they draw what's
+  behind them directly from the nearest panel's kept picture (BackPicture.Behind), never through Windows.
+- Fast scrolling smeared ("stretched"): Windows' scroll copies the old pixels along and patches the rest. Theme.Repaint:
+  the glide and scrollbar drags now scroll with drawing off and then draw the whole panel once (RedrawWindow).
+- BackPicture reuses its picture when the size is the same (Settings' cards are made again on every scroll step).
+
+## Items, "Punish it", "Look out for" (2026-11-01)
+- Items a special pulls out (FrameDataBook.ItemMoves / ReadItems / ItemHits): Link's and Toon Link's bombs
+  (fighter/<name>/ITEM/Itm<Name>00Param.pac), Snake's grenade, Peach's turnip, Diddy's peanut (item/ItmCommonParam.pac).
+  Their script parts with hitboxes are listed on the move as item projectiles (Projectile.Item): "Throw" = when thrown,
+  "Born" = the blast. Link bomb blast 6% 70°; Snake grenade blast 12% 80°, thrown 2%; Diddy peanut 4%; turnip damage ? (code).
+  Dedede's Waddle Dees aren't on the SD card (they come from the Brawl disc), so they're still not drawn.
+- Punish.cs + PunishView ("Punish it" tab): their move on your shield. Shield stun floor((d+4.45)/2.235), advantage =
+  hit frame + stun - (FAF-1) (aerials as Combos.Ready: landed + L-cancel); a move that hits more than once is worked out
+  from its last hit. Your options: grab, up smash, up B straight out of shield; aerials after jumpsquat. Spare = window -
+  (startup + jump). Reach compares the furthest hitbox edge (Places) with theirs at that hit; pushback not counted.
+  Checked: Marth f-smash vs Fox (-27: everything punishes, but only up close: Marth's sword reaches 19.5, Fox 12-15).
+- WatchOut (DeathCoach.cs): after a game, the opponent's move that took the most stocks / did the most damage, its
+  Punish report and a picture of it as it hits (rendered at its hit frame), shown as "LOOK OUT FOR" in the post-game card.
+- bapp.sh's error filter hid compile errors (greedy sed); fixed (test tooling only).
+
+## Compare, code-built specials, watch, recaps, sharing, head pictures, collections (2026-11-01, 1.2.3)
+- Frame Data "Compare" tab (CompareView): this fighter and one you pick, move by move: startup, active, FAF, the faster
+  one green. Rows matched by name, then by the game's animation name (Falco's "Forward tilt (all angles)"), then by the
+  start of the name. Several hits show first-last ("6…21"). Column widths fit the window (44-74 px each).
+- Code-built specials (from Brawl's and P+'s modules):
+  Sonic/Knuckles up B spring (wnSonicGimmickJump "Fall": article params +0x10 vy, +0x14 gravity, +0x18 fall limit;
+  hits 4% only when it's used in the air). Zelda side B Din's Fire blast (fireball params +0 time 85, +0x14 speed 3.2,
+  +0x18 -0.035/frame, made at HeadN 74 + fighter param 1 +0xC/+0x10; blast damage +0xC + +0x10 a frame flown = 28% at
+  its farthest), drawn flying straight with no stick. Kirby's stone: hits in DummySpecialLwToAir/ToGround, now rows
+  "Down B stone, falling/landing" drawn on the stone pose. Ike's up B sword removed (only the Final Smash throws it;
+  Aether's hits are Ike's own). Moves that really don't hit (Olimar pluck/whistle, Mewtwo teleport) say so and count
+  as exact (FrameDataBook.Harmless). Olimar side B explains the Pikmin cling (colour tables are code-only).
+  Whole cast: not drawn 16 -> 8 (the rest are set-later things: Snake's mine/C4/Cypher, Dedede's Waddle Dees, Olimar's
+  thrown Pikmin, Charizard rock pieces/down B, Zelda down B).
+- ProjectileFlight.Apply logs a failing rule when SKINMANAGER_DEBUG_FLIGHT is set (it used to swallow it silently).
+- Stat Tracker: "Watch this game" opens Brawl Online's launcher with the replay file (its main process plays a .brep
+  given on the command line or to a second instance: playback Dolphin, mode "normal"). Overview starts with "Your last
+  session" (games with less than 45 minutes between them: record, vs your usual, characters, each opponent's set).
+  Opponents: "The rivalry" (all time, last 5, current streak).
+- Shared setups (SharedSetup.cs, SharedSetupForm.cs; Profiles: "Share..." and "Open a shared one..."): a .ppsetup file
+  (JSON) listing a profile's mods with their GameBanana mod and file ids; the friend's app shows which they have and gets
+  the rest (download + the usual add steps, one at a time). Mods added from a file are listed but can't be fetched.
+  Only gamebanana.com page links are kept from an opened file.
+- Head pictures from the model (ModelPreview.RenderHead): found from HeadN (HeadJ/Head; no head bone: the whole model,
+  Kirby/Jigglypuff), everything above it within reach. Stock icon made automatically when a skin has none (Add and
+  Pack), and "Make one from the 3D model" on the stock icon and in-match portrait rows too.
+- Mod Store collections: right-click a mod -> add to a collection / new collection (Favorite.Lists in favorites.json);
+  Favorites has a dropdown to show one collection.
+- Frame Data: on a narrow window "Save GIF..." becomes "GIF..." so it doesn't cover the "Pause on quick hits" box.

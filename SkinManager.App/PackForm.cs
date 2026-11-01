@@ -335,6 +335,23 @@ namespace SkinManager.App
                     }
                     pics[PictureKind.SelectPortrait] = png;
                 }
+                // and a stock icon from the model's head, when none came with it
+                if (!pics.ContainsKey(PictureKind.StockIcon) && costume.Main != null)
+                {
+                    var main = costume.Main.Path;
+                    var head = await Task.Run(() => { try { return ModelPreview.RenderHead(File.ReadAllBytes(main), 128, 128); } catch { return null; } });
+                    if (head != null)
+                    {
+                        string png = Path.Combine(Path.GetTempPath(), "PPlusModdingTool", "model-stock-" + Guid.NewGuid().ToString("N") + ".png");
+                        Directory.CreateDirectory(Path.GetDirectoryName(png));
+                        using (head) using (var small = new Bitmap(32, 32))
+                        {
+                            using (var g = Graphics.FromImage(small)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(head, 0, 0, 32, 32); }
+                            small.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+                        }
+                        pics[PictureKind.StockIcon] = png;
+                    }
+                }
                 try
                 {
                     var plan = await Task.Run(() => { using (var card = _installer.OpenCard()) return _installer.Plan(card, _pkg, costume, slot, pics); });

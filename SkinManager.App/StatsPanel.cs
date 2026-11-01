@@ -208,6 +208,7 @@ namespace SkinManager.App
             _chart.Picked += c => { _charCard.Character = c; _charCard.ToTop(); _charCard.Invalidate(); };
             _matches.Picked += id => { _matchCard.Game = id; _matchCard.ToTop(); _matchCard.Invalidate(); };
             _matchCard.ShowReplay += ShowReplayFile;
+            _matchCard.WatchReplay += WatchReplayFile;
             _body.Controls.AddRange(new Control[] { _tools, _table, _sideTitle, _side, _overview, _chart, _charCard, _matches, _matchCard, _progress });
             Resize += (s, e) => Arrange();
             VisibleChanged += (s, e) => { if (Visible && _h == null) Reload(); };
@@ -448,6 +449,19 @@ namespace SkinManager.App
                         try { c.Tips = DeathCoach.For(smash.Replay, smash.Me, Book, name); } catch (Exception e) { Program.Log("DI tips", e); }
                         try { c.Facts = FunFacts.For(smash, name); } catch (Exception e) { Program.Log("fun facts", e); }
                         try { c.Combo = FunFacts.ComboIdea(smash, Book(smash.MyCharacter), Book(smash.TheirCharacter), name); } catch (Exception e) { Program.Log("combo idea", e); }
+                        // the move of theirs that hurt you most, what it is on your shield, and a picture of it as it hits
+                        try
+                        {
+                            var w = WatchOut.For(smash.Replay, smash.Me, smash.Them, Book, name);
+                            if (w?.Entry != null && w.Book?.Costume != null)
+                            {
+                                var pics = ModelPreview.RenderMove(w.Book.Costume, w.Book.Motion, w.Book.Moves, w.Entry.Data, 168, 120, false);
+                                int at = Math.Max(0, Math.Min(pics.Count - 1, (w.Punish?.HitFrame ?? w.Entry.Data.Startup) - 1));
+                                for (int i = 0; i < pics.Count; i++) if (i == at) w.Picture = pics[i]; else pics[i].Dispose();
+                            }
+                            c.Watch = w;
+                        }
+                        catch (Exception e) { Program.Log("watch out", e); }
                     }
                 }
                 catch (Exception e) { Program.Log("coach", e); }
@@ -482,6 +496,21 @@ namespace SkinManager.App
             var path = Locate(file);
             if (path == null) { Dialog.Show(this, "That replay isn't in your Documents\\Brawl Online folder anymore.", "Stat Tracker", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\""); } catch (Exception e) { Program.Log("showing a replay", e); }
+        }
+
+        /// <summary>Finds Brawl Online's launcher (set by the main window; null: not found and not picked).</summary>
+        public Func<string> Launcher;
+
+        /// <summary>Plays the game in Brawl Online's replay player: its launcher opened with the replay file (the same as
+        /// double-clicking the file), which also works when Brawl Online is already open.</summary>
+        void WatchReplayFile(string file)
+        {
+            var path = Locate(file);
+            if (path == null) { Dialog.Show(this, "That replay isn't on this PC anymore (Brawl Online keeps them in Documents\\Brawl Online), so it can't be played.", "Watch this game", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            var exe = Launcher?.Invoke();
+            if (exe == null) return;
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "\"" + path + "\"") { UseShellExecute = false, WorkingDirectory = System.IO.Path.GetDirectoryName(exe) }); }
+            catch (Exception e) { Program.Log("watching a replay", e); Dialog.Show(this, "Brawl Online couldn't be opened: " + Friendly.Explain(e), "Watch this game", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 
         static string Ago(DateTime utc)
@@ -614,6 +643,14 @@ namespace SkinManager.App
             _side.Visible = _sideTitle.Visible = true;
             _sideTitle.Text = games.Last().Them.Name;
             var rows = new List<RecordTable.Row>();
+            // the rivalry: how it's gone overall and lately
+            var order = games.OrderBy(g => g.Game.Start).ToList();
+            int streak = 0; bool? streakWon = null;
+            for (int i = order.Count - 1; i >= 0; i--) { bool w = order[i].Me.Won == true; if (streakWon == null) streakWon = w; if (w != streakWon) break; streak++; }
+            rows.Add(new RecordTable.Row { Header = true, Name = "The rivalry" });
+            rows.Add(new RecordTable.Row { Name = "All time", Record = MatchHistory.Count(order), Note = $"since {order[0].Game.Start.ToLocalTime():MMM d}" });
+            if (order.Count > 5) rows.Add(new RecordTable.Row { Name = "Last 5 games", Record = MatchHistory.Count(order.Skip(order.Count - 5)) });
+            if (streak >= 2) rows.Add(new RecordTable.Row { Name = streakWon == true ? $"You've won {streak} in a row" : $"They've won {streak} in a row", Note = "last played " + Ago(order.Last().Game.Start) });
             var scout = Scout(id, 4);
             if (scout.Count > 0)
             {

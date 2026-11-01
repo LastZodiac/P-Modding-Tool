@@ -35,18 +35,27 @@ namespace SkinManager.App
         readonly MoveView _view = new MoveView();
         readonly ComboView _combo = new ComboView { Visible = false };
         readonly DiView _di = new DiView { Visible = false };
-        readonly Button _tabMoves = Theme.Secondary("Moves && hitboxes"), _tabCombos = Theme.Secondary("Launch && combos"), _tabDi = Theme.Secondary("How to DI"), _tabSure = Theme.Secondary("How accurate");
+        readonly PunishView _punish = new PunishView { Visible = false };
+        readonly CompareView _compare = new CompareView { Visible = false };
+        readonly Button _tabMoves = Theme.Secondary("Moves && hitboxes"), _tabCombos = Theme.Secondary("Launch && combos"), _tabDi = Theme.Secondary("How to DI"), _tabSure = Theme.Secondary("How accurate"), _tabPunish = Theme.Secondary("Punish it"), _tabCompare = Theme.Secondary("Compare");
         readonly AccuracyView _sure = new AccuracyView { Visible = false };
         readonly Dictionary<string, ModelPreview.MoveCamera> _cams = new Dictionary<string, ModelPreview.MoveCamera>();
         readonly FlowLayoutPanel _chips = new FlowLayoutPanel { BackColor = Color.Transparent, WrapContents = false, Height = 30 };
         string _filter = "All";
-        Character _targetChar, _diChar;
+        Character _targetChar, _diChar, _punishChar, _compareChar;
 
         public FrameDataPanel(Func<Installer> installer)
         {
             _installer = installer;
             Dock = DockStyle.Fill; Padding = new Padding(28, 18, 16, 8);
-            Controls.AddRange(new Control[] { _title, _who, _note, _strip, _chips, _list, _view, _combo, _di, _sure, _tabMoves, _tabCombos, _tabDi, _tabSure });
+            Controls.AddRange(new Control[] { _title, _who, _note, _strip, _chips, _list, _view, _combo, _di, _punish, _sure, _tabMoves, _tabCombos, _tabDi, _tabPunish, _tabSure });
+            _tabPunish.Click += (s, e) => ShowTab(4);
+            Controls.Add(_compare); Controls.Add(_tabCompare);
+            _tabCompare.Click += (s, e) => ShowTab(5);
+            new ToolTip().SetToolTip(_tabCompare, "This fighter next to another: every move they share, side by side");
+            _compare.OtherChanged += c => { _compareChar = c; ShowCompare(); };
+            new ToolTip().SetToolTip(_tabPunish, "This move hits your shield: which of your out-of-shield options punish it");
+            _punish.MeChanged += c => { _punishChar = c; ShowPunish(); };
             _tabMoves.Click += (s, e) => ShowTab(0);
             _tabCombos.Click += (s, e) => ShowTab(1);
             _tabDi.Click += (s, e) => ShowTab(2);
@@ -54,7 +63,7 @@ namespace SkinManager.App
             new ToolTip().SetToolTip(_tabSure, "Which numbers are read straight from P+'s files, which needed an assumption, and what isn't drawn");
             _sure.WholeCastRequested += CheckWholeCast;
             _sure.FighterPicked += c => ShowFighter(c);
-            Theme.Toggle(_tabMoves, true); Theme.Toggle(_tabCombos, false); Theme.Toggle(_tabDi, false); Theme.Toggle(_tabSure, false);
+            Theme.Toggle(_tabMoves, true); Theme.Toggle(_tabCombos, false); Theme.Toggle(_tabDi, false); Theme.Toggle(_tabSure, false); Theme.Toggle(_tabPunish, false); Theme.Toggle(_tabCompare, false);
             foreach (var t in FrameDataBook.Tabs)
             {
                 var b = Theme.Secondary(t); b.Margin = new Padding(0, 0, 5, 0); b.Font = Theme.Small; b.Padding = new Padding(4, 1, 4, 1); b.AutoSizeMode = AutoSizeMode.GrowAndShrink; b.MinimumSize = new Size(0, 26);
@@ -82,7 +91,9 @@ namespace SkinManager.App
             _note.Location = new Point(30, 64); _note.Size = new Size(w, 18);
             _strip.Location = new Point(28, 86); _strip.Width = w; _strip.Height = _strip.Needed(w);
             _tabSure.Location = new Point(28 + w - _tabSure.PreferredSize.Width, 24);
-            _tabDi.Location = new Point(_tabSure.Left - 8 - _tabDi.PreferredSize.Width, 24);
+            _tabPunish.Location = new Point(_tabSure.Left - 8 - _tabPunish.PreferredSize.Width, 24);
+            _tabCompare.Location = new Point(_tabPunish.Left - 8 - _tabCompare.PreferredSize.Width, 24);
+            _tabDi.Location = new Point(_tabCompare.Left - 8 - _tabDi.PreferredSize.Width, 24);
             _tabCombos.Location = new Point(_tabDi.Left - 8 - _tabCombos.PreferredSize.Width, 24);
             _tabMoves.Location = new Point(_tabCombos.Left - 8 - _tabMoves.PreferredSize.Width, 24);
             int top = _strip.Bottom + 10;
@@ -90,7 +101,7 @@ namespace SkinManager.App
             _chips.Location = new Point(28, top); _chips.Size = new Size(listW, 28);
             _list.Location = new Point(28, top + 32); _list.Size = new Size(listW, Math.Max(200, h - top - 44));
             _view.Location = new Point(28 + listW + 14, top); _view.Size = new Size(w - listW - 14, Math.Max(200, h - top - 12));
-            _combo.Bounds = _view.Bounds; _di.Bounds = _view.Bounds; _sure.Bounds = _view.Bounds;
+            _combo.Bounds = _view.Bounds; _di.Bounds = _view.Bounds; _sure.Bounds = _view.Bounds; _punish.Bounds = _view.Bounds; _compare.Bounds = _view.Bounds;
         }
 
         bool _starting;
@@ -111,6 +122,8 @@ namespace SkinManager.App
                 _combo.SetCast(cast, cast.FirstOrDefault(c => c.Name == "Fox") ?? cast.FirstOrDefault());
                 _targetChar = _diChar = cast.FirstOrDefault(c => c.Name == "Fox") ?? cast.FirstOrDefault();
                 _di.SetCast(cast, _diChar);
+                _punishChar = _diChar; _punish.SetCast(cast, _punishChar);
+                _compareChar = cast.FirstOrDefault(c => c.Name == "Falco") ?? _diChar; _compare.SetCast(cast, _compareChar);
                 Arrange();
                 _note.Text = $"{cast.Count} fighters, read straight from P+'s own files on your card. FAF = the first frame you can act again.";
                 ShowFighter(cast.FirstOrDefault(c => c.Name == "Fox") ?? cast[0]);
@@ -146,21 +159,70 @@ namespace SkinManager.App
             if (_strip.Selected != c) return;   // picked someone else meanwhile
             _book = book;
             _list.Show(book, null);
-            ShowSure();
+            ShowSure(); ShowCompare();
             var first = book.Entries.FirstOrDefault();
             if (first != null) ShowMove(first);
         }
 
         bool _combos, _diOn;
-        bool _sureOn;
+        bool _sureOn, _punishOn, _compareOn;
         void ShowTab(int tab)
         {
-            _combos = tab == 1; _diOn = tab == 2; _sureOn = tab == 3;
-            Theme.Toggle(_tabMoves, tab == 0); Theme.Toggle(_tabCombos, _combos); Theme.Toggle(_tabDi, _diOn); Theme.Toggle(_tabSure, _sureOn);
-            _view.Visible = tab == 0; _combo.Visible = _combos; _di.Visible = _diOn; _sure.Visible = _sureOn;
+            _combos = tab == 1; _diOn = tab == 2; _sureOn = tab == 3; _punishOn = tab == 4; _compareOn = tab == 5;
+            Theme.Toggle(_tabMoves, tab == 0); Theme.Toggle(_tabCombos, _combos); Theme.Toggle(_tabDi, _diOn); Theme.Toggle(_tabSure, _sureOn); Theme.Toggle(_tabPunish, _punishOn); Theme.Toggle(_tabCompare, _compareOn);
+            _view.Visible = tab == 0; _combo.Visible = _combos; _di.Visible = _diOn; _sure.Visible = _sureOn; _punish.Visible = _punishOn; _compare.Visible = _compareOn;
+            if (_compareOn) ShowCompare();
             if (_combos) ShowCombos();
             if (_diOn) ShowDi();
             if (_sureOn) ShowSure();
+            if (_punishOn) ShowPunish();
+        }
+
+        /// <summary>The compare side: the other fighter read the first time.</summary>
+        async void ShowCompare()
+        {
+            if (!_compareOn || _book == null) return;
+            var a = _book; var who = _compareChar ?? a.Character;
+            try
+            {
+                FighterBook b;
+                lock (_books) _books.TryGetValue(who.FilePrefix, out b);
+                if (b == null)
+                {
+                    _compare.Status("Reading " + who.Name + "…");
+                    var inst = _installer();
+                    b = await Task.Run(() => { using (var card = inst.OpenCard()) return FrameDataBook.Load(card, who); });
+                    lock (_books) _books[who.FilePrefix] = b;
+                }
+                if (_book != a || !_compareOn) return;
+                _compare.Show(a, b);
+            }
+            catch (Exception e) { Program.Log("compare", e); _compare.Status("Couldn't read " + who.Name + ": " + e.Message); }
+        }
+
+        /// <summary>The punish side: both fighters measured (where their hitboxes reach) the first time.</summary>
+        async void ShowPunish()
+        {
+            if (!_punishOn || _book == null || _move == null) return;
+            var them = _book; var move = _move;
+            var meChar = _punishChar ?? them.Character;
+            try
+            {
+                _punish.Status("Working out your options…");
+                var inst = _installer();
+                var report = await Task.Run(() =>
+                {
+                    them.Measure();
+                    FighterBook me;
+                    lock (_books) _books.TryGetValue(meChar.FilePrefix, out me);
+                    if (me == null) { using (var card = inst.OpenCard()) me = FrameDataBook.Load(card, meChar); lock (_books) _books[meChar.FilePrefix] = me; }
+                    me.Measure();
+                    return Punish.For(them, move, me);
+                });
+                if (_book != them || _move != move || !_punishOn) return;
+                _punish.Show(report);
+            }
+            catch (Exception e) { Program.Log("punish", e); _punish.Status("Couldn't work it out: " + e.Message); }
         }
 
         void ShowSure()
@@ -254,6 +316,7 @@ namespace SkinManager.App
             _move = m; _list.Selected = m; _list.Invalidate();
             var book = _book;
             if (_combos) { ShowCombos(); }
+            if (_punishOn) ShowPunish();
             _view.Show(book, m, null);
             var key = Key(m);
             if (_frames.TryGetValue(key, out var have) && _cams.ContainsKey(key)) { _view.Show(book, m, have); ShowDi(); return; }
@@ -492,9 +555,15 @@ namespace SkinManager.App
             _pic = new Rectangle((w - picW) / 2, 0, picW, picH);
             _strip = new Rectangle(0, picH + 10, w, 26);
             int by = _strip.Bottom + 8;
-            _back.Location = new Point(0, by); _play.Location = new Point(50, by); _next.Location = new Point(100, by); _speed.Location = new Point(150, by);
-            _hurt.Location = new Point(206, by + 6);
+            // placed by their real widths (the rounded buttons are wider than they were)
+            _back.Location = new Point(0, by); _play.Location = new Point(_back.Right + 4, by); _next.Location = new Point(_play.Right + 4, by); _speed.Location = new Point(_next.Right + 4, by);
+            _hurt.Location = new Point(_speed.Right + 12, by + 6);
             _pauseHits.Location = new Point(_hurt.Right + 14, by + 6);
+            // a narrow window: the save button gets shorter rather than covering the tick boxes
+            bool tight = _pauseHits.Right + 10 > w - 110;
+            _gif.Text = tight ? "GIF…" : "Save GIF…"; _gif.Width = tight ? 64 : 110;
+            if (_pauseHits.Right + 10 > w - _gif.Width) _pauseHits.Text = "Pause hits";
+            else if (!tight) _pauseHits.Text = "Pause on quick hits";
             _gif.Location = new Point(w - _gif.Width, by);
         }
 
@@ -569,7 +638,7 @@ namespace SkinManager.App
             if (d.LandingLag > 0) cols.Add(("Landing lag", $"{d.LandingLag} ({d.LandingLag / 2} if you L-cancel)"));
             if (d.Intangible.Count > 0) cols.Add(("Intangible", d.IntangibleText));
             foreach (var p in d.Projectiles) cols.Add((p.Name.StartsWith("Projectile") ? "Projectile" : "Spawned hitbox",
-                (p.Flight != null ? $"{p.Name}: hits {p.ActiveText}" + (p.Flight.About != null ? " · " + p.Flight.About : "") : p.Unknown ? $"{p.Name}: when is up to the game, hits on {p.ActiveText}" : $"out on frame {p.Frame}, hits {p.ActiveText}") + (p.Flight == null && p.Data.Lingers ? " (+ = keeps going until it hits or vanishes)" : "")));
+                (p.Flight != null ? $"{p.Name}: hits {p.ActiveText}" + (p.Flight.About != null ? " · " + p.Flight.About : "") : p.Item ? $"{p.Name}: an item, it hits when it's thrown or blows up" : p.Unknown ? $"{p.Name}: when is up to the game, hits on {p.ActiveText}" : $"out on frame {p.Frame}, hits {p.ActiveText}") + (p.Flight == null && p.Data.Lingers ? " (+ = keeps going until it hits or vanishes)" : "")));
             if (mvNote != null) cols.Add(("Note", mvNote));
             if (d.Throw != null) cols.Add(("Throw", $"{d.Throw.DamageText} · {d.Throw.Angle}° · BKB {d.Throw.Bkb} · KBG {d.Throw.Kbg}" + (d.ThrowFrame > 0 ? $" · released frame {d.ThrowFrame}" : "")));
             int x = 0, colW = Math.Max(110, Width / Math.Min(4, cols.Count));

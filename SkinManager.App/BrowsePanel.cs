@@ -36,6 +36,9 @@ namespace SkinManager.App
         readonly Button _kindStages = Theme.Secondary("Stages");
         readonly Button _kindMusic = Theme.Secondary("Music");
         readonly Button _favButton = Theme.Secondary("★ Favorites");
+        // in Favorites: all of them, or one of your collections
+        readonly ComboBox _collection = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat, Visible = false };
+        string _collectionNow;
         readonly CheckBox _hideInstalled = new CheckBox { Text = "Hide ones I have", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Body, BackColor = Color.Transparent };
         readonly CheckBox _hideOld = new CheckBox { Text = "Hide outdated", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Body, BackColor = Color.Transparent };
         bool _favMode;
@@ -114,7 +117,9 @@ namespace SkinManager.App
             // row 1: what to look at; row 2: search; row 3: narrowing it down; then what's shown
             var bar = new Panel { Dock = DockStyle.Top, Height = 146 };
             _kindSkins.Location = new Point(0, 0);
-            _kindSkins.Layout += (s, e) => { _kindStages.Left = _kindSkins.Right + 4; _kindMusic.Left = _kindStages.Right + 4; _favButton.Left = _kindMusic.Right + 16; };
+            _kindSkins.Layout += (s, e) => { _kindStages.Left = _kindSkins.Right + 4; _kindMusic.Left = _kindStages.Right + 4; _favButton.Left = _kindMusic.Right + 16; _collection.Left = _favButton.Right + 8; };
+            _collection.Location = new Point(360, 4); _collection.BackColor = Theme.Panel; _collection.ForeColor = Theme.Text;
+            _collection.SelectedIndexChanged += (s, e) => { if (!_fillingCollections) { _collectionNow = _collection.SelectedIndex <= 0 ? null : (string)_collection.SelectedItem; if (_favMode) ShowFavorites(); } };
             _kindStages.Location = new Point(70, 0); _kindMusic.Location = new Point(150, 0); _favButton.Location = new Point(240, 0);
             _search.Location = new Point(0, 44); _search.Width = 300;
             _go.Location = new Point(310, 40);
@@ -125,8 +130,8 @@ namespace SkinManager.App
             _stageWhich.Location = new Point(300, 116);
             _hideInstalled.Location = new Point(0, 120); _hideOld.Location = new Point(150, 120);
             _heading.Visible = false;   // the page line under the results says what's shown
-            bar.Controls.AddRange(new Control[] { _heading, _search, _go, _who, _stageCat, _stageWhich, _musicCat, sortLabel, _sort, _kindSkins, _kindStages, _kindMusic, _favButton, _hideInstalled, _hideOld });
-            _favButton.Click += (s, e) => { _favMode = !_favMode; Theme.Toggle(_favButton, _favMode); if (_favMode) ShowFavorites(); else NewSearch(); };
+            bar.Controls.AddRange(new Control[] { _heading, _search, _go, _who, _stageCat, _stageWhich, _musicCat, sortLabel, _sort, _kindSkins, _kindStages, _kindMusic, _favButton, _collection, _hideInstalled, _hideOld });
+            _favButton.Click += (s, e) => { _favMode = !_favMode; Theme.Toggle(_favButton, _favMode); _collection.Visible = _favMode; if (_favMode) ShowFavorites(); else NewSearch(); };
             _hideInstalled.CheckedChanged += (s, e) => { if (_favMode) ShowFavorites(); else if (_current != null) ShowPage(_current, _generation); };
             _hideOld.CheckedChanged += (s, e) => { if (_favMode) ShowFavorites(); else if (_current != null) ShowPage(_current, _generation); };
             SetMode(false, load: false);
@@ -211,7 +216,49 @@ namespace SkinManager.App
 
         Character Wanted => _stageMode || _musicMode ? null : _who.SelectedItem as Character;
 
-        void NewSearch() { _page = 1; if (_favMode) { _favMode = false; Theme.Toggle(_favButton, false); } Load(); }
+        void NewSearch() { _page = 1; if (_favMode) { _favMode = false; Theme.Toggle(_favButton, false); _collection.Visible = false; } Load(); }
+
+        bool _fillingCollections;
+        void FillCollections()
+        {
+            _fillingCollections = true;
+            _collection.BeginUpdate(); _collection.Items.Clear();
+            _collection.Items.Add("All favorites");
+            foreach (var c in Favs?.Collections ?? new List<string>()) _collection.Items.Add(c);
+            int at = _collectionNow == null ? 0 : _collection.Items.IndexOf(_collectionNow);
+            if (at < 0) { at = 0; _collectionNow = null; }
+            _collection.SelectedIndex = at;
+            _collection.EndUpdate();
+            _fillingCollections = false;
+        }
+
+        /// <summary>Right-click on a mod: put it in one of your collections, or a new one.</summary>
+        void CollectionMenu(ModCard card, GbMod m, Point at)
+        {
+            if (Favs == null) return;
+            var fav = new Favorite { Key = "gb:" + m.Id, Name = m.Name, Author = m.Author, ThumbUrl = m.ThumbUrl, ModId = m.Id, Category = m.Category, Kind = KindNow };
+            var menu = new ContextMenuStrip { BackColor = Theme.Panel, ForeColor = Theme.Text, ShowImageMargin = false, ShowCheckMargin = true };
+            var title = new ToolStripMenuItem("Add to a collection") { Enabled = false };
+            menu.Items.Add(title);
+            foreach (var c in Favs.Collections)
+            {
+                bool inIt = Favs.InCollection(fav.Key, c); string name = c;
+                menu.Items.Add(new ToolStripMenuItem(c, null, (s, e) => { Favs.SetCollection(fav, name, !inIt); card.Favorite = Favs.Has(fav.Key); card.Invalidate(); if (_favMode) { FillCollections(); ShowFavorites(); } }) { Checked = inIt, ForeColor = Theme.Text });
+            }
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("New collection...", null, (s, e) =>
+            {
+                using (var f = new InputForm("New collection", "A name for the collection (like \"Fox skins to try\" or \"Tournament stages\"):", "", "Make it"))
+                {
+                    if (f.ShowDialog(FindForm()) != DialogResult.OK || f.Value.Length == 0) return;
+                    Favs.SetCollection(fav, f.Value, true);
+                    card.Favorite = true; card.Invalidate();
+                    if (_favMode) { FillCollections(); ShowFavorites(); }
+                }
+            }) { ForeColor = Theme.Text });
+            menu.Closed += (s, e) => BeginInvoke((Action)menu.Dispose);
+            menu.Show(card, at);
+        }
 
         async void Load()
         {
@@ -316,6 +363,7 @@ namespace SkinManager.App
         {
             var card = new ModCard { Mod = m, Installed = IsInstalled(m.Id), ShowCategory = showCategory, Margin = new Padding(0, 0, 12, 12), Favorite = Favs?.Has("gb:" + m.Id) == true };
             card.Click += (s, e) => { foreach (Control c in _results.Controls) if (c is ModCard mc) { mc.Selected = mc == card; mc.Invalidate(); } ShowDetails(m.Id); };
+            card.MouseUp += (s, e) => { if (e.Button == MouseButtons.Right) CollectionMenu(card, m, e.Location); };
             card.FavoriteClicked += () =>
             {
                 card.Favorite = Favs?.Toggle(new Favorite { Key = "gb:" + m.Id, Name = m.Name, Author = m.Author, ThumbUrl = m.ThumbUrl, ModId = m.Id, Category = m.Category, Kind = KindNow }) == true;
@@ -330,15 +378,19 @@ namespace SkinManager.App
         void ShowFavorites()
         {
             int gen = ++_generation;
-            _heading.Text = "Your favorites";
+            FillCollections();
+            _heading.Text = _collectionNow ?? "Your favorites";
             foreach (Control old in _results.Controls) old.Dispose();
             _results.Controls.Clear();
             var favs = (Favs?.All ?? Enumerable.Empty<Favorite>()).Where(f => f.ModId != 0 && (f.Kind ?? "skin") == KindNow)
+                .Where(f => _collectionNow == null || (f.Lists != null && f.Lists.Contains(_collectionNow, StringComparer.OrdinalIgnoreCase)))
                 .Where(f => !(_hideInstalled.Checked && IsInstalled(f.ModId))).ToList();
             _pager.Visible = false;
             if (favs.Count == 0)
             {
-                ShowMessage($"No favorite {(KindNow == "music" ? "songs" : KindNow + "s")} yet. Hover over one and click the ☆ in its corner to star it.", false);
+                ShowMessage(_collectionNow != null
+                    ? $"No {(KindNow == "music" ? "songs" : KindNow + "s")} in \"{_collectionNow}\" yet. Right-click any mod in the store to add it."
+                    : $"No favorite {(KindNow == "music" ? "songs" : KindNow + "s")} yet. Hover over one and click the ☆ in its corner to star it, or right-click it to put it in a collection of your own.", false);
                 return;
             }
             _message.Visible = false; _results.Visible = true;
@@ -711,9 +763,11 @@ namespace SkinManager.App
             if (s != _starHover) { _starHover = s; Invalidate(); }
             base.OnMouseMove(e);
         }
-        protected override void OnMouseDown(MouseEventArgs e) { _starDown = _star.Contains(e.Location); base.OnMouseDown(e); }
+        bool _rightDown;   // a right-click opens the collections menu, not the mod
+        protected override void OnMouseDown(MouseEventArgs e) { _rightDown = e.Button == MouseButtons.Right; _starDown = !_rightDown && _star.Contains(e.Location); base.OnMouseDown(e); }
         protected override void OnClick(EventArgs e)
         {
+            if (_rightDown) { _rightDown = false; return; }
             if (_starDown) { _starDown = false; FavoriteClicked?.Invoke(); return; }   // the star doesn't open the mod
             base.OnClick(e);
         }
