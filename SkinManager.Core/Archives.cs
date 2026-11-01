@@ -46,6 +46,9 @@ namespace SkinManager.Core
             {
                 string name = Path.GetFileNameWithoutExtension(p);
                 name = System.Text.RegularExpressions.Regex.Replace(name, @"^\d+-", "");   // downloads are saved as <file id>-<name>
+                // kept short: Windows paths stop at 260 characters, and the file's own (long) name still goes inside it
+                if (name.Length > 40) name = name.Substring(0, 40).TrimEnd(' ', '.');
+                if (name.Length == 0) name = "mod";
                 string sub = name; int n = 2;
                 while (!used.Add(sub)) sub = name + " " + n++;
                 string target = Path.Combine(dest, sub);

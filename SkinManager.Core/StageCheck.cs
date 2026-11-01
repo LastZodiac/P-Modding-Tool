@@ -21,6 +21,54 @@ namespace SkinManager.Core
         /// <summary>The largest stage file P+ ships (Castle Siege's alt). Bigger files may not fit in the game's memory.</summary>
         public const long MaxStageBytes = 4_660_608;
 
+        /// <summary>The most stage the game can hold once it's unpacked: P+'s biggest battle stage unpacked (Fourside's
+        /// New Pork City alt, 6.13 MB). The game unpacks the whole stage file into its stage memory (StageResource, 6.40 MB);
+        /// a stage that unpacks bigger runs past it and the game crashes on loading it (seen with a stage that unpacked to
+        /// 8.2 MB: "gfPoolFree Error" right after loading the file, then the game froze).</summary>
+        public const long MaxStageMemory = 6_432_864;
+        /// <summary>The game's stage memory itself (StageResource, 0x666700 bytes, from its memory layout report): a stage
+        /// that unpacks bigger can't load at all.</summary>
+        public const long StageHeap = 0x666700;
+
+        /// <summary>How big a stage file is once the game has unpacked it (its parts' unpacked sizes); 0 if it can't be read.</summary>
+        public static long MemorySize(byte[] stage)
+        {
+            if (stage == null) return 0;
+            string key;
+            using (var sha = SHA1.Create()) key = Convert.ToBase64String(sha.ComputeHash(stage));
+            lock (MemorySizes) if (MemorySizes.TryGetValue(key, out long known)) return known;
+            long n = 0;
+            try
+            {
+                Installer.Quiet();
+                using (var tmp = new TempFile(".pac", stage))
+                lock (BrawlGate.Lock) using (var root = NodeFactory.FromFile(null, tmp.Path))
+                    n = root == null ? 0 : root.Children.Sum(c => (long)c.UncompressedSize);
+            }
+            catch { n = 0; }
+            lock (MemorySizes) MemorySizes[key] = n;
+            return n;
+        }
+        static readonly Dictionary<string, long> MemorySizes = new Dictionary<string, long>();
+
+        /// <summary>Does the stage fit in the game's stage memory once unpacked?</summary>
+        public static CheckResult MemoryCheck(string fileName, byte[] stage)
+        {
+            long n = MemorySize(stage);
+            if (n <= 0) return new CheckResult { Passed = true, Title = "Stage memory not checked", Detail = "The file couldn't be unpacked to measure it." };
+            bool ok = n <= StageHeap, close = n > MaxStageMemory;
+            return new CheckResult
+            {
+                Passed = ok,
+                Title = !ok ? "Too big for the game's stage memory" : close ? "Only just fits in the game's stage memory" : "Fits in the game's stage memory",
+                Detail = !ok
+                    ? $"{fileName} unpacks to {n / 1024} KB in the game, more than its stage memory holds ({StageHeap / 1024} KB). The game would crash when the stage loads."
+                    : close
+                    ? $"{fileName} unpacks to {n / 1024} KB in the game: bigger than any stage P+ ships ({MaxStageMemory / 1024} KB), but under the game's stage memory ({StageHeap / 1024} KB). Test it offline first."
+                    : $"{fileName} unpacks to {n / 1024} KB in the game. P+'s biggest stage unpacks to {MaxStageMemory / 1024} KB.",
+            };
+        }
+
         /// <summary>Gameplay parts of a stage file, each reduced to a fingerprint. Two files with the same
         /// fingerprints play the same.</summary>
         public static Dictionary<string, string> Gameplay(byte[] stage)
@@ -291,8 +339,19 @@ namespace SkinManager.Core
 
         /// <summary>How far off a reskin's looks would be on P+'s stage. A stage's own collision is built to match
         /// its scenery, so comparing the reskin's collision with P+'s shows where the scenery won't line up.
-        /// Only the fixed (non-moving) parts are compared.</summary>
-        public static Fit HowFarOff(byte[] reskin, byte[] original) => FitOf(Surfaces(reskin), Surfaces(original));
+        /// The fixed (non-moving) parts are compared; a stage that has none (you stand on parts that move, like Delfino
+        /// Secret's or Corneria's) is compared where its parts start, as the preview shows it.</summary>
+        public static Fit HowFarOff(byte[] reskin, byte[] original) => FitOf(Standing(reskin), Standing(original));
+
+        static List<(float x1, float y1, float x2, float y2, bool floor)> Standing(byte[] stage)
+        {
+            using (var tmp = new TempFile(".pac", stage))
+            lock (BrawlGate.Lock) using (var root = NodeFactory.FromFile(null, tmp.Path))
+            {
+                var s = Surfaces(root);
+                return s.Count > 0 ? s : Surfaces(root, moving: true);
+            }
+        }
 
         static Fit FitOf(List<(float x1, float y1, float x2, float y2, bool floor)> a, List<(float x1, float y1, float x2, float y2, bool floor)> b)
         {
@@ -355,6 +414,9 @@ namespace SkinManager.Core
             float qx = x1 + dx * t - px, qy = y1 + dy * t - py;
             return (float)Math.Sqrt(qx * qx + qy * qy);
         }
+
+        /// <summary>A stage file's floors and walls (its collision), as drawn on the previews.</summary>
+        public static List<(float x1, float y1, float x2, float y2, bool floor)> SurfacesOf(byte[] stage) { try { return Standing(stage); } catch { return new List<(float, float, float, float, bool)>(); } }
 
         static List<(float x1, float y1, float x2, float y2, bool floor)> Surfaces(byte[] stage)
         {

@@ -347,8 +347,8 @@ namespace SkinManager.App
             if (problems.Count > 0)
             {
                 string text = "These didn't pass the safety checks and won't be installed:\r\n\r\n" + string.Join("\r\n", problems.Take(12));
-                if (plans.Count == 0) { MessageBox.Show(this, text, "Can't install", MessageBoxButtons.OK, MessageBoxIcon.Warning); UpdateSummary(); return; }
-                if (MessageBox.Show(this, text + $"\r\n\r\nInstall the other {plans.Count}?", "Some can't be installed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) { UpdateSummary(); return; }
+                if (plans.Count == 0) { Dialog.Show(this, text, "Can't install", MessageBoxButtons.OK, MessageBoxIcon.Warning); UpdateSummary(); return; }
+                if (Dialog.Show(this, text + $"\r\n\r\nInstall the other {plans.Count}?", "Some can't be installed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) { UpdateSummary(); return; }
             }
             Plans = plans;
             DialogResult = DialogResult.OK;

@@ -26,6 +26,7 @@ namespace SkinManager.Core
         public DateTime LastKo; public bool LastKoMine;   // the latest stock lost or taken (LastKoMine: you took it)
         public List<(int Frame, bool Mine)> Kos = new List<(int, bool)>();   // this game's stocks, in order (Mine: you took it)
         public int Frame;                      // the game's frame, as last reported (60 a second)
+        public DateTime StartedUtc;            // when this game started (its fighters came in)
         public double Ping = -1, Jitter, Rollbacks = -1;   // the connection (ms; % of frames re-run), every 10 seconds
         public int? EndStocksMine, EndStocksTheirs; public double? EndDamageMine, EndDamageTheirs;   // how the last game ended
         public LiveState Copy() { var c = (LiveState)MemberwiseClone(); c.LegalStages = new List<int>(LegalStages); c.Kos = new List<(int, bool)>(Kos); return c; }
@@ -54,6 +55,11 @@ namespace SkinManager.Core
         readonly HashSet<string> _deaths = new HashSet<string>();
 
         public LiveState State = new LiveState();
+
+        /// <summary>Games that finished since the last call, as records for the match history (a game counts even when
+        /// Brawl Online couldn't save its replay). You are LoggedGames.MeMark in them.</summary>
+        public List<GameRecord> TakeFinished() { var f = new List<GameRecord>(_finished); _finished.Clear(); return f; }
+        readonly List<GameRecord> _finished = new List<GameRecord>();
         bool _inSession;
         // the last game that ended (in a room every game is its own match: the score carries over while it's the same person)
         string _lastOpp; int _lastWins, _lastTheirs, _lastGame; DateTime _lastAt;
@@ -147,7 +153,7 @@ namespace SkinManager.Core
                 if (s.Phase == MatchPhase.GameOver) { s.Phase = MatchPhase.Loading; }
                 if (s.MyChar != null && s.TheirChar != null && s.Phase == MatchPhase.Loading)
                 {
-                    s.Phase = MatchPhase.Playing; s.StocksTaken = s.StocksLost = 0; s.LastKo = default; s.Kos.Clear(); s.Frame = 0;
+                    s.Phase = MatchPhase.Playing; s.StocksTaken = s.StocksLost = 0; s.LastKo = default; s.Kos.Clear(); s.Frame = 0; s.StartedUtc = DateTime.UtcNow;
                     Say($"Game {s.Game} started: {Fighters.Name(s.MyChar.Value)} vs {Fighters.Name(s.TheirChar.Value)}", 1);
                 }
                 return true;
@@ -165,6 +171,17 @@ namespace SkinManager.Core
                     s.EndStocksMine = p2 ? p2s : p1s; s.EndStocksTheirs = p2 ? p1s : p2s; s.EndDamageMine = p2 ? p2d : p1d; s.EndDamageTheirs = p2 ? p1d : p2d;
                 }
                 Say($"Game {(s.Mode == "room" ? s.Game : gameNo)}: you {(s.LastGameWon == true ? "won" : "lost")}" + (s.EndStocksMine != null ? $" ({(s.LastGameWon == true ? s.EndStocksMine : s.EndStocksTheirs)} stock{((s.LastGameWon == true ? s.EndStocksMine : s.EndStocksTheirs) == 1 ? "" : "s")} left)" : ""), s.LastGameWon == true ? 1 : 2);
+                if (s.Phase == MatchPhase.Playing && s.MyChar != null && s.TheirChar != null && s.OpponentCode != null && s.StartedUtc != default)
+                    _finished.Add(new GameRecord
+                    {
+                        Start = s.StartedUtc, Stage = s.Stage ?? -1, Ranked = s.Mode == "ranked", Frames = s.Frame,
+                        GameNumber = s.Mode == "room" ? s.Game : gameNo,
+                        Players =
+                        {
+                            new GamePlayer { UserId = LoggedGames.MeMark, Character = s.MyChar.Value, Won = s.LastGameWon == true },
+                            new GamePlayer { Name = s.OpponentName, Code = s.OpponentCode, Character = s.TheirChar.Value, Won = s.LastGameWon != true },
+                        },
+                    });
                 if (s.LastGameWon == true) s.MyWins++; else s.TheirWins++;
                 s.Game = Math.Max(gameNo, s.Game) + 1;
                 _lastOpp = s.OpponentCode; _lastWins = s.MyWins; _lastTheirs = s.TheirWins; _lastGame = s.Game; _lastAt = DateTime.Now;

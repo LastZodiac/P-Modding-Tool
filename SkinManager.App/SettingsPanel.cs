@@ -30,7 +30,7 @@ namespace SkinManager.App
             var h = Theme.Label("Background", Theme.Heading); h.Location = new Point(20, 16);
             var hint = Theme.Label("The picture behind the app. Pick any picture on your PC (a screenshot, fan art...).", Theme.Small, Theme.Muted); hint.Location = new Point(22, 44);
             _preview.Location = new Point(20, 76);
-            var choose = Theme.Primary("Choose a picture...");
+            var choose = Theme.Secondary("Choose a picture...");
             var builtin = Theme.Secondary("Built-in background");
             var plain = Theme.Secondary("Plain (no picture)");
             choose.Location = new Point(362, 76); builtin.Location = new Point(362, 122); plain.Location = new Point(362, 160);
@@ -61,8 +61,8 @@ namespace SkinManager.App
             card2.Layout += (s, e) => { desk.Left = open.Right + 12; start.Left = desk.Right + 12; };
             void Make(string path, string where)
             {
-                try { SelfUpdate.MakeShortcut(path); MessageBox.Show(FindForm(), "Done: P+ Modding Tool is " + where + ".", "Shortcut", MessageBoxButtons.OK, MessageBoxIcon.Information); }
-                catch (Exception ex) { MessageBox.Show(FindForm(), "The shortcut couldn't be made: " + Friendly.Explain(ex), "Shortcut", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                try { SelfUpdate.MakeShortcut(path); Dialog.Show(FindForm(), "Done: P+ Modding Tool is " + where + ".", "Shortcut", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+                catch (Exception ex) { Dialog.Show(FindForm(), "The shortcut couldn't be made: " + Friendly.Explain(ex), "Shortcut", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             }
             desk.Click += (s, e) => Make(SelfUpdate.DesktopShortcut, "on your desktop");
             start.Click += (s, e) => Make(SelfUpdate.StartMenuShortcut, "in your Start menu");
@@ -136,7 +136,7 @@ namespace SkinManager.App
             tours.CheckedChanged += (s, e) => { _look.Tours = tours.Checked; Changed(); };
             var again = Theme.Secondary("Show all tours again");
             again.Location = new Point(500, 44);
-            again.Click += (s, e) => { _look.ToursSeen.Clear(); _look.Tours = true; tours.Checked = true; Changed(); MessageBox.Show(FindForm(), "Each page shows its tour again the next time you open it. (The \"?\" button at the top shows a page's tour any time.)", "Tours", MessageBoxButtons.OK, MessageBoxIcon.Information); };
+            again.Click += (s, e) => { _look.ToursSeen.Clear(); _look.Tours = true; tours.Checked = true; Changed(); Dialog.Show(FindForm(), "Each page shows its tour again the next time you open it. (The \"?\" button at the top shows a page's tour any time.)", "Tours", MessageBoxButtons.OK, MessageBoxIcon.Information); };
             card4.Controls.AddRange(new Control[] { h4, tours, again });
             // which SD card: Brawl Online's (online play) or a mod maker's own Dolphin
             var card5 = new GlassPanel { Location = new Point(28, card4.Bottom + 16), Size = new Size(720, 172), Tint = 215, TintColor = Theme.Panel };
@@ -154,7 +154,7 @@ namespace SkinManager.App
             pick.Click += (s, e) => PickDolphin();
             back.Click += (s, e) =>
             {
-                if (MessageBox.Show(FindForm(), "Go back to Brawl Online's SD card? The app restarts to switch. Your Dolphin's card and its mods list stay as they are.",
+                if (Dialog.Show(FindForm(), "Go back to Brawl Online's SD card? The app restarts to switch. Your Dolphin's card and its mods list stay as they are.",
                     "SD card", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
                 if (SaveFirst != null && !SaveFirst()) return;
                 _look.CardFile = null; _look.Save(); Application.Restart(); Environment.Exit(0);
@@ -254,21 +254,21 @@ namespace SkinManager.App
             var found = OtherCards.Find(picked);
             if (found.Problem != null)
             {
-                if (MessageBox.Show(FindForm(), found.Problem + "\r\n\r\nPick the SD card file (sd.raw) itself instead?", "Your Dolphin's SD card", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
+                if (Dialog.Show(FindForm(), found.Problem + "\r\n\r\nPick the SD card file (sd.raw) itself instead?", "Your Dolphin's SD card", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
                 using (var f = new OpenFileDialog { Title = "Pick your Dolphin's SD card", Filter = "SD card (sd.raw)|*.raw|All files|*.*", InitialDirectory = picked })
                     if (f.ShowDialog(FindForm()) == DialogResult.OK) found = OtherCards.Find(f.FileName); else return;
-                if (found.Problem != null) { MessageBox.Show(FindForm(), found.Problem, "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                if (found.Problem != null) { Dialog.Show(FindForm(), found.Problem, "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             }
-            if (MessageBox.Show(FindForm(), "Found it:\r\n" + found.Card + "\r\n\r\n" + (found.Warning != null ? "Heads up: " + found.Warning + "\r\n\r\n" : "") +
+            if (Dialog.Show(FindForm(), "Found it:\r\n" + found.Card + "\r\n\r\n" + (found.Warning != null ? "Heads up: " + found.Warning + "\r\n\r\n" : "") +
                 "The app puts mods on this card from now on, with its own mods list (your Brawl Online mods stay as they are). It restarts to switch.",
                 "Use your Dolphin's SD card", MessageBoxButtons.OKCancel, found.Warning != null ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.OK) return;
             string data = OtherCards.DataFolderFor(Program.DataFolder, found.Card);
             if (OtherCards.IsNew(data) && !OtherCards.IsNew(Program.DataFolder) &&
-                MessageBox.Show(FindForm(), "Bring the mods in My Mods over to your Dolphin's card too?\r\n\r\nThey start turned off there, so nothing on that card changes until you turn them on. " +
+                Dialog.Show(FindForm(), "Bring the mods in My Mods over to your Dolphin's card too?\r\n\r\nThey start turned off there, so nothing on that card changes until you turn them on. " +
                     "(Your Brawl Online card and its mods stay as they are.)", "Your Dolphin's SD card", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
                 try { Cursor = Cursors.WaitCursor; OtherCards.BringMods(Program.DataFolder, data); }
-                catch (Exception ex) { MessageBox.Show(FindForm(), "Your mods couldn't all be brought over: " + SkinManager.Core.Friendly.Explain(ex) + "\r\nYou can still add them again on that card.", "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception ex) { Dialog.Show(FindForm(), "Your mods couldn't all be brought over: " + SkinManager.Core.Friendly.Explain(ex) + "\r\nYou can still add them again on that card.", "Your Dolphin's SD card", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 finally { Cursor = Cursors.Default; }
             }
             if (SaveFirst != null && !SaveFirst()) return;
@@ -293,7 +293,7 @@ namespace SkinManager.App
                     Changed();
                     if (old != null && old.StartsWith(Program.DataFolder) && File.Exists(old)) try { File.Delete(old); } catch { }
                 }
-                catch (Exception ex) { MessageBox.Show(FindForm(), "That picture couldn't be opened: " + Friendly.Explain(ex), "Background", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                catch (Exception ex) { Dialog.Show(FindForm(), "That picture couldn't be opened: " + Friendly.Explain(ex), "Background", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             }
         }
 

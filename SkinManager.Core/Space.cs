@@ -52,6 +52,7 @@ namespace SkinManager.Core
             card.OnCard(newSize) - (card.Exists(path) ? card.OnCard(card.FileSize(path)) : 0);
 
         public static string MB(long bytes) => bytes < 0 ? "−" + MB(-bytes)
+            : bytes >= 1000L * 1024 * 1024 ? $"{bytes / 1073741824.0:0.0} GB"
             : bytes >= 10L * 1024 * 1024 ? $"{bytes / 1048576.0:0} MB" : bytes >= 1024 * 1024 ? $"{bytes / 1048576.0:0.0} MB" : $"{Math.Max(0, bytes / 1024)} KB";
     }
 }

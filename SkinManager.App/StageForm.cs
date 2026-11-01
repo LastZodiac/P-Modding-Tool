@@ -17,6 +17,18 @@ namespace SkinManager.App
         /// <summary>"(the stage is 160 wide)", when it's known.</summary>
         static string Wide(StageCheck.Fit fit) => fit != null && fit.Width >= 1 ? $" (the stage is {fit.Width:0} wide)" : "";
 
+        /// <summary>One plain answer: does what you see line up with where you stand? (Measured between the mod's own floors
+        /// and P+'s, which are the ones you stand on.)</summary>
+        static (string Text, Color Color, bool Good) Verdict(StageCheck.Fit fit)
+        {
+            if (fit == null || fit.Floors >= 1e6f || float.IsNaN(fit.Floors))
+                return ("?  Can't be measured here (you stand on moving parts). Compare the two pictures.", Theme.Warn, false);
+            if (fit.Floors < 1f && fit.Rest < 5f) return ("✓  Lines up: you stand right on the mod's ground.", Theme.Good, true);
+            if (fit.Floors < 1f) return ("✓  You stand right on the mod's ground. Some edges are a little off, which is hard to notice.", Theme.Good, true);
+            if (fit.Floors < 4f) return ($"⚠  Slightly off: you'll stand up to {fit.Floors:0} units above or inside the mod's ground (a fighter is about 15 tall). See the red line.", Theme.Warn, false);
+            return ($"✗  Doesn't line up: you'll stand up to {fit.Floors:0} units away from the mod's ground (a fighter is about 15 tall). See the red line.", Theme.Bad, false);
+        }
+
         readonly Installer _installer;
         readonly Library _lib;
         readonly SkinPackage _pkg;
@@ -66,13 +78,13 @@ namespace SkinManager.App
             Size = new Size(980, 700); MinimumSize = new Size(760, 480);
             StartPosition = FormStartPosition.CenterParent; AutoScaleMode = AutoScaleMode.Dpi; ShowInTaskbar = false;
 
-            var head = new Panel { Dock = DockStyle.Top, Height = 112 };
+            var head = new Panel { Dock = DockStyle.Top, Height = 96 };
             var title = Theme.Label(pkg.StageFiles.Count == 1 ? "Which stage should it replace?" : $"This download has {pkg.StageFiles.Count} stage files", Theme.Title);
             title.Location = new Point(24, 14);
             var hint = new Label
             {
-                Text = "It goes on P+'s normal version of the stage first (what you get by just picking its icon). It has to play exactly like P+'s stage, so it's safe online: when it doesn't, the app copies P+'s gameplay into it, or puts its looks on P+'s own stage. \"What's different\" shows exactly why a map doesn't match.",
-                Font = Theme.Body, ForeColor = Theme.Muted, AutoSize = false, Location = new Point(26, 50), Size = new Size(920, 60), BackColor = Color.Transparent,
+                Text = "Pick which of P+'s stages it replaces. Every choice here plays exactly like P+'s stage, so it's safe online. Each one shows P+'s stage next to how it will look, and whether what you see lines up with where you stand.",
+                Font = Theme.Body, ForeColor = Theme.Muted, AutoSize = false, Location = new Point(26, 50), Size = new Size(920, 44), BackColor = Color.Transparent,
             };
             head.Controls.Add(title); head.Controls.Add(hint);
             head.Resize += (s, e) => hint.Width = head.Width - 50;
@@ -214,10 +226,9 @@ namespace SkinManager.App
                 if (IsDisposed) return;
                 bool exact = r.Boxes.Any(b => b.Tag is StageFile);
                 r.Status.Text = exact ? "Plays exactly like P+'s stages below. Tick the one(s) it should replace:"
-                    : r.Boxes.Any() ? "As it is, it plays differently from P+'s stages (it was probably made for an older P+ version, or for another stage), so online games would go out of sync. " +
-                                      "The app can fix that: it copies P+'s gameplay into it, or puts its looks on P+'s own stage. Pick one (\"What's different\" below shows exactly why):"
+                    : r.Boxes.Any() ? "Made for an older P+ or another stage, so the app makes it safe for you. Pick one:"
                     : "It plays differently from P+'s stages, so it would make online games go out of sync, and the app couldn't fix it for the stages below. You can try another stage from the list." + AlreadyNote();
-                r.Status.ForeColor = exact ? Theme.Good : r.Boxes.Any() ? Theme.Warn : Theme.Bad;
+                r.Status.ForeColor = exact ? Theme.Good : r.Boxes.Any() ? Theme.Text : Theme.Bad;
                 r.Other.Items.Clear();
                 foreach (var s in _all.OrderBy(s => s.Label, StringComparer.OrdinalIgnoreCase)) r.Other.Items.Add(s);
                 r.Other.Enabled = true; r.OtherLabel.Visible = r.Other.Visible = r.Why.Visible = true;
@@ -242,7 +253,7 @@ namespace SkinManager.App
         {
             if (_select == null) return "";
             string w = _select.WhereText(s.CardPath);
-            return w == null ? "\r\n    In the game: not on the stage select pages (P+ only uses it in some modes)." : "\r\n    In the game: " + w + ".";
+            return w == null ? "\r\n    Not on the stage select (P+ only uses it in some modes)." : "\r\n    In the game: " + w + ".";
         }
 
         static StageFile TargetOf(CheckBox b) => b.Tag as StageFile ?? (b.Tag as Fix)?.Stage ?? (b.Tag as Group)?.Parts.FirstOrDefault().Stage;
@@ -279,8 +290,8 @@ namespace SkinManager.App
                 ((_pkg.Source != null && s.GameBananaFileId == _pkg.Source.FileId && s.GameBananaFileId != 0) || string.Equals(s.SourcePath, _pkg.SourcePath, StringComparison.OrdinalIgnoreCase)));
             var mine = _lib.Stages.FirstOrDefault(s => s.Enabled && string.Equals(s.CardPath, m.CardPath, StringComparison.OrdinalIgnoreCase));
             var box = Box("Replace P+'s " + m.Label + (done ? "  (already yours)" : mine != null ? $"  (turns off {mine.Name})" : ""), m);
-            AddOption(r, box, "Plays exactly like it already, so only the looks change." + WhereNote(m), Theme.Muted);
-            if (r.Boxes.Count(b => b.Tag is StageFile) == 1) _ = AddPreview(r, File.ReadAllBytes(r.File), "How it will look", false);
+            AddOption(r, box, "Made for this stage: only the looks change. Safe online." + WhereNote(m), Theme.Muted, ("✓  Lines up: it has exactly P+'s floors.", Theme.Good, true));
+            if (r.Boxes.Count(b => b.Tag is StageFile) == 1) _ = AddPreview(r, m, File.ReadAllBytes(r.File), false);
             if (!done) r.Candidates.Add((box, (named ? 0 : 20) + (IsFront(m) ? -2 : Stages.SameNumber(r.File, m) ? -1 : 1)));
         }
 
@@ -291,12 +302,14 @@ namespace SkinManager.App
             return box;
         }
 
-        void AddOption(Row r, Control top, string note, Color color)
+        void AddOption(Row r, Control top, string note, Color color, (string Text, Color Color, bool Good)? verdict = null)
         {
             if (top is CheckBox cb) r.Boxes.Add(cb);
             r.Targets.Controls.Add(top);
+            if (verdict != null)
+                r.Targets.Controls.Add(new Label { Text = verdict.Value.Text, Font = Theme.BodyBold, ForeColor = verdict.Value.Color, AutoSize = false, BackColor = Color.Transparent, Margin = new Padding(20, 0, 0, 0) });
             if (!string.IsNullOrEmpty(note))
-                r.Targets.Controls.Add(new Label { Text = "    " + note, Font = Theme.Small, ForeColor = color, AutoSize = false, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 4) });
+                r.Targets.Controls.Add(new Label { Text = note.Replace("\r\n    ", "\r\n"), Font = Theme.Small, ForeColor = color, AutoSize = false, BackColor = Color.Transparent, Margin = new Padding(20, 0, 0, 4) });
             Relayout(r);
         }
 
@@ -322,7 +335,7 @@ namespace SkinManager.App
             if (plan == null || !plan.CanInstall)
             {
                 problem = problem ?? string.Join(" ", plan.Checks.Where(c => !c.Passed).Select(c => c.Detail ?? c.Title));
-                AddOption(r, Theme.Label("✗  P+'s " + s.Label, Theme.Body, Theme.Muted), "P+'s gameplay can't be copied into it: " + problem, Theme.Muted);
+                AddOption(r, Theme.Label("✗  Can't copy P+'s " + s.Label + " gameplay into it", Theme.Small, Theme.Muted), null, Theme.Muted);
                 await TryLooks(r, s, named, quiet: false);
                 return;
             }
@@ -330,19 +343,18 @@ namespace SkinManager.App
             var box = Box("Make it play like P+'s " + s.Label + " and replace it" + (mine != null ? $"  (turns off {mine.Name})" : ""), new Fix { Stage = s, Plan = plan });
             var fit = plan.Fit;
             if (fit != null && (fit.Floors >= 1e6f || float.IsNaN(fit.Floors))) fit = null;   // moving floors only: can't be measured
-            bool good = fit != null && fit.Floors < 1f && fit.Rest < 5f;
-            string how = fit == null ? "The app can't measure how well its floors line up (one of the two stands on moving parts), so try it offline first." : fit.Exact ? "Its floors line up exactly with P+'s, so it will look right."
-                : fit.Floors < 1f ? $"Where you stand lines up. The sides or underside are off by up to {fit.Rest:0.#}{Wide(fit)}" + (fit.Rest < 5f ? ", which is hard to notice." : ", so some edges won't match what you see.")
-                : $"Where you stand is off by up to {fit.Floors:0.#}{Wide(fit)}, so what you see won't quite match where you stand. Try it offline first.";
+            var verdict = Verdict(fit);
+            bool good = verdict.Good;
+            string how = "P+'s floors and blast zones are copied into it, so it's safe online.";
             if (plan.LooksSwapped.Count > 0)
             {
-                how += " Its moving platform will look like P+'s.";
-                if (plan.LooksSwapped.All(x => x.StartsWith("+"))) how += " The map's own platform may still show as a decoration that doesn't move; check it offline first.";
+                how += " Its moving platform looks like P+'s.";
+                if (plan.LooksSwapped.All(x => x.StartsWith("+"))) how += " The mod's own platform may still show, standing still.";
             }
-            AddOption(r, box, how + WhereNote(s), good ? Theme.Muted : Theme.Warn);
+            AddOption(r, box, how + WhereNote(s), Theme.Muted, verdict);
             // the normal version comes first: people pick a stage's icon, not a button version of it
             r.Candidates.Add((box, good && IsFront(s) ? (named ? -3 : 25) : (good ? (named ? 10 : 30) : 60) - (Stages.SameNumber(r.File, s) ? 1 : 0)));
-            await AddPreview(r, plan.Bytes, "How it will look on P+'s " + s.Label, plan.LooksSwapped.Count > 0);
+            await AddPreview(r, s, plan.Bytes, plan.LooksSwapped.Count > 0);
         }
 
         /// <summary>Puts the map's looks on P+'s own stage file and adds that as an option, with a preview.</summary>
@@ -360,49 +372,73 @@ namespace SkinManager.App
             if (plan == null || !plan.CanInstall)
             {
                 problem = problem ?? string.Join(" ", plan.Checks.Where(c => !c.Passed).Select(c => c.Detail ?? c.Title));
-                AddOption(r, Theme.Label("✗  Its looks on P+'s " + s.Label, Theme.Body, Theme.Muted), "Can't be done: " + problem, Theme.Muted);
+                AddOption(r, Theme.Label("✗  Can't put its looks on P+'s " + s.Label, Theme.Body, Theme.Muted), problem, Theme.Muted);
                 return;
             }
             var mine = _lib.Stages.FirstOrDefault(x => x.Enabled && string.Equals(x.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase));
             var box = Box("Use its looks on P+'s " + s.Label + (mine != null ? $"  (turns off {mine.Name})" : ""), new Fix { Stage = s, Plan = plan, Looks = true });
             var fit = plan.Fit;
             if (fit != null && (fit.Floors >= 1e6f || float.IsNaN(fit.Floors))) fit = null;   // a stage you stand on moving parts of (Corneria's Great Fox): can't be measured
-            bool good = fit != null && fit.Floors < 1f && fit.Rest < 5f;
-            string how = "Plays exactly like P+'s stage, because it IS P+'s stage, with the map's scenery instead of P+'s. ";
-            how += fit == null ? "The app can't measure how well the map lines up with this stage (you stand on moving parts), so check the preview." : fit.Exact ? "The map is shaped exactly like it, so what you see lines up with where you stand."
-                : fit.Floors < 1f ? $"Where you stand lines up with what you see; the sides or underside are off by up to {fit.Rest:0.#}{Wide(fit)}" + (fit.Rest < 5f ? ", which is hard to notice." : ".")
-                : $"The map is shaped differently: what you see is off from where you stand by up to {fit.Floors:0.#}{Wide(fit)}, so players may look like they stand on air. Safe online, but check the preview.";
-            if (plan.Looks != null && plan.Looks.KeptLooks.Count > 0) how += " Its moving platforms look like P+'s.";
-            if (plan.Looks != null && plan.Looks.StaticParts) how += " Some of the map's moving decorations may stand still.";
-            if (plan.Looks != null && plan.Looks.PlatformsLeftOut > 0) how += " The map's own copy of the platform is left out, so there's only one.";
-            AddOption(r, box, how + " " + LooksWarning + WhereNote(s), Theme.Warn);
-            // never ticked by itself: the map's scenery is placed by another stage program than it was made for, and the game
-            // can place it differently from what the files show (you could end up standing inside the map). Ranked so the
-            // best one is first in the list.
-            r.Candidates.Add((box, 60 + (fit != null && fit.Exact ? 0 : good ? 5 : 20) + (IsFront(s) ? 0 : 1)));
-            await AddPreview(r, plan.Bytes, "How it will look on P+'s " + s.Label, plan.Looks != null && plan.Looks.KeptLooks.Count > 0);
+            var verdict = Verdict(fit);
+            bool good = verdict.Good;
+            string how = "It's P+'s own stage with the mod's scenery on it, so it's safe online.";
+            if (plan.Looks != null && plan.Looks.KeptLooks.Count > 0) how += " Moving platforms look like P+'s.";
+            if (plan.Looks != null && plan.Looks.StaticParts) how += " Some moving decorations may stand still.";
+            if (!Allowed(r)(s)) how += " " + LooksWarning;
+            AddOption(r, box, how + WhereNote(s), Theme.Muted, verdict);
+            // ticked by itself only when it lines up and the mod was made for this stage (its program places the scenery as
+            // the mod expects); otherwise ranked so the best one is first in the list
+            r.Candidates.Add((box, good && Allowed(r)(s) ? (IsFront(s) ? (named ? 0 : 28) : 35) : 60 + (fit != null && fit.Exact ? 0 : good ? 5 : 20) + (IsFront(s) ? 0 : 1)));
+            await AddPreview(r, s, plan.Bytes, plan.Looks != null && plan.Looks.KeptLooks.Count > 0);
         }
 
-        const string LooksWarning = "Try it offline first: P+'s stage program places the scenery, and it can end up a little off from the files (you could stand inside the map's ground), which the app can't check.";
+        const string LooksWarning = "It was made for another stage, whose program may place the scenery differently: check it once offline.";
 
-        /// <summary>A picture of the result: the scenery as the game shows it at the start, with where you stand drawn on top.</summary>
-        async Task AddPreview(Row r, byte[] bytes, string what, bool platformsArePPlus)
+        /// <summary>P+'s stage as it is now, next to how it will look: the scenery as the game shows it at the start, with
+        /// where you stand in gold, and the mod's own ground in red wherever it isn't where you'll stand.</summary>
+        async Task AddPreview(Row r, StageFile target, byte[] after, bool platformsArePPlus)
         {
-            if (bytes == null) return;
-            var caption = new Label
+            if (after == null) return;
+            const int W = 400, H = 225;
+            var box = new Panel { Size = new Size(2 * W + 16, H + 44), Margin = new Padding(20, 4, 0, 14), BackColor = Color.Transparent };
+            Label Cap(string t, int x) => new Label { Text = t, Font = Theme.BodyBold, ForeColor = Theme.Text, AutoSize = false, Location = new Point(x, 0), Size = new Size(W, 20), BackColor = Color.Transparent };
+            var leftPic = new PictureBox { Location = new Point(0, 22), Size = new Size(W, H), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
+            var rightPic = new PictureBox { Location = new Point(W + 16, 22), Size = new Size(W, H), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
+            var legend = new Label
             {
-                Text = "    " + what + ". The gold line is where you stand; grey lines are walls and undersides." +
-                       (platformsArePPlus ? " The platforms that move are P+'s own (they're kept so they move right), so they look like P+'s on every stage." : ""),
-                Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 2),
+                Text = "Gold: where you'll stand.  Red: where the mod's ground is, where that's different (no red = it lines up)." + (platformsArePPlus ? "  Moving platforms are P+'s own." : ""),
+                Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, Location = new Point(0, H + 24), Size = new Size(2 * W + 16, 18), BackColor = Color.Transparent,
             };
-            var pic = new PictureBox { Size = new Size(480, 270), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black, Margin = new Padding(24, 0, 0, 10) };
-            r.Targets.Controls.Add(caption); r.Targets.Controls.Add(pic);
+            box.Controls.AddRange(new Control[] { Cap("P+'s " + (target?.Label ?? "stage") + " now", 0), Cap("With this mod", W + 16), leftPic, rightPic, legend });
+            r.Targets.Controls.Add(box);
             Relayout(r);
-            Bitmap shot = null;
-            try { shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
+            string modFile = r.File, path = target?.CardPath;
+            Bitmap before = null, now = null;
+            try
+            {
+                now = await Task.Run(() =>
+                {
+                    var theirs = StageCheck.SurfacesOf(File.ReadAllBytes(modFile));
+                    return ModelPreview.RenderStage(after, W, H, theirs: theirs.Count > 0 ? theirs : null);
+                });
+            }
+            catch (Exception e) { Program.Trace("preview: " + e.Message); }
             if (IsDisposed) return;
-            if (shot != null) pic.Image = shot;
-            else { caption.Text = "    (No picture for this one.)"; pic.Height = 0; pic.Margin = Padding.Empty; Relayout(r); }
+            if (now != null) rightPic.Image = now;
+            if (path != null)
+                try
+                {
+                    before = await Task.Run(() =>
+                    {
+                        byte[] orig = _lib.HasOriginalFile(path) ? _lib.OriginalFile(path) : null;
+                        if (orig == null) using (var card = _installer.OpenCard()) orig = card.ReadFile(path);
+                        return orig == null ? null : ModelPreview.RenderStage(orig, W, H);
+                    });
+                }
+                catch (Exception e) { Program.Trace("preview of P+'s stage: " + e.Message); }
+            if (IsDisposed) return;
+            if (before != null) leftPic.Image = before;
+            if (now == null && before == null) { box.Height = 0; box.Margin = Padding.Empty; Relayout(r); }
         }
 
         /// <summary>The map on all the files of a stage's normal version (Smashville's five times of day), as one choice.</summary>
@@ -447,18 +483,20 @@ namespace SkinManager.App
             bool looks = g.Parts.Any(p => p.Fix != null && p.Fix.Looks), fixd = g.Parts.Any(p => p.Fix != null && !p.Fix.Looks);
             var fits = g.Parts.Where(p => p.Fix?.Plan.Fit != null).Select(p => p.Fix.Plan.Fit).Where(f => f.Floors < 1e6f && !float.IsNaN(f.Floors)).ToList();
             float floors = fits.Count == 0 ? 0 : fits.Max(f => f.Floors), rest = fits.Count == 0 ? 0 : fits.Max(f => f.Rest);
-            bool good = floors < 1f && rest < 5f;
-            string how = $"Picking {slotName} gives one of {members.Count} versions, by the time of day or at random ({versions}). The map goes on all of them, so it always shows. ";
-            how += looks ? "It's P+'s stage underneath with the map's scenery on it, so it plays exactly like P+'s. " + LooksWarning
-                 : fixd ? (good ? "The app copies P+'s gameplay into it, and its floors line up with P+'s, so it will look right."
-                                : $"The app copies P+'s gameplay into it. Where you stand is off by up to {floors:0.#} from what you see, so try it offline first.")
-                 : "Plays exactly like them already, so only the looks change.";
+            var verdict = !looks && !fixd ? ("✓  Lines up: it has exactly P+'s floors.", Theme.Good, true)
+                        : Verdict(fits.Count == 0 ? null : new StageCheck.Fit { Floors = floors, Rest = rest });
+            bool good = verdict.Item3;
+            string how = $"Goes on all {members.Count} versions P+ picks from ({versions}), so it always shows. ";
+            how += looks ? "It's P+'s own stage with the mod's scenery on it, so it's safe online."
+                 : fixd ? "P+'s floors and blast zones are copied into it, so it's safe online."
+                 : "Made for this stage: only the looks change. Safe online.";
+            if (looks && !g.Parts.All(p => p.Fix == null || allowed(p.Stage))) how += " " + LooksWarning;
             var spot = _front?.SpotsOf(members[0].CardPath).FirstOrDefault(x => x.Button == 0);
             if (spot != null) how += "\r\n    In the game: " + spot.Where + ", just pick it.";
-            AddOption(r, box, how, looks || !good ? Theme.Warn : Theme.Muted);
+            AddOption(r, box, how, Theme.Muted, verdict);
             r.Candidates.Add((box, looks ? 60 : !fixd ? (named ? -10 : 15) : good ? (named ? -4 : 25) : 70));
             var first = g.Parts[0];
-            await AddPreview(r, first.Fix != null ? first.Fix.Plan.Bytes : File.ReadAllBytes(r.File), $"How it will look on P+'s {slotName} ({first.Stage.Version})", first.Fix?.Plan.Looks?.KeptLooks.Count > 0);
+            await AddPreview(r, first.Stage, first.Fix != null ? first.Fix.Plan.Bytes : File.ReadAllBytes(r.File), first.Fix?.Plan.Looks?.KeptLooks.Count > 0);
         }
 
         /// <summary>"What's different?": exactly why the map doesn't play like one of P+'s stages.</summary>
@@ -546,8 +584,8 @@ namespace SkinManager.App
             {
                 if (c is Label l && !(c is LinkLabel))
                 {
-                    l.Width = w - 10;
-                    l.Height = TextRenderer.MeasureText(l.Text, l.Font, new Size(w - 10, 1000), TextFormatFlags.WordBreak).Height + 4;
+                    l.Width = w - 10 - l.Margin.Left;
+                    l.Height = TextRenderer.MeasureText(l.Text, l.Font, new Size(l.Width - 4, 1000), TextFormatFlags.WordBreak).Height + 6;
                     if (l.Font == Theme.Body) l.Height = Math.Max(l.Height, 24);
                 }
                 h += c.Height + c.Margin.Vertical;
@@ -725,8 +763,8 @@ namespace SkinManager.App
             if (problems.Count > 0)
             {
                 string text = "These didn't pass the safety checks:\r\n\r\n" + string.Join("\r\n", problems);
-                if (plans.Count == 0) { MessageBox.Show(this, text, "Can't install", MessageBoxButtons.OK, MessageBoxIcon.Warning); Update(); return; }
-                if (MessageBox.Show(this, text + $"\r\n\r\nInstall the other {plans.Count}?", "Some can't be installed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) { Update(); return; }
+                if (plans.Count == 0) { Dialog.Show(this, text, "Can't install", MessageBoxButtons.OK, MessageBoxIcon.Warning); Update(); return; }
+                if (Dialog.Show(this, text + $"\r\n\r\nInstall the other {plans.Count}?", "Some can't be installed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) { Update(); return; }
             }
             Plans = plans;
             DialogResult = DialogResult.OK;

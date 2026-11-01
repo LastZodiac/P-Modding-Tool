@@ -30,7 +30,7 @@ namespace SkinManager.App
             _again.Click += (s, e) => Look(false);
             _fresh.Click += (s, e) =>
             {
-                if (MessageBox.Show(this, "Count everything on your SD card right now as normal P+ files? From then on, only files added or changed after this point show up here.", "Start over from now", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                if (Dialog.Show(this, "Count everything on your SD card right now as normal P+ files? From then on, only files added or changed after this point show up here.", "Start over from now", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
                 Look(true);
             };
             Resize += (s, e) => Arrange();

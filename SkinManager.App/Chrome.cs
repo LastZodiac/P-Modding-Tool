@@ -64,6 +64,7 @@ namespace SkinManager.App
             if (look.Background != "builtin" && look.Background != "none")
                 try { using (var tmp = Image.FromFile(look.Background)) _picture = new Bitmap(tmp); } catch { _picture = null; }
             _cache?.Dispose(); _cache = null;
+            BackCache.Generation++;
         }
 
         public void Paint(Graphics g, Size size)
@@ -75,8 +76,12 @@ namespace SkinManager.App
                 _cache = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);   // the fastest kind to draw (redrawn behind every see-through panel)
                 _cacheSize = size;
                 using (var cg = Graphics.FromImage(_cache)) Render(cg, size);
+                BackCache.Generation++;   // the see-through panels' copies of it are out of date
             }
-            g.DrawImage(_cache, new Rectangle(0, 0, _cache.Width, _cache.Height), 0, 0, _cache.Width, _cache.Height, GraphicsUnit.Pixel);
+            // only the part being painted (a panel or card asks for just what's behind it)
+            var clip = Rectangle.Round(g.VisibleClipBounds);
+            clip.Intersect(new Rectangle(0, 0, _cache.Width, _cache.Height));
+            if (clip.Width > 0 && clip.Height > 0) g.DrawImage(_cache, clip, clip, GraphicsUnit.Pixel);
         }
 
         void Render(Graphics g, Size size)
@@ -123,20 +128,64 @@ namespace SkinManager.App
     }
 
     /// <summary>A panel that lets the window's backdrop show through (tinted).</summary>
+    /// <summary>What's behind a see-through panel, kept as a picture. Without it every card, button and label on the
+    /// panel would have the window draw everything behind it again (the backdrop, each panel's tint, all the way up),
+    /// on every frame of a scroll: that is what made scrolling choppy. Made again when the panel moves within the
+    /// window, changes size, or the backdrop changes.</summary>
+    static class BackCache
+    {
+        public static int Generation;   // goes up whenever the window's backdrop is drawn anew
+
+        public static Point OffsetInForm(Control c)
+        {
+            int x = 0, y = 0;
+            for (var p = c; p != null && !(p is Form); p = p.Parent) { x += p.Left; y += p.Top; }
+            return new Point(x, y);
+        }
+    }
+
+    sealed class BackPicture : IDisposable
+    {
+        Bitmap _bmp; Point _at; Size _size; int _gen = -1;
+
+        public void Paint(Control owner, PaintEventArgs e, Action<PaintEventArgs> build)
+        {
+            var size = owner.ClientSize;
+            if (size.Width <= 0 || size.Height <= 0) return;
+            var at = BackCache.OffsetInForm(owner);
+            if (_bmp == null || at != _at || size != _size || _gen != BackCache.Generation)
+            {
+                _bmp?.Dispose();
+                _bmp = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                using (var g = Graphics.FromImage(_bmp)) build(new PaintEventArgs(g, new Rectangle(Point.Empty, size)));
+                _at = at; _size = size; _gen = BackCache.Generation;
+            }
+            var clip = e.ClipRectangle;
+            clip.Intersect(new Rectangle(Point.Empty, size));
+            if (clip.Width > 0 && clip.Height > 0) e.Graphics.DrawImage(_bmp, clip, clip, GraphicsUnit.Pixel);
+        }
+
+        public void Drop() { _bmp?.Dispose(); _bmp = null; }
+        public void Dispose() => Drop();
+    }
+
     class GlassPanel : Panel
     {
         public int Tint = 0;   // 0..255 darkness drawn over the backdrop
         public Color TintColor = Color.FromArgb(10, 11, 16);
+        readonly BackPicture _back = new BackPicture();
         public GlassPanel()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Color.Transparent;
         }
-        protected override void OnPaintBackground(PaintEventArgs e)
+        protected override void OnPaintBackground(PaintEventArgs e) => _back.Paint(this, e, pe =>
         {
-            base.OnPaintBackground(e);   // the parent's backdrop
-            if (Tint > 0) using (var b = new SolidBrush(Color.FromArgb(Tint, TintColor))) e.Graphics.FillRectangle(b, ClientRectangle);
-        }
+            base.OnPaintBackground(pe);   // the parent's backdrop
+            if (Tint > 0) using (var b = new SolidBrush(Color.FromArgb(Tint, TintColor))) pe.Graphics.FillRectangle(b, pe.ClipRectangle);
+        });
+        protected override void OnVisibleChanged(EventArgs e) { if (!Visible) _back.Drop(); base.OnVisibleChanged(e); }
+        protected override void Dispose(bool disposing) { if (disposing) _back.Dispose(); base.Dispose(disposing); }
         protected override void OnScroll(ScrollEventArgs se) { base.OnScroll(se); Invalidate(true); }
         protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); Invalidate(true); }
     }
@@ -144,11 +193,15 @@ namespace SkinManager.App
     /// <summary>A see-through grid of cards that redraws cleanly when scrolled.</summary>
     class GlassFlow : FlowLayoutPanel
     {
+        readonly BackPicture _back = new BackPicture();
         public GlassFlow()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
             BackColor = Color.Transparent;
         }
+        protected override void OnPaintBackground(PaintEventArgs e) => _back.Paint(this, e, pe => base.OnPaintBackground(pe));
+        protected override void OnVisibleChanged(EventArgs e) { if (!Visible) _back.Drop(); base.OnVisibleChanged(e); }
+        protected override void Dispose(bool disposing) { if (disposing) _back.Dispose(); base.Dispose(disposing); }
         protected override void OnScroll(ScrollEventArgs se) { base.OnScroll(se); Invalidate(true); }
         protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); Invalidate(true); }
     }

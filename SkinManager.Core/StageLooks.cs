@@ -177,11 +177,76 @@ namespace SkinManager.Core
             public int Models, Textures, Animations;
             public List<string> KeptLooks = new List<string>();   // P+'s parts that keep P+'s look (moving platforms)
             public bool StaticParts;                              // some of the map's moving decorations stand still
+            public int TexturesShrunk;                            // P+'s pictures nothing visible uses any more, made tiny
             public int PlatformsLeftOut;                          // the map's own copies of P+'s moving platforms, not used
         }
 
         static IEnumerable<ResourceNode> All(ResourceNode n) { foreach (var c in n.Children) { yield return c; foreach (var d in All(c)) yield return d; } }
         static int Polys(MDL0Node m) => m.FindChild("Objects", false)?.Children.Count ?? 0;
+
+        /// <summary>P+'s pictures that nothing left visible uses (its scenery is out of sight once the map's looks are on):
+        /// each made a 4x4 grey picture under the same name, so everything that names it still finds it, but the game no
+        /// longer holds the full pictures in its stage memory. Without this a map plus P+'s whole picture set can unpack past
+        /// what the game has room for (Smashville: 1.8 MB of P+'s pictures). Returns how many were made tiny.</summary>
+        static int ShrinkHidden(ResourceNode root)
+        {
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            var shownMaterials = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var m in root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(x => Polys(x) > 0))
+            {
+                m.Populate();
+                foreach (var t in m.TextureList ?? new List<ResourceNode>()) used.Add(t.Name);
+                foreach (var t in m.PaletteList ?? new List<ResourceNode>()) used.Add(t.Name);
+                foreach (var mat in m.FindChildrenByType(null, ResourceType.MDL0Material)) shownMaterials.Add(mat.Name);
+            }
+            // picture-swap animations on something still shown keep every picture they swap in
+            foreach (var pat in root.FindChildrenByType(null, ResourceType.PAT0).OfType<PAT0Node>())
+            {
+                pat.Populate();
+                if (!pat.Children.Any(e => shownMaterials.Contains(e.Name))) continue;
+                foreach (var e in All(pat).OfType<PAT0TextureEntryNode>())
+                {
+                    if (!string.IsNullOrEmpty(e.Texture)) used.Add(e.Texture);
+                    if (!string.IsNullOrEmpty(e.Palette)) used.Add(e.Palette);
+                }
+            }
+            int n = 0;
+            using (var tiny = new System.Drawing.Bitmap(4, 4))
+            {
+                for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) tiny.SetPixel(x, y, System.Drawing.Color.Gray);
+                foreach (var t in root.FindChildrenByType(null, ResourceType.TEX0).OfType<TEX0Node>().ToList())
+                {
+                    if (used.Contains(t.Name) || t.Width * t.Height <= 16) continue;
+                    t.ReplaceRaw(BrawlLib.Wii.Textures.TextureConverter.I4.EncodeTEX0Texture(tiny, 1));
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>A stage file with the looks already moved over (by an older version), with P+'s hidden pictures made
+        /// tiny (see ShrinkHidden). Null if there was nothing to do or it couldn't be read.</summary>
+        public static byte[] Slim(byte[] stage, out int shrunk)
+        {
+            shrunk = 0;
+            try
+            {
+                using (var tIn = new TempFile(".pac", stage))
+                using (var tOut = new TempFile(".pac"))
+                {
+                    lock (BrawlGate.Lock)
+                        using (var root = NodeFactory.FromFile(null, tIn.Path))
+                        {
+                            if (root == null) return null;
+                            shrunk = ShrinkHidden(root);
+                            if (shrunk == 0) return null;
+                            root.Export(tOut.Path);
+                        }
+                    return File.ReadAllBytes(tOut.Path);
+                }
+            }
+            catch { return null; }
+        }
 
         /// <summary>The names of a stage's models that gameplay uses: position markers and models collision rides on.</summary>
         static HashSet<string> GameplayModels(ResourceNode root)
@@ -373,6 +438,7 @@ namespace SkinManager.Core
                                 }
                                 pat.RegenerateTextureList(); pat.RegeneratePaletteList();
                             }
+                            r.TexturesShrunk = ShrinkHidden(b);
                             b.Export(outFile.Path);
                         }
                     }

@@ -253,7 +253,9 @@ namespace SkinManager.Core
                 return root.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().Select(c => (c.Name, c.FrameCount)).ToList();
         }
 
-        public static Bitmap RenderStage(byte[] stage, int width = 480, int height = 270, string animation = null, int frame = 0)
+        /// <summary>theirs: the mod's own floors (its collision before P+'s went in). Wherever they're more than a unit from
+        /// where you'll stand, they're drawn in red: where the mod's ground really is. No red means it lines up.</summary>
+        public static Bitmap RenderStage(byte[] stage, int width = 480, int height = 270, string animation = null, int frame = 0, List<(float x1, float y1, float x2, float y2, bool floor)> theirs = null)
         {
             lock (BrawlGate.Lock)
             using (var tmp = new TempFile(".pac", stage))
@@ -273,8 +275,45 @@ namespace SkinManager.Core
                 float w = (fx1 - fx0) * 1.6f, cx = (fx0 + fx1) / 2, cy = (fy0 + fy1) / 2 + (fx1 - fx0) * 0.12f;
                 float h = w * height / width;
                 var lines = floors.Select(f => (f.x1, f.y1, f.x2, f.y2, f.floor ? Color.FromArgb(230, 255, 190, 40) : Color.FromArgb(200, 210, 210, 210))).ToList();
+                if (theirs != null) lines.AddRange(OffFloors(theirs, stand).Select(x => (x.x1, x.y1, x.x2, x.y2, Color.FromArgb(240, 255, 60, 60))));
                 return Draw(tris, width, height, cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2, 1f, 1f, lines, Cull, (fx1 - fx0) * 1.5f);
             }
+        }
+
+        /// <summary>The pieces of the mod's floors that are more than a unit from any floor you'll stand on.</summary>
+        public static List<(float x1, float y1, float x2, float y2)> OffFloors(List<(float x1, float y1, float x2, float y2, bool floor)> theirs, List<(float x1, float y1, float x2, float y2, bool floor)> stand)
+        {
+            var result = new List<(float, float, float, float)>();
+            float Dist(float px, float py)
+            {
+                float best = float.MaxValue;
+                foreach (var t in stand)
+                {
+                    float dx = t.x2 - t.x1, dy = t.y2 - t.y1, l = dx * dx + dy * dy;
+                    float u = l < 1e-6f ? 0 : Math.Max(0, Math.Min(1, ((px - t.x1) * dx + (py - t.y1) * dy) / l));
+                    float qx = t.x1 + dx * u - px, qy = t.y1 + dy * u - py;
+                    best = Math.Min(best, (float)Math.Sqrt(qx * qx + qy * qy));
+                }
+                return best;
+            }
+            foreach (var f in theirs.Where(x => x.floor))
+            {
+                float len = (float)Math.Sqrt((f.x2 - f.x1) * (f.x2 - f.x1) + (f.y2 - f.y1) * (f.y2 - f.y1));
+                int n = Math.Max(1, (int)(len / 0.5f));
+                int start = -1;
+                for (int i = 0; i <= n + 1; i++)
+                {
+                    bool off = i <= n && Dist(f.x1 + (f.x2 - f.x1) * i / n, f.y1 + (f.y2 - f.y1) * i / n) > 1f;
+                    if (off && start < 0) start = i;
+                    if (!off && start >= 0)
+                    {
+                        int end = i - 1;
+                        if (end > start) result.Add((f.x1 + (f.x2 - f.x1) * start / n, f.y1 + (f.y2 - f.y1) * start / n, f.x1 + (f.x2 - f.x1) * end / n, f.y1 + (f.y2 - f.y1) * end / n));
+                        start = -1;
+                    }
+                }
+            }
+            return result;
         }
 
         /// <summary>Does what you see line up with where you stand? A stage's floors (its collision) and its scenery (its

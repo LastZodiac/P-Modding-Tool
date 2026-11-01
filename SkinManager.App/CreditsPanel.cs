@@ -56,7 +56,7 @@ namespace SkinManager.App
             {
                 string folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "LICENSES");
                 if (Directory.Exists(folder)) Open(folder);
-                else MessageBox.Show(FindForm(), "The license texts come with the app's Setup (LICENSES folder).", "Credits");
+                else Dialog.Show(FindForm(), "The license texts come with the app's Setup (LICENSES folder).", "Credits");
             };
             Controls.AddRange(new Control[] { title, made, built, lic });
         }

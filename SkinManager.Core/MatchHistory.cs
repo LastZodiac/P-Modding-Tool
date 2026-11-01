@@ -91,6 +91,72 @@ namespace SkinManager.Core
         }
     }
 
+    /// <summary>Games seen in Brawl Online's game log while the app was open (logged.json in the kept folder): how a game
+    /// still counts when Brawl Online couldn't save its replay. Each is only used when no replay or Brawl Online record of
+    /// the same game turns up (same opponent, started within half a minute).</summary>
+    public static class LoggedGames
+    {
+        /// <summary>Stands for you in a logged game (the log doesn't give your id): filled in when the history is read.</summary>
+        public const string MeMark = "(you)";
+        static readonly object Gate = new object();
+        static string FileIn(string folder) => Path.Combine(folder, "logged.json");
+
+        public static List<GameRecord> Read(string folder)
+        {
+            lock (Gate)
+            {
+                try
+                {
+                    var f = FileIn(folder);
+                    if (!File.Exists(f)) return new List<GameRecord>();
+                    using (var s = File.OpenRead(f)) return (List<GameRecord>)new DataContractJsonSerializer(typeof(List<GameRecord>)).ReadObject(s) ?? new List<GameRecord>();
+                }
+                catch { return new List<GameRecord>(); }
+            }
+        }
+
+        public static void Add(string folder, GameRecord g)
+        {
+            if (g == null || g.Players.Count < 2) return;
+            lock (Gate)
+            {
+                try
+                {
+                    var all = Read(folder);
+                    if (all.Any(x => Math.Abs((x.Start - g.Start).TotalSeconds) < 5)) return;
+                    all.Add(g);
+                    if (all.Count > 5000) all = all.Skip(all.Count - 5000).ToList();
+                    Directory.CreateDirectory(folder);
+                    var f = FileIn(folder); var tmp = f + ".tmp";
+                    using (var s = File.Create(tmp)) new DataContractJsonSerializer(typeof(List<GameRecord>)).WriteObject(s, all);
+                    if (File.Exists(f)) File.Replace(tmp, f, null); else File.Move(tmp, f);
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>The logged games no other record has, with you and your opponent filled in as the history knows you.</summary>
+        internal static List<GameRecord> Missing(MatchHistory h, string folder)
+        {
+            var result = new List<GameRecord>();
+            foreach (var lg in Read(folder))
+            {
+                var me = lg.Players.FirstOrDefault(p => p.UserId == MeMark);
+                var them = lg.Players.FirstOrDefault(p => p.UserId != MeMark);
+                if (me == null || them == null) continue;
+                bool covered = h.Games.Any(g => Math.Abs((g.Start - lg.Start).TotalSeconds) < 30 && g.Players.Any(p => string.Equals(p.Code, them.Code, StringComparison.OrdinalIgnoreCase)));
+                if (covered) continue;
+                // the opponent as other games know them (their id), else one made from their code
+                var known = h.Games.SelectMany(g => g.Players).LastOrDefault(p => p.UserId != null && p.UserId != h.Me && string.Equals(p.Code, them.Code, StringComparison.OrdinalIgnoreCase));
+                them.UserId = known?.UserId ?? "code:" + them.Code;
+                me.UserId = h.Me ?? MeMark; me.Name = h.MyName ?? me.Name; me.Code = h.MyCode ?? me.Code;
+                lg.Players = lg.Players.OrderBy(p => p.UserId, StringComparer.Ordinal).ToList();
+                result.Add(lg);
+            }
+            return result;
+        }
+    }
+
     /// <summary>A win-loss record.</summary>
     public struct Record
     {
@@ -128,7 +194,7 @@ namespace SkinManager.Core
         public Dictionary<int, string> StageNames = new Dictionary<int, string>();
         public string Source;                   // the database file
 
-        public string StageName(int slot) => StageNames.TryGetValue(slot, out var n) ? n : $"Stage {slot:X2}";
+        public string StageName(int slot) => slot < 0 ? "Unknown stage" : StageNames.TryGetValue(slot, out var n) ? n : $"Stage {slot:X2}";
 
         /// <summary>Brawl Online's folder (…\AppData\Roaming\Brawl Online) from its netplay folder.</summary>
         public static string DatabasePath(BrawlOnlineInstall install) => Path.Combine(Path.GetDirectoryName(install.NetplayFolder.TrimEnd('\\', '/')), "replays.sqlite");
@@ -145,7 +211,7 @@ namespace SkinManager.Core
             try
             {
                 var kept = archiveFolder != null ? MatchArchive.Read(archiveFolder) : new List<GameRecord>();
-                fromDb.AddRange(FromNewReplays(fromDb.Concat(kept).ToList()));
+                fromDb.AddRange(FromNewReplays(fromDb.Concat(kept).ToList(), BackupReplayFolder(databasePath)));
             }
             catch { }
             h.Games = archiveFolder != null ? MatchArchive.Merge(fromDb, archiveFolder) : fromDb;
@@ -155,6 +221,19 @@ namespace SkinManager.Core
             h.Me = me?.Key;
             var mine = h.Games.SelectMany(g => g.Players).LastOrDefault(p => p.UserId == h.Me);
             h.MyName = mine?.Name; h.MyCode = mine?.Code;
+            // games whose replay was never saved: from the game log, as the app saw them
+            if (archiveFolder != null)
+                try
+                {
+                    var logged = LoggedGames.Missing(h, archiveFolder);
+                    if (logged.Count > 0)
+                    {
+                        if (h.Me == null) h.Me = LoggedGames.MeMark;
+                        foreach (var g in logged) g.Id = GameRecord.IdOf(g.Key);
+                        h.Games = h.Games.Concat(logged).OrderBy(g => g.Start).ToList();
+                    }
+                }
+                catch { }
             return h;
         }
 
@@ -185,23 +264,33 @@ namespace SkinManager.Core
             return games.Values.Where(g => g.Players.Count >= 2).OrderBy(g => g.Start).ToList();
         }
 
-        /// <summary>Games whose replays are newer than every game known so far (read from the replays' own headers).</summary>
-        static List<GameRecord> FromNewReplays(List<GameRecord> known)
+        /// <summary>Where Brawl Online saves a replay when it can't write it in Documents\Brawl Online (its log says "saving it
+        /// in ...\netplay\User\Replays instead"). Its own game list only covers Documents, so these are read here.</summary>
+        public static string BackupReplayFolder(string databasePath)
+        {
+            try { return Path.Combine(Path.GetDirectoryName(databasePath), "netplay", "User", "Replays"); } catch { return null; }
+        }
+
+        // replays that couldn't be read yet (still being written, or broken): not read again unless they change
+        static readonly HashSet<string> Unreadable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Games whose replays no record knows yet (read from the replays' own headers): next to the known ones (a
+        /// folder per month), in Documents\Brawl Online and in Brawl Online's backup replay folder.</summary>
+        static List<GameRecord> FromNewReplays(List<GameRecord> known, string backupFolder)
         {
             var result = new List<GameRecord>();
             var withFiles = known.Where(g => !string.IsNullOrEmpty(g.File)).ToList();
             var names = new HashSet<string>(withFiles.Select(g => Path.GetFileName(g.File)), StringComparer.OrdinalIgnoreCase);
             var keys = new HashSet<string>(known.Select(g => g.Key));
-            DateTime since = known.Count > 0 ? known.Max(g => g.Start).AddHours(-6) : DateTime.UtcNow.AddDays(-2);
-            // where the replays are: next to the newest known ones (a folder per month), else Documents\Brawl Online
             var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var g in withFiles.OrderByDescending(g => g.Start).Take(20))
                 try { var month = Path.GetDirectoryName(g.File); var root = Path.GetDirectoryName(month); if (Directory.Exists(root)) roots.Add(root); } catch { }
             try { var docs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Brawl Online"); if (Directory.Exists(docs)) roots.Add(docs); } catch { }
+            try { if (backupFolder != null && Directory.Exists(backupFolder)) roots.Add(backupFolder); } catch { }
             foreach (var root in roots)
             {
                 var folders = new List<string> { root };
-                try { folders.AddRange(Directory.GetDirectories(root).Where(d => Directory.GetLastWriteTimeUtc(d) > since.AddDays(-1))); } catch { }
+                try { folders.AddRange(Directory.GetDirectories(root)); } catch { }
                 foreach (var folder in folders)
                 {
                     string[] files;
@@ -209,15 +298,18 @@ namespace SkinManager.Core
                     foreach (var file in files)
                     {
                         if (names.Contains(Path.GetFileName(file))) continue;
+                        string seen = null;
                         try
                         {
-                            if (File.GetLastWriteTimeUtc(file) < since) continue;
+                            var fi = new FileInfo(file); seen = file + "|" + fi.Length + "|" + fi.LastWriteTimeUtc.Ticks;
+                            lock (Unreadable) if (Unreadable.Contains(seen)) continue;
                             var g = ReplayHeader(file);
-                            if (g == null || !keys.Add(g.Key)) continue;
+                            if (g == null) { lock (Unreadable) Unreadable.Add(seen); continue; }
                             names.Add(Path.GetFileName(file));
+                            if (!keys.Add(g.Key)) continue;
                             result.Add(g);
                         }
-                        catch { }
+                        catch { if (seen != null) lock (Unreadable) Unreadable.Add(seen); }
                     }
                 }
             }

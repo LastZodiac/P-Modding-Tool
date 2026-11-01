@@ -52,7 +52,7 @@ namespace SkinManager.App
                 if (!verified && theirs.LastWriteTimeUtc <= mine.LastWriteTimeUtc) continue;   // an older build: leave it
                 if (!verified)
                 {
-                    var answer = MessageBox.Show($"A new version of P+ Modding Tool is ready (made {theirs.LastWriteTime:MMM d, h:mm tt}).\r\n\r\nUpdate now? It takes a second. Your mods and SD card aren't touched.",
+                    var answer = Dialog.Show($"A new version of P+ Modding Tool is ready (made {theirs.LastWriteTime:MMM d, h:mm tt}).\r\n\r\nUpdate now? It takes a second. Your mods and SD card aren't touched.",
                         "Update the app", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                     if (answer != DialogResult.Yes) return false;
                 }
@@ -83,12 +83,12 @@ namespace SkinManager.App
                     // put everything back as it was
                     foreach (var m in Enumerable.Reverse(moved))
                         try { if (File.Exists(m.Target)) File.Delete(m.Target); if (m.Old != null) File.Move(m.Old, m.Target); } catch { }
-                    MessageBox.Show("The update couldn't be put in (" + Friendly.Explain(e) + "). The app stays as it was.", "Update the app", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Dialog.Show("The update couldn't be put in (" + Friendly.Explain(e) + "). The app stays as it was.", "Update the app", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
                 Clear(drop);
                 try { Process.Start(new ProcessStartInfo(Application.ExecutablePath) { UseShellExecute = false, WorkingDirectory = AppFolder }); return true; }
-                catch { MessageBox.Show("Updated. Open the app again to use the new version.", "Update the app"); return true; }
+                catch { Dialog.Show("Updated. Open the app again to use the new version.", "Update the app"); return true; }
             }
             return false;
         }
@@ -155,10 +155,10 @@ namespace SkinManager.App
             if (File.Exists(asked) || Environment.GetEnvironmentVariable("SKINMANAGER_TRACE") != null) return;
             try { Directory.CreateDirectory(Program.DataFolder); File.WriteAllText(asked, DateTime.Now.ToString("u")); } catch { return; }
             if (File.Exists(DesktopShortcut) && File.Exists(StartMenuShortcut)) return;
-            if (MessageBox.Show(owner, "Put a shortcut to P+ Modding Tool on your desktop and in the Start menu?\r\n\r\n(You can do this later in Settings too.)", "Shortcuts",
+            if (Dialog.Show(owner, "Put a shortcut to P+ Modding Tool on your desktop and in the Start menu?\r\n\r\n(You can do this later in Settings too.)", "Shortcuts",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             try { MakeShortcut(DesktopShortcut); MakeShortcut(StartMenuShortcut); }
-            catch (Exception e) { MessageBox.Show(owner, "The shortcuts couldn't be made: " + Friendly.Explain(e), "Shortcuts", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (Exception e) { Dialog.Show(owner, "The shortcuts couldn't be made: " + Friendly.Explain(e), "Shortcuts", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
     }
 }

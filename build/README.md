@@ -384,3 +384,74 @@ Set `SKINMANAGER_GB_BASE` / `SKINMANAGER_GB_IMAGES` to point the app at a local 
   "R.O.B.'s Gyro" (gravity 0.051, fall 1.8, floor friction 0.03). Drawn uncharged and full charge; the item code's
   speed-to-damage scaling isn't in the files (noted).
 - Whole-cast signature dump before/after (start, active, FAF, hits, projectiles): only those 5 rows changed.
+
+## Match history without Brawl Online's list (2026-11-01)
+- When Brawl Online can't write in Documents\Brawl Online, its log says "replay: cannot create the file ... saving it in
+  ...\netplay\User\Replays\ instead". Its replays.sqlite only lists Documents replays, so it stops adding games.
+- MatchHistory.FromNewReplays now reads every replay no record knows (by file name), in the known replay folders,
+  Documents\Brawl Online and the backup folder (MatchHistory.BackupReplayFolder); no date window. Replays that can't be
+  read yet (still being written) are skipped until their size or time changes. Tested on a real install: 267 → 309 games.
+- LiveMatch.TakeFinished: each game the log shows finishing (winner line) becomes a GameRecord (you = LoggedGames.MeMark,
+  start = when its fighters came in), kept in Stats\logged.json. LoggedGames.Missing adds one only when nothing else has
+  a game against the same opponent code within 30 s of it (replay startTime = first ftManager entry; room games are
+  3+ minutes apart). Opponent id from other games with that code, else "code:<code>". Tested: with the replays the
+  logged copies add nothing (309); without them they fill in exactly (309, same record).
+
+## Stage memory (2026-11-01)
+- The game unpacks a stage file into its stage memory (StageResource, 0x666700 = 6.40 MB, from the game's memory report
+  in dolphin.log). P+'s biggest battle stage unpacks to 6,432,864 bytes (Fourside New Pork City); a "looks only"
+  Xenoville on Smashville unpacked to 8.6 MB and crashed the game right after loading ("gfPoolFree Error").
+- StageCheck.MemoryCheck on every stage plan (fails above the heap; "only just fits" above P+'s biggest).
+- SwapLooks: P+'s pictures nothing visible uses any more are made 4x4 (same names, so materials and PAT0 still find
+  them): Xenoville on Smashville 8.6 → 5.8 MB unpacked, gameplay identical, looks identical in the preview.
+- Installer.TooBigStages + the banner ("Make them fit"): stages put on by older versions are re-made (StageForNow slims
+  looks-only ones, turns the rest off with the reason).
+- Archives: folder names for single files capped at 40 characters (Windows 260-character path limit: a long mp3 name
+  failed to open).
+
+## Stage install screen (2026-11-01)
+- Each option: one verdict line (✓ lines up / ⚠ slightly off / ✗ doesn't line up / ? can't measure) from the mod's own
+  floors against P+'s, one short line on why it's safe, and where it is in the game. The long caution is only shown when
+  the mod was made for another stage program.
+- Previews side by side: P+'s stage now | with this mod. On the mod's picture the gold line is where you'll stand and
+  the mod's own floors are drawn red wherever they're more than a unit from it (ModelPreview.OffFloors): no red = lines up.
+- HowFarOff/SurfacesOf: a stage with no fixed floors (Delfino Secret, Corneria) is measured where its moving parts start
+  (as the preview draws it), instead of "can't be measured". Cocktail of Dreams on Delfino Secret: 52 units off (✗).
+- A looks-only option is ticked by itself when it lines up and the mod was made for that stage's program.
+
+## Look and feel pass (2026-11-01)
+- App/Polish.cs (new): Polish.Install() (called first thing in Main) styles every window the app opens, on Application.Idle,
+  and anything added to it later: dark title bars (DWMWA_USE_IMMERSIVE_DARK_MODE 20, 19 before Windows 10 20H1), dark
+  scrollbars (SetWindowTheme "DarkMode_Explorer"; dropdown lists "DarkMode_CFD"), and every ComboBox drawn in the app's
+  colors (ComboPainter: owner-drawn items + the closed box repainted after WM_PAINT, rounded, with a chevron).
+- SmoothButton: Theme.Primary/Secondary now make rounded, beveled buttons (gradient, top highlight, shadow, hover lift,
+  press sink). Code that sets BackColor keeps working: the color is kept as the fill and the control stays transparent
+  (OnBackColorChanged), and the parent is painted behind it so the corners blend.
+- Dialog.Show replaces MessageBox.Show everywhere (same overloads): a dark box with the app's buttons. Program.Crash's
+  last-resort fallback stays a plain MessageBox.
+- Toast: a note at the bottom of the window ("Saved: 3 mods turned on · Undo") replaces the "Done" box after a save
+  when there's nothing to warn about. Saves with notes (stayed off, P+ changed) still get the box.
+- Main screen: header line is just the free space (+ "Close Brawl Online to change mods" only while it's open), cut
+  with an ellipsis before the buttons, card name in a tooltip. Banners are dark with a colored stripe (red = crashes or
+  desyncs, gold = notices, green = app update), text cut to fit with the full list in a tooltip, short sentences;
+  MainForm.Short drops "(STGFILE_NAME)" from mod names in sentences. "Made smaller than needed" is now "can use its
+  full-quality pictures" with a "Restore quality" button. Sidebar: MODS, TOOLS, then Settings/Credits pinned at the bottom.
+- Gold is kept for the main action: Add from file, Search, Add your own music, Choose stage versions and Choose a
+  picture are secondary buttons now.
+- My Mods: space bar says "2.1 GB free" (breakdown in its tooltip), Space.MB shows GB from 1000 MB, per-mod size only
+  when under 200 MB is left, the count line is hidden (the tabs count), "Add more from this download" only on hover.
+- Checked by rendering under Mono + Xvfb (buttons, banners, cards, dialog, toast). ComboPainter's repaint is Windows
+  behaviour (Mono draws its own combo first).
+
+## Smoothness pass (2026-11-01)
+- Why scrolling was choppy: every card, button and label is see-through, so for each one Windows had every panel
+  behind it draw itself again (the backdrop, each panel's tint, all the way up to the window), on every scroll step.
+- BackPicture (Chrome.cs): GlassPanel and GlassFlow keep what's behind them as a picture, made again only when the
+  panel moves in the window, changes size, or the backdrop is redrawn (BackCache.Generation). A card now costs one
+  copy of that picture. Backdrop.Paint only copies the part asked for.
+- SmoothScroll (Polish.cs, on every scrollable panel via Polish.Style): the wheel glides (each notch moves the goal,
+  ease 0.3 a 10 ms tick); dragging the scrollbar stops it. ScrollView (Stat Tracker, Frame Data lists) glides the same.
+- Theme.Freeze (WM_SETREDRAW): My Mods and the Mod Store rebuild their cards with drawing off, so the half-built grid
+  and the jump back to where you were never show.
+- My Mods filter buttons are made once and updated (made again on every refresh, old ones were left drawn over).
+- SmoothButton: no dark drop shadow, and a faint light outline instead of the dark one (read as a black frame).

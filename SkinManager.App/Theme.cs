@@ -1,4 +1,5 @@
 // Colors, fonts and small drawing helpers shared by the windows.
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -55,6 +56,28 @@ namespace SkinManager.App
             }
         }
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+        static readonly bool OnWindows = Type.GetType("Mono.Runtime") == null && Environment.OSVersion.Platform == PlatformID.Win32NT;
+
+        /// <summary>Stops a control drawing until the result is disposed (then it's drawn once, whole): for rebuilding a
+        /// list of cards without the half-built list flashing up.</summary>
+        public static IDisposable Freeze(Control c) => new Frozen(c);
+        sealed class Frozen : IDisposable
+        {
+            readonly Control _c; readonly bool _on;
+            public Frozen(Control c)
+            {
+                _c = c;
+                if (OnWindows && c.IsHandleCreated && c.Visible) try { SendMessage(c.Handle, 0x000B, IntPtr.Zero, IntPtr.Zero); _on = true; } catch { }   // WM_SETREDRAW off
+            }
+            public void Dispose()
+            {
+                if (!_on || _c.IsDisposed) return;
+                try { SendMessage(_c.Handle, 0x000B, (IntPtr)1, IntPtr.Zero); } catch { }
+                _c.Invalidate(true);
+            }
+        }
+
         /// <summary>Copies a picture 1:1 (no resizing, whatever the screen's scaling).</summary>
         public static void Blit(Graphics g, Image b, int x, int y) { if (b != null) g.DrawImage(b, new Rectangle(x, y, b.Width, b.Height), 0, 0, b.Width, b.Height, GraphicsUnit.Pixel); }
 
@@ -65,10 +88,10 @@ namespace SkinManager.App
 
         public static Button Primary(string text)
         {
-            var b = new Button
+            var b = new SmoothButton
             {
-                Text = text, FlatStyle = FlatStyle.Flat, BackColor = Accent, ForeColor = AccentText,
-                Font = BodyBold, AutoSize = true, Padding = new Padding(14, 6, 14, 6), Cursor = Cursors.Hand,
+                Text = text, BackColor = Accent, ForeColor = AccentText,
+                Font = BodyBold, AutoSize = true, Padding = new Padding(14, 4, 14, 4),
             };
             b.FlatAppearance.BorderSize = 0;
             b.FlatAppearance.MouseOverBackColor = Color.FromArgb(255, 196, 92);
@@ -77,10 +100,10 @@ namespace SkinManager.App
 
         public static Button Secondary(string text)
         {
-            var b = new Button
+            var b = new SmoothButton
             {
-                Text = text, FlatStyle = FlatStyle.Flat, BackColor = Panel, ForeColor = Text,
-                Font = Body, AutoSize = true, Padding = new Padding(10, 4, 10, 4), Cursor = Cursors.Hand,
+                Text = text, BackColor = Panel, ForeColor = Text,
+                Font = Body, AutoSize = true, Padding = new Padding(10, 4, 10, 4),
             };
             b.FlatAppearance.BorderColor = Line;
             b.FlatAppearance.MouseOverBackColor = PanelHover;

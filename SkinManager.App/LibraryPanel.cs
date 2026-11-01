@@ -57,8 +57,8 @@ namespace SkinManager.App
         readonly ComboBox _who = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat };
         readonly ComboBox _whichStage = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat, MaxDropDownItems = 20 };
         readonly Button _allOff = Theme.Secondary("Turn all off");
-        readonly Button _ownMusic = Theme.Primary("+ Add your own music");
-        readonly Button _versions = Theme.Primary("Choose stage versions...");
+        readonly Button _ownMusic = Theme.Secondary("+ Add your own music");
+        readonly Button _versions = Theme.Secondary("Choose stage versions...");
         readonly Button _hand = Theme.Secondary("Mods put on by hand");
         readonly Button _allOn = Theme.Secondary("Turn all on");
         readonly FlowLayoutPanel _tabs = new GlassFlow { AutoSize = false, WrapContents = false, Size = new Size(900, 32) };
@@ -169,7 +169,7 @@ namespace SkinManager.App
         string CostText(string id)
         {
             var r = _host.Space;
-            if (r == null || !r.Cost.TryGetValue(id, out long c)) return "";
+            if (r == null || r.Usable > 200L * 1024 * 1024 || !r.Cost.TryGetValue(id, out long c)) return "";   // only worth showing when room is tight
             if (Math.Abs(c) < 64 * 1024) return "  •  ±0 MB";
             return c > 0 ? "  •  +" + Space.MB(c) : "  •  −" + Space.MB(-c);
         }
@@ -339,6 +339,7 @@ namespace SkinManager.App
             var dls = NotInstalled().Where(Matches).ToList();
             int on = all.Count(_host.IsOn);
             var files = _host.Lib.Stages;
+            _count.Visible = false;   // the tabs already count them
             _count.Text = $"{Skins.Count} skins, {OnePerMod(files.Where(x => !x.IsSong)).Count()} stages, {files.Count(x => x.IsSong)} songs" + (AllTextures.Count > 0 ? $", {AllTextures.Count} texture pack{(AllTextures.Count == 1 ? "" : "s")}" : "") + $"  •  {Skins.Count(_host.IsOn) + OnePerMod(files).Count(_host.IsOn)} on";
             Theme.Toggle(_kindSkins, !_stageMode && !_textureMode); Theme.Toggle(_kindStages, _stageMode && !_musicMode); Theme.Toggle(_kindMusic, _musicMode); Theme.Toggle(_kindTextures, _textureMode);
             _who.Visible = !_stageMode && !_textureMode;
@@ -364,6 +365,9 @@ namespace SkinManager.App
             });
 
             int scroll = -_grid.AutoScrollPosition.Y;
+            // the cards are made again: nothing is drawn until they're all in and scrolled back to where you were
+            using (Theme.Freeze(_grid))
+            {
             _grid.SuspendLayout();
             foreach (Control c in _grid.Controls.Cast<Control>().ToList()) c.Dispose();
             _grid.Controls.Clear();
@@ -405,6 +409,7 @@ namespace SkinManager.App
             _grid.ResumeLayout();
             _empty.Visible = false; _grid.Visible = true;
             _grid.AutoScrollPosition = new Point(0, scroll);
+            }
             _allOff.Enabled = _allOn.Enabled = _tab != Tab.Downloaded;
             _meter.Invalidate();
         }
@@ -517,23 +522,35 @@ namespace SkinManager.App
             _emptyButton.Location = new Point(4, _emptyText.Bottom + 14);
         }
 
+        // the filter buttons are made once and only their text and look change (making them again on every refresh left
+        // pieces of the old ones drawn over the new ones)
+        readonly Dictionary<Tab, Button> _tabButtons = new Dictionary<Tab, Button>();
         void BuildTabs(Dictionary<Tab, int> counts)
         {
-            foreach (Control c in _tabs.Controls.Cast<Control>().ToList()) c.Dispose();
-            _tabs.Controls.Clear();
-            foreach (var kv in counts)
+            _tabs.SuspendLayout();
+            foreach (Tab t in Enum.GetValues(typeof(Tab)))
             {
-                var t = kv.Key;
-                var b = new Button
+                if (!_tabButtons.TryGetValue(t, out var b))
                 {
-                    Text = $"{(t == Tab.Favorites ? "★ Favorites" : t.ToString())}  ({kv.Value})", FlatStyle = FlatStyle.Flat, AutoSize = true, Cursor = Cursors.Hand,
-                    Font = t == _tab ? Theme.BodyBold : Theme.Body, Padding = new Padding(8, 2, 8, 2), Margin = new Padding(0, 0, 6, 0),
-                    BackColor = t == _tab ? Theme.PanelHover : Theme.Back, ForeColor = t == _tab ? Theme.Text : Theme.Muted,
-                };
-                b.FlatAppearance.BorderColor = t == _tab ? Theme.Accent : Theme.Line;
-                b.Click += (s, e) => { _tab = t; Refresh(); };
-                _tabs.Controls.Add(b);
+                    var tab = t;
+                    b = new Button { FlatStyle = FlatStyle.Flat, AutoSize = true, Cursor = Cursors.Hand, Padding = new Padding(8, 2, 8, 2), Margin = new Padding(0, 0, 6, 0), UseMnemonic = false };
+                    b.Click += (s, e) => { _tab = tab; Refresh(); };
+                    _tabButtons[t] = b;
+                    _tabs.Controls.Add(b);
+                }
+                bool shown = counts.TryGetValue(t, out int n);
+                b.Visible = shown;
+                if (!shown) continue;
+                string text = $"{(t == Tab.Favorites ? "★ Favorites" : t.ToString())}  ({n})";
+                if (b.Text != text) b.Text = text;
+                bool sel = t == _tab;
+                b.Font = sel ? Theme.BodyBold : Theme.Body;
+                b.BackColor = sel ? Theme.PanelHover : Theme.Back; b.ForeColor = sel ? Theme.Text : Theme.Muted;
+                b.FlatAppearance.BorderColor = sel ? Theme.Accent : Theme.Line;
+                b.FlatAppearance.MouseOverBackColor = Theme.PanelHover;
             }
+            _tabs.ResumeLayout();
+            _tabs.Invalidate(true);
         }
 
         /// <summary>A newer version on GameBanana: a green tag and an "Update" link instead of "Add more".</summary>
@@ -584,7 +601,7 @@ namespace SkinManager.App
             card.FavoriteClicked += () => { _host.Favs?.Toggle(new Favorite { Key = "gb:" + d.ModId, Name = d.ModName, Author = d.Author, ThumbUrl = d.ThumbUrl, ModId = d.ModId, Category = d.Category }); Refresh(); };
             card.DeleteClicked += () =>
             {
-                if (MessageBox.Show(FindForm(), $"Delete the downloaded file for \"{d.ModName}\"?", "Delete download", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (Dialog.Show(FindForm(), $"Delete the downloaded file for \"{d.ModName}\"?", "Delete download", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 d.Delete(); Refresh();
             };
             return card;
@@ -688,8 +705,8 @@ namespace SkinManager.App
             Seg(Math.Min(r.Margin, r.Free), Color.FromArgb(140, 140, 150));
             Seg(r.Usable, Theme.Good);
             bool low = r.Usable < 5L * 1024 * 1024;
-            string text = $"Room for mods: {Space.MB(r.Usable)} free";
-            string rest = $" · your mods {Space.MB(r.Mods)} · kept free {Space.MB(Math.Min(r.Margin, r.Free))}";
+            string text = $"{Space.MB(r.Usable)} free";
+            string rest = low ? "  ·  almost full" : "";
             using (var f = new Font(Theme.Small, FontStyle.Bold))
             {
                 TextRenderer.DrawText(g, text, f, new Point(0, 2), low ? Theme.Bad : Theme.Text);
@@ -710,7 +727,7 @@ namespace SkinManager.App
         public Color Tag1Color = Theme.Accent;
         public bool On, ShowSwitch, Music, Favorite, CanFavorite = true;
         public event Action SwitchClicked, DeleteClicked, ActionClicked, MoreClicked, FavoriteClicked;
-        bool _hover, _starHover;
+        bool _hover, _starHover, _moreHover;
         Rectangle _switch, _delete, _action, _more, _star;
 
         public void ClearMore() => MoreClicked = null;
@@ -721,11 +738,13 @@ namespace SkinManager.App
             Size = new Size(218, 270); BackColor = Color.Transparent;
         }
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Cursor = Cursors.Default; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _moreHover = false; Cursor = Cursors.Default; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnMouseMove(MouseEventArgs e)
         {
             bool star = CanFavorite && _star.Contains(e.Location);
             if (star != _starHover) { _starHover = star; Invalidate(); }
+            bool more = MoreText != null && _more.Contains(e.Location);
+            if (more != _moreHover) { _moreHover = more; Invalidate(); }
             bool hot = star || _switch.Contains(e.Location) || _delete.Contains(e.Location) || _action.Contains(e.Location) || (MoreText != null && _more.Contains(e.Location));
             Cursor = hot ? Cursors.Hand : Cursors.Default;
             base.OnMouseMove(e);
@@ -782,8 +801,10 @@ namespace SkinManager.App
             if (MoreText != null)
             {
                 _more = new Rectangle(8, y + 78, Width - 16, 18);
-                using (var u = new Font(Theme.Small, FontStyle.Underline))
-                    TextRenderer.DrawText(g, MoreText, u, _more, Theme.Accent, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+                bool always = MoreText.StartsWith("Update");   // something to do: always shown
+                if (always || _hover)
+                    using (var u = new Font(Theme.Small, _moreHover ? FontStyle.Underline : FontStyle.Regular))
+                        TextRenderer.DrawText(g, (always ? "" : "+ ") + MoreText, u, _more, always || _moreHover ? Theme.Accent : Theme.Muted, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
             }
             int by = Height - 34;
             _delete = new Rectangle(8, by, 60, 24);

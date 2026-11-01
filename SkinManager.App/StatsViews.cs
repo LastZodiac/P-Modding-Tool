@@ -26,7 +26,28 @@ namespace SkinManager.App
         int MaxScroll => Math.Max(0, ContentHeight - Height);
         public void ToTop() { Scroll = 0; Invalidate(); }
         protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); if (FindForm()?.ActiveControl is TextBox == false) Focus(); }
-        protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); SetScroll(Scroll - e.Delta / 2); }
+        // the wheel glides (see SmoothScroll): each notch moves the goal, the view eases there
+        Timer _glide; float _glidePos; int _glideGoal;
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (_glide == null)
+            {
+                _glide = new Timer { Interval = 10 };
+                _glide.Tick += (s, a) =>
+                {
+                    _glidePos += (_glideGoal - _glidePos) * 0.3f;
+                    if (Math.Abs(_glideGoal - _glidePos) < 0.75f) { _glidePos = _glideGoal; _glide.Stop(); }
+                    SetScroll((int)Math.Round(_glidePos));
+                    Update();
+                };
+                Disposed += (s, a) => _glide.Dispose();
+            }
+            if (!_glide.Enabled) { _glidePos = Scroll; _glideGoal = Scroll; }
+            int step = Math.Max(60, Math.Min(180, Height / 4));
+            _glideGoal = Math.Max(0, Math.Min(MaxScroll, _glideGoal - e.Delta * step / 120));
+            _glide.Start();
+        }
         void SetScroll(int v) { int s = Math.Max(0, Math.Min(MaxScroll, v)); if (s != Scroll) { Scroll = s; Invalidate(); } }
         protected override void OnResize(EventArgs e) { base.OnResize(e); Layout2(); SetScroll(Scroll); }
 
@@ -40,7 +61,7 @@ namespace SkinManager.App
         {
             base.OnMouseDown(e);
             var t = Thumb();
-            if (!t.IsEmpty && e.X >= Width - 12) { _dragging = true; _dragFrom = e.Y; _scrollFrom = Scroll; if (!t.Contains(e.X - 0f, e.Y)) SetScroll((int)((float)e.Y / Height * ContentHeight - Height / 2f)); _scrollFrom = Scroll; return; }
+            if (!t.IsEmpty && e.X >= Width - 12) { _glide?.Stop(); _dragging = true; _dragFrom = e.Y; _scrollFrom = Scroll; if (!t.Contains(e.X - 0f, e.Y)) SetScroll((int)((float)e.Y / Height * ContentHeight - Height / 2f)); _scrollFrom = Scroll; return; }
             Clicked(new Point(e.X, e.Y + Scroll), e.Button);
         }
         protected override void OnMouseMove(MouseEventArgs e)

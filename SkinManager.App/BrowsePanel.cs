@@ -45,7 +45,7 @@ namespace SkinManager.App
         bool _stageMode, _musicMode;
         string Model => _musicMode ? "Sound" : "Mod";
         static readonly (string, int)[] StageCategories = { ("1:1 stages (reskins)", GameBanana.OneToOneStages), ("Competitive stages", GameBanana.CompetitiveStages), ("All stages", GameBanana.AllStages) };
-        readonly Button _go = Theme.Primary("Search");
+        readonly Button _go = Theme.Secondary("Search");
         readonly Label _heading = Theme.Label("", Theme.Heading);
         readonly GlassFlow _results = new GlassFlow { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(0, 4, 0, 0) };
         readonly Panel _pager = new Panel { Dock = DockStyle.Bottom, Height = 46 };
@@ -285,6 +285,8 @@ namespace SkinManager.App
         {
             var who = Wanted;
             string search = _search.Text;
+            using (Theme.Freeze(_results))   // the old page goes and the new one comes in one go, no half-built grid
+            {
             foreach (Control old in _results.Controls) old.Dispose();
             _results.Controls.Clear();
             var mods = result.Mods.Where(m => !(_hideInstalled.Checked && IsInstalled(m.Id)) && !(_hideOld.Checked && m.Obsolete)).ToList();
@@ -300,6 +302,7 @@ namespace SkinManager.App
                 foreach (var m in mods) _results.Controls.Add(Card(m, gen, who == null || _stageMode || _musicMode));
                 _results.ResumeLayout();
                 _results.AutoScrollPosition = new Point(0, 0);
+            }
             }
             _pager.Visible = true;
             _pageText.Text = result.Total == 0 ? "" : $"Page {result.Page} of {result.Pages}   ({result.Total} in all)";
@@ -539,7 +542,7 @@ namespace SkinManager.App
             cancel.Click += (s, e) => _download?.Cancel();
             button.Click += async (s, e) =>
             {
-                if (_download != null) { MessageBox.Show(FindForm(), "Another download is still going (see the bar at the bottom of the page). Wait for it to finish, or cancel it there.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                if (_download != null) { Dialog.Show(FindForm(), "Another download is still going (see the bar at the bottom of the page). Wait for it to finish, or cancel it there.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 button.Visible = false; bar.Visible = status.Visible = cancel.Visible = true; bar.Value = 0;
                 var cts = _download = new CancellationTokenSource();
                 var paths = new List<string>(); Exception error = null;
@@ -583,7 +586,7 @@ namespace SkinManager.App
                 if (error != null)
                 {
                     Program.Trace("download failed: " + error);
-                    MessageBox.Show(FindForm(), error is GbException ? error.Message : "The download failed. " + Friendly.Explain(error), "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Dialog.Show(FindForm(), error is GbException ? error.Message : "The download failed. " + Friendly.Explain(error), "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 InstallAllRequested?.Invoke(paths, new SkinSource { ModId = d.Mod.Id, FileId = 0, ModName = d.Mod.Name, Author = d.Mod.Author, PageUrl = d.Mod.ProfileUrl, ThumbUrl = d.Mod.ThumbUrl });
@@ -626,7 +629,7 @@ namespace SkinManager.App
             cancel.Click += (s, e) => _download?.Cancel();
             button.Click += async (s, e) =>
             {
-                if (_download != null) { MessageBox.Show(FindForm(), "Another download is still going (see the bar at the bottom of the page). Wait for it to finish, or cancel it there.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                if (_download != null) { Dialog.Show(FindForm(), "Another download is still going (see the bar at the bottom of the page). Wait for it to finish, or cancel it there.", "One at a time", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 button.Visible = false; bar.Visible = status.Visible = cancel.Visible = true; bar.Value = 0;
                 status.Text = "Starting download...";
                 var cts = _download = new CancellationTokenSource();
@@ -658,7 +661,7 @@ namespace SkinManager.App
                 if (error != null)
                 {
                     Program.Trace("download failed: " + error);
-                    MessageBox.Show(FindForm(), error is GbException ? error.Message : "The download failed. " + Friendly.Explain(error), "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Dialog.Show(FindForm(), error is GbException ? error.Message : "The download failed. " + Friendly.Explain(error), "Couldn't download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 var source = new SkinSource { ModId = d.Mod.Id, FileId = f.Id, ModName = d.Mod.Name, Author = d.Mod.Author, PageUrl = d.Mod.ProfileUrl, ThumbUrl = d.Mod.ThumbUrl };

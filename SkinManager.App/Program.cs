@@ -30,6 +30,7 @@ namespace SkinManager.App
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            Polish.Install();
             Application.ThreadException += (s, e) => Crash(e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (s, e) => Crash(e.ExceptionObject as Exception);
             SkinManager.Core.Installer.Quiet();

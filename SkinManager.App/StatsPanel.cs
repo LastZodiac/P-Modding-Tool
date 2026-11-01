@@ -320,7 +320,10 @@ namespace SkinManager.App
                 var parts = file.Split('\\', '/');
                 string month = parts.Length > 1 ? parts[parts.Length - 2] : "";
                 string here = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Brawl Online", month, parts[parts.Length - 1]);
-                return System.IO.File.Exists(here) ? here : null;
+                if (System.IO.File.Exists(here)) return here;
+                // Brawl Online's backup replay folder (used when it can't save in Documents)
+                string backup = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Brawl Online", "netplay", "User", "Replays", month, parts[parts.Length - 1]);
+                return System.IO.File.Exists(backup) ? backup : null;
             }
             catch { return null; }
         }
@@ -477,7 +480,7 @@ namespace SkinManager.App
         void ShowReplayFile(string file)
         {
             var path = Locate(file);
-            if (path == null) { MessageBox.Show(this, "That replay isn't in your Documents\\Brawl Online folder anymore.", "Stat Tracker", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (path == null) { Dialog.Show(this, "That replay isn't in your Documents\\Brawl Online folder anymore.", "Stat Tracker", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\""); } catch (Exception e) { Program.Log("showing a replay", e); }
         }
 

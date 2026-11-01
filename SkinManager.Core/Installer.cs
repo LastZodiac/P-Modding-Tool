@@ -379,6 +379,23 @@ namespace SkinManager.Core
             return r.Passed;
         }
 
+        /// <summary>Stage mods turned on whose file is too big for the game's stage memory once unpacked (the game crashes
+        /// loading the stage). Put on by an older version, before the app checked this; "putting them back" makes them fit
+        /// where it can (StageForNow) and turns off the rest.</summary>
+        public List<InstalledStage> TooBigStages()
+        {
+            var list = new List<InstalledStage>();
+            foreach (var s in _lib.Stages.Where(x => x.Enabled && x.Kind == null).ToList())
+                try
+                {
+                    string p = Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath));
+                    if (!File.Exists(p) || new FileInfo(p).Length < 1_500_000) continue;   // nothing that small unpacks that big
+                    if (StageCheck.MemorySize(File.ReadAllBytes(p)) > StageCheck.StageHeap) list.Add(s);
+                }
+                catch { }
+            return list;
+        }
+
         byte[] LooksSource(InstalledStage s)
         {
             string f = Path.Combine(_lib.StageFolder(s.Id), "looks-map.pac");
@@ -393,6 +410,21 @@ namespace SkinManager.Core
             if (s.IsSwap) return SwapForNow(card, s, out why);
             var bytes = StageCopy(s);
             if (s.Kind != null) return bytes;   // songs: no gameplay
+            // too big for the game's stage memory (the game crashes loading it): looks put on P+'s stage by an older version
+            // kept all of P+'s pictures; those nothing shows any more are made tiny, which is usually plenty
+            if (bytes != null && StageCheck.MemorySize(bytes) > StageCheck.StageHeap)
+            {
+                var slim = s.LooksOnly ? StageCheck.Slim(bytes, out _) : null;
+                if (slim == null || StageCheck.MemorySize(slim) > StageCheck.StageHeap)
+                {
+                    why = $"{s.Name} is too big for the game's stage memory on {s.Target.Label} (the game would crash loading it)";
+                    return null;
+                }
+                File.WriteAllBytes(Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath)), slim);
+                s.Sha256 = Library.Sha256(slim);
+                if (!Notes.Any(n => n.StartsWith(s.Name + " was too big"))) Notes.Add($"{s.Name} was too big for the game's stage memory (it would crash the game), so P+'s pictures it hides were made smaller. It looks the same.");
+                bytes = slim;
+            }
             RefreshOriginal(card, s.CardPath);
             var original = _lib.OriginalFile(s.CardPath);
             if (original == null) { why = $"P+ no longer has {s.Target.Label}"; return null; }
@@ -404,7 +436,7 @@ namespace SkinManager.Core
                 // its looks on P+'s stage: made again on P+'s current file
                 var src = LooksSource(s);
                 var redone = src == null ? new StageCheck.LooksResult() : StageCheck.SwapLooks(src, original, program);
-                if (redone.Bytes != null && StageCheck.Compare(StageCheck.Gameplay(redone.Bytes), theirs, "", program).Passed)
+                if (redone.Bytes != null && StageCheck.MemorySize(redone.Bytes) <= StageCheck.StageHeap && StageCheck.Compare(StageCheck.Gameplay(redone.Bytes), theirs, "", program).Passed)
                 {
                     File.WriteAllBytes(Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath)), redone.Bytes);
                     s.Sha256 = Library.Sha256(redone.Bytes);
@@ -777,6 +809,7 @@ namespace SkinManager.Core
             };
             plan.Bytes = File.ReadAllBytes(stageFile);
             plan.Checks.Add(SkinCheck.Size(target.FileName, plan.Bytes.Length, StageCheck.MaxStageBytes));
+            plan.Checks.Add(StageCheck.MemoryCheck(target.FileName, plan.Bytes));
             var original = _stageIndex.Of(card, _lib, target.CardPath);
             plan.Checks.Add(original == null
                 ? new CheckResult { Passed = false, Title = "P+'s " + target.Label + " couldn't be read", Detail = "Without it the app can't compare the two." }
@@ -812,6 +845,7 @@ namespace SkinManager.Core
             }
             plan.Bytes = made;
             plan.Checks.Add(SkinCheck.Size(target.FileName, made.Length, StageCheck.MaxStageBytes));
+            plan.Checks.Add(StageCheck.MemoryCheck(target.FileName, made));
             Dictionary<string, string> after;
             after = StageCheck.Gameplay(made);
             var original = _stageIndex.Of(card, _lib, target.CardPath);
@@ -849,6 +883,7 @@ namespace SkinManager.Core
             plan.Bytes = looks.Bytes;
             plan.Fit = StageCheck.HowFarOff(map, originalBytes);
             plan.Checks.Add(SkinCheck.Size(target.FileName, looks.Bytes.Length, StageCheck.MaxStageBytes));
+            plan.Checks.Add(StageCheck.MemoryCheck(target.FileName, looks.Bytes));
             var compare = StageCheck.Compare(StageCheck.Gameplay(looks.Bytes), StageCheck.Gameplay(originalBytes), "P+'s " + target.Label, program);
             if (compare.Passed) compare.Title = "Plays exactly like P+'s " + target.Label + " (it is P+'s stage underneath)";
             plan.Checks.Add(compare);

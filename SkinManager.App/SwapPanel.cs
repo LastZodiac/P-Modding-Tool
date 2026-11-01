@@ -216,7 +216,7 @@ namespace SkinManager.App
                     return t;
                 });
                 _status.Text = before;
-                MessageBox.Show(FindForm(),
+                Dialog.Show(FindForm(),
                     $"Saved: {Path.GetFileName(path)} ({tris:N0} triangles, with its pictures).\r\n\r\n" +
                     "This is P+'s exact model, so anything you make from it keeps P+'s proportions. To give it a new look:\r\n\r\n" +
                     "1. Open this file in a 3D program (Blender, for example).\r\n" +
@@ -231,7 +231,7 @@ namespace SkinManager.App
             {
                 Program.Log("save model 3d", e);
                 _status.Text = before;
-                MessageBox.Show(FindForm(), "The model couldn't be saved: " + Friendly.Explain(e), "Save P+ Model as 3D", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Dialog.Show(FindForm(), "The model couldn't be saved: " + Friendly.Explain(e), "Save P+ Model as 3D", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { _export3d.Enabled = true; }
         }
@@ -281,7 +281,7 @@ namespace SkinManager.App
             {
                 Program.Log("saving P+ model pictures", e);
                 _status.Text = before;
-                MessageBox.Show(FindForm(), "The pictures couldn't be saved: " + Friendly.Explain(e), "Save P+ Model Pictures", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Dialog.Show(FindForm(), "The pictures couldn't be saved: " + Friendly.Explain(e), "Save P+ Model Pictures", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { _pictures.Enabled = true; }
         }
@@ -461,7 +461,7 @@ namespace SkinManager.App
             if (_built == null || c == null || slot == null) return;
             if (_built.Mixes > _built.MixBudget)
             {
-                MessageBox.Show(FindForm(), $"This model bends between its joints in {_built.Mixes} different ways, and P+'s own costume has {_built.MixBudget}. The game can't load that many and would crash, so it wasn't made into a costume. A simpler model (or the Detail setting set lower) fixes this.", "Model Swapper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Dialog.Show(FindForm(), $"This model is too complex for the game ({_built.Mixes} joint blends; P+'s costume has {_built.MixBudget}) and would crash it, so it wasn't made into a costume.\r\n\r\nTry a simpler model, or set Detail lower.", "Model Swapper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             string name = Path.GetFileNameWithoutExtension(_path);
