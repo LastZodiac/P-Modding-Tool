@@ -1898,8 +1898,13 @@ namespace SkinManager.App
         public void StageVersions()
         {
             if (_busy || _installer == null || _lib == null) return;
+            bool add = false;
             using (var f = new StageVersionsForm(_installer, _lib))
+            {
                 if (f.ShowDialog(this) == DialogResult.OK && f.Change != null && !f.Change.IsEmpty) Run(f.Change, f.Done);
+                add = f.AddStageAsked;
+            }
+            if (add) PickSkin();
         }
 
         /// <summary>Does a folder have mod files in it (costumes, stages, game songs, archives)?</summary>
@@ -1968,7 +1973,8 @@ namespace SkinManager.App
             {
                 RememberCostumeCount(originalPath, pkg.StageFiles.Count);
                 var stagePlans = new List<StagePlan>();
-                using (var form = new StageForm(_installer, _lib, pkg))
+                // the stage manager, opened on the stage the download is for: tick the versions it goes on
+                using (var form = new StageVersionsForm(_installer, _lib, pkg))
                 {
                     if (form.ShowDialog(this) == DialogResult.OK) stagePlans = form.Plans;
                     else if (pkg.SongFiles.Count == 0) return;

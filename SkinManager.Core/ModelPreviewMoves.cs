@@ -14,7 +14,7 @@ namespace SkinManager.Core
     {
         public static readonly Color[] HitColors = { Color.FromArgb(240, 60, 60), Color.FromArgb(255, 140, 30), Color.FromArgb(240, 60, 200), Color.FromArgb(60, 200, 90), Color.FromArgb(70, 150, 255), Color.FromArgb(255, 230, 60), Color.FromArgb(150, 90, 255), Color.FromArgb(40, 220, 220) };
 
-        sealed class Shot { public List<(Vector3 a, Vector3 b, Vector3 c, Vector2 ta, Vector2 tb, Vector2 tc, Tex tex, bool xlu)> Tris; public List<(Vector3 p, float r, Color c)> Hits = new List<(Vector3, float, Color)>(); public List<(Vector3 a, Vector3 b, float r)> Hurt = new List<(Vector3, Vector3, float)>(); public int Body; public float Shift; public List<Hitbox> HitOf = new List<Hitbox>(); public HashSet<int> Flying = new HashSet<int>(); public List<List<Vector3>> Trails = new List<List<Vector3>>(); public bool After; }
+        sealed class Shot { public List<(Vector3 a, Vector3 b, Vector3 c, Vector2 ta, Vector2 tb, Vector2 tc, Tex tex, bool xlu)> Tris; public List<(Vector3 p, float r, Color c)> Hits = new List<(Vector3, float, Color)>(); public List<(Vector3 a, Vector3 b, float r)> Hurt = new List<(Vector3, Vector3, float)>(); public int Body; public float Shift; public List<Hitbox> HitOf = new List<Hitbox>(); public HashSet<int> Flying = new HashSet<int>(); public List<List<Vector3>> Trails = new List<List<Vector3>>(); public List<Vector3> Marks = new List<Vector3>(); public Dictionary<int, Vector3> Beams = new Dictionary<int, Vector3>(); public bool After; }
 
         /// <summary>Where things are in a move's pictures: a point (x, y) in game units (x forward from where the fighter
         /// stood, y up from the ground) is at pixel ((x - MinX) * Scale, (MaxY - y) * Scale). Each frame's hitboxes in pixels.</summary>
@@ -101,12 +101,16 @@ namespace SkinManager.Core
                 }
                 // a move played in parts (start, dash, end): each part's animation moves the fighter from where the last one
                 // left it (the game adds a part's root movement to the fighter's position), so it's carried over
-                string lastAnim = null; float lastRootX = 0, carryX = 0;
+                string lastAnim = null; float lastRootX = 0, carryX = 0; bool posed = false;
                 foreach (var f in move.Frames)
                 {
                     if (cancelled?.Invoke() == true) return new List<Bitmap>();
-                    anims.TryGetValue(f.Animation ?? "", out var anim);
-                    model.ApplyCHR(anim, anim == null ? 0 : Math.Max(1, Math.Min(f.AnimFrame, anim.FrameCount)));
+                    var anim = RealAnim(anims, f.Animation);
+                    if (!posed && anim != null && anim.Children.Count == 0) model.ApplyCHR(null, 0);   // nothing to keep yet: the model's own pose
+                    posed = true;
+                    // an animation with no bones in it (P+'s 1-frame placeholders: Pit's side B hold and end, his up B end): the
+                    // fighter keeps the pose it was in, as in the game, instead of snapping to the model's T-pose
+                    if (!(anim != null && anim.Children.Count == 0)) model.ApplyCHR(anim, anim == null ? 0 : Math.Max(1, Math.Min(f.AnimFrame, anim.FrameCount)));
                     var rootBone = BoneAt(trans >= 0 ? trans : 0);
                     float rootX = rootBone == null ? 0 : Yaw(rootBone._frameMatrix.GetPoint())._x;
                     if (lastAnim != null && f.Animation != lastAnim) carryX += lastRootX;
@@ -124,6 +128,7 @@ namespace SkinManager.Core
                             continue;
                         }
                         var b = BoneAt(h.Bone); if (b == null) continue;
+                        if (h.Stretch) shot.Beams[shot.Hits.Count] = Place(b, 0, 0, 0);
                         shot.Hits.Add((Place(b, h.X, h.Y, h.Z), h.Size, h.Grab ? Color.FromArgb(170, 80, 255) : HitColors[h.Id % HitColors.Length])); shot.HitOf.Add(h);
                     }
                     int ownCount = shot.Hits.Count;
@@ -157,6 +162,8 @@ namespace SkinManager.Core
                             var at = new Vector3(fo._x + fl.Path[j - 1].X, fo._y + fl.Path[j - 1].Y, fo._z);
                             // one that comes down to the floor ends there
                             if (fl.StopAtGround && j > 1 && at._y < 0) continue;
+                            // flying with nothing that hits yet (Din's Fire before it blows up): a small dot shows where it is
+                            if (!fl.Hits[j - 1].Any(h => !h.Grab)) shot.Marks.Add(at);
                             foreach (var h in fl.Hits[j - 1])
                             {
                                 if (h.Grab) continue;
@@ -186,8 +193,10 @@ namespace SkinManager.Core
                     float fx = f.MoveX + carryX, fy = f.MoveY;
                     for (int k = 0; k < shot.Tris.Count; k++) { var t = shot.Tris[k]; t.a._x += fx - shift; t.b._x += fx - shift; t.c._x += fx - shift; t.a._y += fy; t.b._y += fy; t.c._y += fy; shot.Tris[k] = t; }
                     for (int k = 0; k < shot.Hits.Count; k++) { var h = shot.Hits[k]; if (k < ownCount) { h.p._x += fx; h.p._y += fy; } h.p._x -= shift; shot.Hits[k] = h; }
+                    foreach (var k in shot.Beams.Keys.ToList()) { var v = shot.Beams[k]; v._x += fx - shift; v._y += fy; shot.Beams[k] = v; }
                     for (int k = 0; k < shot.Hurt.Count; k++) { var h = shot.Hurt[k]; h.a._x += fx - shift; h.b._x += fx - shift; h.a._y += fy; h.b._y += fy; shot.Hurt[k] = h; }
                     foreach (var tr in shot.Trails) for (int k = 0; k < tr.Count; k++) { var v = tr[k]; v._x -= shift; tr[k] = v; }
+                    for (int k = 0; k < shot.Marks.Count; k++) { var v = shot.Marks[k]; v._x -= shift; shot.Marks[k] = v; }
                     AuditFrames?.Add((f.Frame, f.Hitboxes.Count(h => !h.Grab), shot.HitOf.Take(ownCount).Count(h => !h.Grab), shot.Hits.Count - ownCount));
                     if (AuditFrames == null) shots.Add(shot);
                 }
@@ -196,12 +205,28 @@ namespace SkinManager.Core
             // one view for the whole move, so the pictures don't jump
             float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
             void Grow(float x, float y, float r) { minX = Math.Min(minX, x - r); maxX = Math.Max(maxX, x + r); minY = Math.Min(minY, y - r); maxY = Math.Max(maxY, y + r); }
+            // a move whose only hits are on what it puts out (Din's Fire: nothing hits until the fireball blows up, far away)
+            // takes in the whole flight, or nothing that hits would ever be in the picture
+            bool ownHits = shots.Any(s => Enumerable.Range(0, s.Hits.Count).Any(i => !s.Flying.Contains(i)));
+            bool Far(Vector3 p) => ownHits && (Math.Abs(p._x) > Reach || p._y > Reach || p._y < -Reach / 2);
             foreach (var s in shots)
             {
                 foreach (var t in s.Tris) { Grow(t.a._x, t.a._y, 0); Grow(t.b._x, t.b._y, 0); Grow(t.c._x, t.c._y, 0); }
                 // a projectile far out isn't allowed to shrink the fighter to a dot: the view takes in about a stage's
                 // width around the fighter, and a little arrow at the edge shows it flying on
-                for (int i = 0; i < s.Hits.Count; i++) { var h = s.Hits[i]; if (s.Flying.Contains(i) && (Math.Abs(h.p._x) > Reach || h.p._y > Reach || h.p._y < -Reach / 2)) continue; Grow(h.p._x, h.p._y, h.r); }
+                for (int i = 0; i < s.Hits.Count; i++)
+                {
+                    var h = s.Hits[i];
+                    if (s.Beams.TryGetValue(i, out var from))
+                    {
+                        // a long beam: the view takes in its start and up to a stage's width of it, not all of it
+                        float dx = h.p._x - from._x, dy = h.p._y - from._y, len = (float)Math.Sqrt(dx * dx + dy * dy), k = len > Reach ? Reach / len : 1;
+                        Grow(from._x, from._y, h.r); Grow(from._x + dx * k, from._y + dy * k, h.r);
+                        continue;
+                    }
+                    if (s.Flying.Contains(i) && Far(h.p)) continue; Grow(h.p._x, h.p._y, h.r);
+                }
+                foreach (var mk in s.Marks) if (!Far(mk)) Grow(mk._x, mk._y, 1);
             }
             if (minX > maxX) return new List<Bitmap>();
             if (Environment.GetEnvironmentVariable("SKINMANAGER_DEBUG_BOUNDS") != null) Console.WriteLine($"bounds x {minX:0.0}..{maxX:0.0} y {minY:0.0}..{maxY:0.0}");
@@ -273,9 +298,26 @@ namespace SkinManager.Core
                         using (var br = new SolidBrush(Color.FromArgb(150, 255, 255, 255)))
                         using (var fnt = new Font("Segoe UI", 9f))
                             g.DrawString("move over, projectile still out", fnt, br, 8, height - 22);
-                    foreach (var h in s.Hits.OrderByDescending(x => x.r))
+                    foreach (var mk in s.Marks)
                     {
-                        var p = S(h.p); float d = 2 * h.r * scale;
+                        var p = S(mk);
+                        using (var br = new SolidBrush(Color.FromArgb(200, 255, 170, 60))) g.FillEllipse(br, p.X - 4, p.Y - 4, 8, 8);
+                        using (var pen = new Pen(Color.FromArgb(230, 255, 230, 180), 1f)) g.DrawEllipse(pen, p.X - 4, p.Y - 4, 8, 8);
+                    }
+                    foreach (var bm in s.Beams)
+                    {
+                        var h = s.Hits[bm.Key]; var a = S(bm.Value); var e = S(h.p); float d = Math.Max(10f, 2 * h.r * scale);
+                        // a beam running far past the picture: cut where it leaves, so the drawing stays sane
+                        float ddx = e.X - a.X, ddy = e.Y - a.Y, dl = (float)Math.Sqrt(ddx * ddx + ddy * ddy), lim = 4f * (width + height);
+                        if (dl > lim) e = new PointF(a.X + ddx * lim / dl, a.Y + ddy * lim / dl);
+                        using (var pen = new Pen(Color.FromArgb(120, h.c), d) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, a, e);
+                        using (var pen = new Pen(Color.FromArgb(230, h.c), 1.5f)) { g.DrawEllipse(pen, a.X - d / 2, a.Y - d / 2, d, d); }
+                    }
+                    foreach (var h in s.Hits.Where((x, i) => !s.Beams.ContainsKey(i)).OrderByDescending(x => x.r))
+                    {
+                        // a hitbox far smaller than the picture shows (Wolf's side B is size 0, Ivysaur's beam tip from far
+                        // away) is drawn at least 10 pixels across so it can be seen
+                        var p = S(h.p); float d = Math.Max(10f, 2 * h.r * scale);
                         using (var br = new SolidBrush(Color.FromArgb(120, h.c))) g.FillEllipse(br, p.X - d / 2, p.Y - d / 2, d, d);
                         using (var pen = new Pen(Color.FromArgb(230, h.c), 1.5f)) g.DrawEllipse(pen, p.X - d / 2, p.Y - d / 2, d, d);
                     }
@@ -289,6 +331,16 @@ namespace SkinManager.Core
         }
 
         const float Reach = 70;    // how far from the fighter the picture follows a projectile (about half a stage each way)
+        /// <summary>The animation a frame shows. P+ leaves some air versions as bone-less 1-frame placeholders and plays the
+        /// ground one in the game (Pit's side B in the air): such a placeholder gives way to its ground twin when that's real.</summary>
+        static CHR0Node RealAnim(Dictionary<string, CHR0Node> anims, string name)
+        {
+            anims.TryGetValue(name ?? "", out var a);
+            if (a != null && a.Children.Count == 0 && name.IndexOf("Air", StringComparison.Ordinal) >= 0
+                && anims.TryGetValue(name.Replace("Air", ""), out var g) && g.Children.Count > 0) return g;
+            return a;
+        }
+
         static Vector3 Scale(MDL0BoneNode b) { var s = new Vector3(1, 1, 1); for (var n = b; n != null; n = n.Parent as MDL0BoneNode) { var k = n._frameState._scale; s = new Vector3(s._x * k._x, s._y * k._y, s._z * k._z); } return s; }
         static float NZ(float v) => Math.Abs(v) < 1e-6f ? 1 : v;
         static Vector3 Yaw(Vector3 w) => new Vector3(w._z, w._y, -w._x);   // the same turn as Gather(…, 90): facing right

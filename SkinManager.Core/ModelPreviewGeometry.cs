@@ -76,13 +76,17 @@ namespace SkinManager.Core
                 foreach (var move in list)
                 {
                     var frames = new List<FramePlace>();
+                    CHR0Node held = null; float heldAt = 0;   // the pose a bone-less placeholder animation keeps (the last real one)
                     foreach (var f in move.Frames)
                     {
                         var fp = new FramePlace();
+                        var anim = RealAnim(anims, f.Animation);
+                        bool placeholder = anim != null && anim.Children.Count == 0;
+                        if (!placeholder && anim != null) { held = anim; heldAt = Math.Max(1, Math.Min(f.AnimFrame, anim.FrameCount)); }
                         if (f.Hitboxes.Count > 0 || f == move.Frames[move.Frames.Count - 1])
                         {
-                            anims.TryGetValue(f.Animation ?? "", out var anim);
-                            model.ApplyCHR(anim, anim == null ? 0 : Math.Max(1, Math.Min(f.AnimFrame, anim.FrameCount)));
+                            if (placeholder) model.ApplyCHR(held, held == null ? 0 : heldAt);   // an empty placeholder keeps the last pose
+                            else model.ApplyCHR(anim, anim == null ? 0 : Math.Max(1, Math.Min(f.AnimFrame, anim.FrameCount)));
                             var tb = BoneAt(trans >= 0 ? trans : 0);
                             if (tb != null) { var t = Yaw(tb._frameMatrix.GetPoint()); fp.RootX = t._x * size; fp.RootY = t._y * size; }
                             foreach (var h in f.Hitboxes)

@@ -15,6 +15,8 @@ namespace SkinManager.Core
         public int Angle, Bkb, Kbg, Wkb, ShieldDamage, Trip, Flags, SpecialFlags;
         public float Hitlag, Sdi;
         public bool Special, Grab, Throw;
+        // a special hitbox with its stretch flag is a capsule from its bone to its offset (Ivysaur's solar beam)
+        public bool Stretch => Special && ((SpecialFlags >> 4) & 1) != 0;
         // a hitbox on a thing the fighter holds (ZSS's whip...): its Bone is that thing's bone; it hangs off the fighter's AttachBone,
         // posed by the thing's own animation (ArticleAnim, frame ArticleFrame) on its model (ArticleModel, in the motion file)
         public string ArticleModel, ArticleAnim; public int AttachBone = -1; public float ArticleFrame;
@@ -50,6 +52,9 @@ namespace SkinManager.Core
         public bool StopAtGround;                           // the flight ends when it comes down to the floor
         public Func<float, List<(float X, float Y)>> PathForHeight;   // a flight that bounces on the floor: its path given how high above the floor it starts
         public Func<float, List<List<Hitbox>>> HitsForHeight;        // ...and its hitboxes, when they change on reaching the floor (Pikachu's jolt starts crawling)
+        // the fighter stays in the move while it flies: this animation goes round until HoldUntil (the move's frame it's
+        // done on), then HoldEnd plays (Zelda holds Din's Fire out until it blows up)
+        public string HoldLoop, HoldEnd; public int HoldUntil;
         public int Life => Path.Count;
         public int End => Start + Life - 1;
     }

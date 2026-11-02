@@ -12,9 +12,22 @@ namespace SkinManager.App
     class ProgressView : ScrollView
     {
         public StatsData Data;
+        /// <summary>A character's tile was clicked: open its page.</summary>
+        public event Action<int> Picked;
+        readonly List<(int Char, RectangleF Box)> _tiles = new List<(int, RectangleF)>();
+        int? _hover;
+
+        protected override void Clicked(Point p, System.Windows.Forms.MouseButtons b) { foreach (var t in _tiles) if (t.Box.Contains(p)) { Picked?.Invoke(t.Char); return; } }
+        protected override void Hover(Point p)
+        {
+            int? h = null; foreach (var t in _tiles) if (t.Box.Contains(p)) h = t.Char;
+            Cursor = h != null ? System.Windows.Forms.Cursors.Hand : System.Windows.Forms.Cursors.Default;
+            if (h != _hover) { _hover = h; Invalidate(); }
+        }
 
         protected override void Draw(Graphics g, int w)
         {
+            _tiles.Clear();
             var c = Data?.Career;
             if (c == null)
             {
@@ -61,13 +74,16 @@ namespace SkinManager.App
 
             // ---- each character's level
             var chars = c.CharXp.OrderByDescending(kv => kv.Value).ToList();
-            Caps(g, "Character mastery", 2, y, 300); y += 22;
+            Caps(g, "Character mastery · click one for its stats", 2, y, 400); y += 22;
             int cw = 150, ch = 64, per = Math.Max(1, (w + 10) / (cw + 10));
             cw = (w - (per - 1) * 10) / per;
             for (int i = 0; i < chars.Count; i++)
             {
                 var r = new RectangleF(i % per * (cw + 10), y + i / per * (ch + 10), cw, ch);
                 Card(g, r);
+                _tiles.Add((chars[i].Key, r));
+                if (_hover == chars[i].Key) using (var pen = new Pen(Theme.Accent, 1.5f)) using (var path = StatsArt.Round(r, 8)) g.DrawPath(pen, path);
+                Text(g, "›", Theme.Bold(14f), _hover == chars[i].Key ? Theme.Accent : Theme.Muted, new RectangleF(r.Right - 22, r.Y + 18, 16, 26));
                 Head(g, Data.Head(chars[i].Key), new RectangleF(r.X + 8, r.Y + 8, 42, 48));
                 var lv = Progress.LevelOf(chars[i].Value);
                 Text(g, Fighters.Name(chars[i].Key), Theme.Small, Theme.Text, new RectangleF(r.X + 58, r.Y + 8, r.Width - 64, 18));

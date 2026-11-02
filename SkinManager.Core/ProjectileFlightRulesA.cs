@@ -174,6 +174,8 @@ namespace SkinManager.Core
                     start: start, bone: 74, fwd: c.FF(1, 0xC), up: c.FF(1, 0x10), later: (life + 1, "Move"));
                 if (!float.IsNaN(dmg0) && !float.IsNaN(per))
                     foreach (var hs in f.Hits) for (int k = 0; k < hs.Count; k++) { var h = hs[k].Copy(); h.Damage = (float)Math.Floor(dmg0 + per * life); hs[k] = h; }
+                // Zelda holds her pose (the loop) while it flies and plays the end as it blows up
+                f.HoldLoop = "SpecialSLoop"; f.HoldEnd = "SpecialSEnd"; f.HoldUntil = start + life;
                 return f;
             });
         }

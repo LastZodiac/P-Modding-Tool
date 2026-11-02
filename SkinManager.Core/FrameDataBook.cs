@@ -354,7 +354,38 @@ namespace SkinManager.Core
                     b.Entries.Add(new MoveEntry { Group = "Down B", Name = name, Parts = new[] { pose }, Data = d,
                         Note = anim.EndsWith("Air") ? "The stone's hit while it drops: it stays out until Kirby lands." : null, NoteIsInfo = true });
                 }
+            // Sheik's needles: charging (start, then the loop that adds a needle each time round) and throwing (the end)
+            // are separate rows. Her neutral B scripts are empty (the game's code does it all); the needles leave as the
+            // throw sound plays in the end animation (its sound event, after its 3-frame timer: frame 4).
+            if (b.Character.FilePrefix == "Sheik" && Sub("SpecialNStart") >= 0 && Sub("SpecialNEnd") >= 0 && Len("SpecialNEnd") > 0)
+            {
+                b.Entries.RemoveAll(e => e.Group == "Neutral B");
+                foreach (var air in new[] { "", "Air" })
+                {
+                    string tag = air == "" ? "" : " (air)";
+                    var charge = new[] { $"Special{air}NStart", $"Special{air}NLoop" }.Where(x => Sub(x) >= 0 && Len(x) > 0).ToArray();
+                    if (charge.Length > 0)
+                    {
+                        var dc = FrameData.Run(m, charge[0], charge.Select(Sub).ToList(), Len, St(), ActOf);
+                        if (dc.Frames.Count > 0)
+                            b.Entries.Add(new MoveEntry { Group = "Neutral B", Name = "Neutral B charge" + tag, Parts = charge, Data = dc, NoteIsInfo = true,
+                                Note = "Charging: each time the loop goes round Sheik readies another needle (up to 6). Nothing hits until she throws: that's the throw row." });
+                    }
+                    string end = $"Special{air}NEnd";
+                    if (Sub(end) < 0 || Len(end) <= 0) continue;
+                    var dt = FrameData.Run(m, end, new List<int> { Sub(end) }, Len, St(), ActOf);
+                    if (dt.Frames.Count > 0)
+                        b.Entries.Add(new MoveEntry { Group = "Neutral B", Name = "Neutral B throw" + tag, Parts = new[] { end }, Data = dt,
+                            Note = "Throws the needles readied (1 to 6). They leave on frame 4, when the throw sound plays; " + (air == "" ? "on the ground they fly straight ahead." : "in the air they fly 45° down.") });
+                }
+            }
             foreach (var e in b.Entries) AddLaunched(b, e);
+            if (b.Character.FilePrefix == "Sheik")
+                foreach (var e in b.Entries.Where(x => x.Group == "Neutral B"))
+                {
+                    if (e.Name.StartsWith("Neutral B charge")) e.Data.Projectiles.Clear();   // no needle while charging
+                    else foreach (var p in e.Data.Projectiles.Where(x => x.Name == "Needle")) p.Frame = 4;
+                }
             foreach (var e in b.Entries.Where(x => x.Note == null && x.Data.Hits.Count == 0))
                 if (Harmless.FirstOrDefault(n => n.Fighter == b.Character.FilePrefix && NoteFits(n.Move, e.Parts[0].Replace("Air", ""))) is var hn && hn.Text != null) { e.Note = hn.Text; e.NoteIsInfo = true; }
             foreach (var e in b.Entries.Where(x => x.Note == null))
@@ -905,7 +936,9 @@ namespace SkinManager.Core
         }
 
         static string Signature(MoveData d) =>
-            d.Startup + "|" + d.ActiveText + "|" + d.Faf + "|" + d.IntangibleText + "|" + string.Join(";", d.Hits.Select(h => h.Summary + h.Size.ToString("0.##"))) + "|" + string.Join(";", d.Projectiles.Select(p => p.Frame + p.Data.Hits.Count.ToString()));
+            d.Startup + "|" + d.ActiveText + "|" + d.Faf + "|" + d.IntangibleText + "|" + string.Join(";", d.Hits.Select(h => h.Summary + h.Size.ToString("0.##"))) + "|" + string.Join(";", d.Projectiles.Select(p => p.Frame + p.Data.Hits.Count.ToString() + Path(p.Flight)));
+        // where a flight goes (a ground and an air version that fly differently, like Sheik's needles, stay two rows)
+        static string Path(Flight f) => f == null || f.Path.Count == 0 ? "" : $"@{f.Life}:{f.Path[f.Path.Count - 1].X:0}:{f.Path[f.Path.Count - 1].Y:0}";
 
         static void Merge(FighterBook b)
         {
@@ -915,6 +948,16 @@ namespace SkinManager.Core
                 var twin = result.FirstOrDefault(r => r.Group == e.Group && Signature(r.Data) == Signature(e.Data) && Same(r.Name, e.Name));
                 if (twin == null) { result.Add(e); continue; }
                 twin.Name = Combine(twin.Name, e.Name);
+                // the row is drawn with the ground version's animation when there is one (Snake's side B shown on the
+                // ground, not floating in its air animation)
+                bool Air(MoveEntry x) => x.Parts.Any(p => p.IndexOf("Air", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (Air(twin) && !Air(e))
+                {
+                    var (parts, data) = (twin.Parts, twin.Data);
+                    twin.Parts = e.Parts; twin.Data = e.Data;
+                    twin.Covers.AddRange(parts);
+                    continue;
+                }
                 twin.Covers.AddRange(e.Parts);
             }
             b.Entries = result;

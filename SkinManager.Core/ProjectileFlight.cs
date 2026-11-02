@@ -94,6 +94,18 @@ namespace SkinManager.Core
             if (fr.Count == 0) return;
             end = Math.Min(end, fr.Count + 600);
             var last = fr[fr.Count - 1];
+            var held = e.Data.Projectiles.Select(p => p.Flight).FirstOrDefault(f => f != null && f.HoldLoop != null && b.Lengths.TryGetValue(f.HoldLoop, out int hl) && hl > 0);
+            if (held != null)
+            {
+                int loopLen = b.Lengths[held.HoldLoop], endLen = held.HoldEnd != null && b.Lengths.TryGetValue(held.HoldEnd, out int el) ? el : 0, i = 0;
+                for (int k = last.Frame + 1; k <= held.HoldUntil; k++, i++)
+                    fr.Add(new FrameState { Frame = k, AnimFrame = i % loopLen, Animation = held.HoldLoop, Hidden = last.Hidden, MoveX = last.MoveX, MoveY = last.MoveY });
+                int from = fr[fr.Count - 1].Frame + 1;
+                for (int j = 0; j < endLen; j++)
+                    fr.Add(new FrameState { Frame = from + j, AnimFrame = j, Animation = held.HoldEnd, Hidden = last.Hidden, MoveX = last.MoveX, MoveY = last.MoveY });
+                e.Data.Total = fr.Count;
+                last = fr[fr.Count - 1];
+            }
             for (int k = fr[fr.Count - 1].Frame + 1; k <= end; k++)
                 fr.Add(new FrameState { Frame = k, AnimFrame = last.AnimFrame, Animation = last.Animation, Body = 0, Hidden = last.Hidden, After = true, MoveX = last.MoveX, MoveY = last.MoveY });
         }

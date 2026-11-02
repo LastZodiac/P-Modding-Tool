@@ -182,6 +182,7 @@ namespace SkinManager.App
         readonly MatchList _matches = new MatchList();
         readonly MatchCard _matchCard = new MatchCard();
         readonly ProgressView _progress = new ProgressView();
+        readonly CharacterProgressView _charProgress = new CharacterProgressView();
 
         static ComboBox Combo(int w) => new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = w, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text };
         sealed class Item { public string Text; public object Value; public override string ToString() => Text; }
@@ -201,15 +202,19 @@ namespace SkinManager.App
             foreach (var t in Views)
             {
                 var b = Theme.Secondary(t); b.Margin = new Padding(0, 0, 8, 0);
-                b.Click += (s, e) => { _tab = t; if (t == "Matches") b.Text = "Matches"; ShowAll(); };
+                b.Click += (s, e) => { _tab = t; if (t == "Matches") b.Text = "Matches"; if (t == "Progress") _charProgress.Character = null; ShowAll(); };
                 _tabs.Controls.Add(b);
             }
-            _overview.Data = _chart.Data = _charCard.Data = _matches.Data = _matchCard.Data = _progress.Data = _data;
+            _overview.Data = _chart.Data = _charCard.Data = _matches.Data = _matchCard.Data = _progress.Data = _charProgress.Data = _data;
+            _progress.Picked += c => { _charProgress.Character = c; _charProgress.ToTop(); ShowAll(); };
+            _charProgress.Back += () => { _charProgress.Character = null; ShowAll(); };
+            _charProgress.WatchReplay += WatchReplayFile;
+            _charProgress.OpenGame += id => { _tab = "Matches"; _matchCard.Game = id; _matchCard.ToTop(); ShowAll(); };
             _chart.Picked += c => { _charCard.Character = c; _charCard.ToTop(); _charCard.Invalidate(); };
             _matches.Picked += id => { _matchCard.Game = id; _matchCard.ToTop(); _matchCard.Invalidate(); };
             _matchCard.ShowReplay += ShowReplayFile;
             _matchCard.WatchReplay += WatchReplayFile;
-            _body.Controls.AddRange(new Control[] { _tools, _table, _sideTitle, _side, _overview, _chart, _charCard, _matches, _matchCard, _progress });
+            _body.Controls.AddRange(new Control[] { _tools, _table, _sideTitle, _side, _overview, _chart, _charCard, _matches, _matchCard, _progress, _charProgress });
             Resize += (s, e) => Arrange();
             VisibleChanged += (s, e) => { if (Visible && _h == null) Reload(); };
             Arrange();
@@ -234,7 +239,7 @@ namespace SkinManager.App
             _table.Location = new Point(0, toolsH); _table.Size = new Size(tableW, _body.Height - toolsH);
             _sideTitle.Location = new Point(tableW + 16, toolsH); _sideTitle.AutoSize = false; _sideTitle.Size = new Size(_body.Width - tableW - 16, 26);
             _side.Location = new Point(tableW + 16, toolsH + 30); _side.Size = new Size(_body.Width - tableW - 16, _body.Height - toolsH - 30);
-            _overview.Bounds = _progress.Bounds = new Rectangle(0, 0, _body.Width, _body.Height);
+            _overview.Bounds = _progress.Bounds = _charProgress.Bounds = new Rectangle(0, 0, _body.Width, _body.Height);
             int left = (int)(_body.Width * 0.52);
             _chart.Bounds = new Rectangle(0, 0, left, _body.Height);
             _charCard.Bounds = new Rectangle(left + 14, 0, _body.Width - left - 14, _body.Height);
@@ -541,13 +546,14 @@ namespace SkinManager.App
             bool table = _tab == "Matchups" || _tab == "Stages" || _tab == "Opponents" || _tab == "Win chance";
             _table.Visible = _tools.Visible = table;
             _overview.Visible = _tab == "Overview";
-            _progress.Visible = _tab == "Progress";
+            _progress.Visible = _tab == "Progress" && _charProgress.Character == null;
+            _charProgress.Visible = _tab == "Progress" && _charProgress.Character != null;
             _chart.Visible = _charCard.Visible = _tab == "Characters";
             _matches.Visible = _matchCard.Visible = _tab == "Matches";
             switch (_tab)
             {
                 case "Overview": _overview.Invalidate(); break;
-                case "Progress": _progress.Invalidate(); break;
+                case "Progress": _progress.Invalidate(); _charProgress.Invalidate(); break;
                 case "Characters":
                     if (_charCard.Character == null || !games.Any(g => g.Me.Character == _charCard.Character))
                         _charCard.Character = games.GroupBy(g => g.Me.Character).OrderByDescending(g => g.Count()).Select(g => (int?)g.Key).FirstOrDefault();

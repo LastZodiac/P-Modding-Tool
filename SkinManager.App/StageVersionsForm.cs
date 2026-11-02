@@ -23,6 +23,8 @@ namespace SkinManager.App
         /// <summary>What to do when it closes with OK (null: nothing).</summary>
         public Installer.Change Change { get; private set; }
         public string Done { get; private set; }
+        /// <summary>Closed with "Add a stage mod from a file…".</summary>
+        public bool AddStageAsked { get; private set; }
 
         sealed class Version
         {
@@ -32,6 +34,7 @@ namespace SkinManager.App
             public string Label;                          // "SV Sakura"
             public string Badge;                          // "Normal", "Hold L", "L list"
             public bool IsNormal;
+            public Dictionary<string, string> SubStages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // file -> the time of day it is (Smashville)
             public override string ToString() => Name;
         }
         /// <summary>A stage mod of yours on one of the stage's versions (all its files there, like the normal Smashville's
@@ -67,6 +70,7 @@ namespace SkinManager.App
         readonly Label _picCap = Theme.Label("How it will look", Theme.Small, Theme.Muted);
         readonly Button _use = Theme.Primary("Use this look");
         readonly Label _hint = Theme.Label("", Theme.Body, Theme.Muted);
+        readonly Label _title = Theme.Label("Stage versions: choose how each one looks", Theme.Title);
 
         readonly Dictionary<string, (string Why, StagePlan Swap, List<StagePlan> Looks, byte[] Picture)> _checked = new Dictionary<string, (string, StagePlan, List<StagePlan>, byte[])>();
         readonly Dictionary<string, Bitmap> _renders = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
@@ -76,6 +80,34 @@ namespace SkinManager.App
         Slot _slot; Version _target, _look; Mod _mod; bool _undo; int _asking;
         readonly CheckBox _move = new CheckBox { AutoSize = true, Checked = true, ForeColor = Theme.Text, BackColor = Color.Transparent, Font = Theme.Body, Visible = false };
 
+        // ----- adding a stage from a download (install mode): its stage files are the looks, put on the versions you tick
+
+        readonly SkinPackage _pkg;
+        sealed class NewLook { public string File; public string Name; public Dictionary<string, string> Gameplay; }
+        sealed class Target { public Version V; public List<string> Files; public string Title; public string Key; }
+        readonly List<NewLook> _new = new List<NewLook>();
+        NewLook _newLook;
+        readonly List<Target> _picked = new List<Target>();
+        List<StagePlan> _newPlans;
+        StageSelect _select;
+        Dictionary<string, uint> _modules;
+        List<StageFile> _allFiles;
+        /// <summary>Adding a stage: what to install (empty: nothing).</summary>
+        public List<StagePlan> Plans { get; private set; } = new List<StagePlan>();
+
+        public StageVersionsForm(Installer installer, Library lib, SkinPackage pkg) : this(installer, lib)
+        {
+            _pkg = pkg;
+            foreach (var f in pkg.StageFiles) _new.Add(new NewLook { File = f, Name = pkg.StageFiles.Count == 1 ? pkg.Name : Path.GetFileNameWithoutExtension(f) });
+            _newLook = _new.FirstOrDefault();
+            Text = "Add a stage: " + pkg.Name;
+            _title.Text = $"Where should \"{Short(pkg.Name, 50)}\" go?";
+            _hint.Text = "Pick the stage, then tick every version it should go on (the normal one, one time of day, Hold L, R or Z, an alt from its list). " +
+                         "You see how it will look before anything changes. You always play on P+'s own floors, platforms and blast zones, so it's safe online.";
+        }
+
+        static string Short(string t, int n) => t == null ? "" : t.Length > n ? t.Substring(0, n - 1) + "…" : t;
+
         public StageVersionsForm(Installer installer, Library lib)
         {
             _installer = installer; _lib = lib;
@@ -84,7 +116,7 @@ namespace SkinManager.App
             Size = new Size(1180, 820); MinimumSize = new Size(940, 640);
             StartPosition = FormStartPosition.CenterParent; AutoScaleMode = AutoScaleMode.Dpi; ShowInTaskbar = false;
 
-            var title = Theme.Label("Stage versions: choose how each one looks", Theme.Title); title.Location = new Point(24, 14);
+            var title = _title; title.Location = new Point(24, 14);
             _hint.Text = "Pick a stage. Then pick one of its versions (the normal one, or one you get by holding L, R or Z, or from its list) and the look you want it to have: " +
                          "another version's, or one of your stage mods (move it from one version to another). Only the scenery changes: you play on P+'s stage either way, so it's safe online.";
             _hint.Location = new Point(26, 50); _hint.AutoSize = false; _hint.Size = new Size(1100, 40);
@@ -103,7 +135,11 @@ namespace SkinManager.App
             var close = Theme.Secondary("Close");
             close.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
             foot.Controls.Add(close);
-            foot.Resize += (s, e) => close.Location = new Point(foot.Width - close.Width - 24, (foot.Height - close.Height) / 2);
+            // a stage mod from a download or file: opens this same window for it, to tick the versions it goes on
+            var addStage = Theme.Secondary("Add a stage mod from a file…");
+            addStage.Click += (s, e) => { AddStageAsked = true; DialogResult = DialogResult.Cancel; Close(); };
+            foot.Controls.Add(addStage);
+            foot.Resize += (s, e) => { close.Location = new Point(foot.Width - close.Width - 24, (foot.Height - close.Height) / 2); addStage.Location = new Point(24, close.Top); addStage.Visible = _pkg == null; };
             Controls.AddRange(new Control[] { title, _hint, _search, _stageTiles, _stagePage, foot });
             Resize += (s, e) => Lay();
             Lay();
@@ -136,9 +172,12 @@ namespace SkinManager.App
             y = (_looks.Controls.Count > 0 ? _looks.Bottom : y) + 10;
             _pic.Size = new Size(352, 198);
             _pic.Location = new Point(pw - _pic.Width, y + 18); _picCap.Location = new Point(_pic.Left, y);
-            _status.SetBounds(0, y, Math.Max(200, _pic.Left - 20), 110);
-            _move.Location = new Point(0, y + 120);
-            _use.Location = new Point(0, y + 152);
+            int sw = Math.Max(200, _pic.Left - 20);
+            int sh = Math.Max(110, TextRenderer.MeasureText(_status.Text ?? "", _status.Font, new Size(sw, 2000), TextFormatFlags.WordBreak).Height + 10);
+            _status.SetBounds(0, y, sw, sh);
+            int below = Math.Max(y + sh, _pic.Visible ? _pic.Bottom - 70 : 0);
+            _move.Location = new Point(0, below + 10);
+            _use.Location = new Point(0, below + 42);
         }
 
         static string Key(Slot s, Version target, Version look) => s.Id + "|" + target.Spot.Entry + "|" + look.Spot.Entry;
@@ -188,6 +227,8 @@ namespace SkinManager.App
                     {
                         _info = Songs.StageInfo(card);
                         var select = _installer.OriginalSelect(card);
+                        _select = select;
+                        if (_pkg != null) { _modules = Stages.ModuleIds(card); _allFiles = Stages.All(card); }
                         var all = select.All.Where(x => x.Page > 0).ToList();
                         var result = new List<Slot>();
                         foreach (var g in all.GroupBy(x => x.Slot).OrderBy(g => g.First().Page).ThenBy(g => g.First().Row).ThenBy(g => g.First().Column))
@@ -195,6 +236,7 @@ namespace SkinManager.App
                             var versions = g.GroupBy(x => x.Entry).OrderBy(e => e.Key).Select(e => new Version
                             {
                                 Spot = e.First(), Files = e.Select(x => x.File).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(),
+                                SubStages = e.Where(x => x.SubStage != null).GroupBy(x => x.File, StringComparer.OrdinalIgnoreCase).ToDictionary(x => x.Key, x => x.First().SubStage, StringComparer.OrdinalIgnoreCase),
                             }).ToList();
                             var normal = versions.FirstOrDefault(v => v.Spot.Button == 0);
                             if (normal == null) continue;
@@ -211,7 +253,7 @@ namespace SkinManager.App
                                         : v.Spot.Button >= 0x8000 && v.Spot.Button < 0xC000 ? "L list" : v.Spot.Button >= 0x4000 && v.Spot.Button < 0x8000 ? "R list" : "Buttons";
                                 slot.Others.Add(v);
                             }
-                            if (slot.Others.Count > 0) result.Add(slot);
+                            if (slot.Others.Count > 0 || _pkg != null) result.Add(slot);   // adding a stage: every stage
                         }
                         var thumbs = StagePictures.Read(card, result.SelectMany(s => s.All.Select(v => (s.Picture, v.Spot.Region ?? "main")).Concat(new[] { (s.Picture, "main") })).Distinct());
                         return (result, thumbs);
@@ -222,6 +264,13 @@ namespace SkinManager.App
             if (IsDisposed) return;
             if (_slots.Count == 0) _hint.Text = "No stage on your SD card has other versions.";
             ShowStages();
+            if (_pkg != null && _allFiles != null)
+            {
+                // the stage the download is named for (its title or file name), opened straight away
+                var named = _new.SelectMany(n => Stages.NamedFor(n.File, _pkg.Name, _allFiles)).ToList();
+                var slot = named.Select(b => _slots.FirstOrDefault(sl => sl.All.Any(v => v.Files.Any(f => string.Equals(Stages.Describe(f).Base, b, StringComparison.OrdinalIgnoreCase))))).FirstOrDefault(x => x != null);
+                if (slot != null) OpenStage(slot);
+            }
         }
 
         Bitmap Thumb(Slot s, Version v)
@@ -286,6 +335,7 @@ namespace SkinManager.App
             _slot = s; _target = null; _look = null; _undo = false;
             _stageTiles.Visible = _search.Visible = false; _stagePage.Visible = true;
             _stageName.Text = s.Name;
+            if (_pkg != null) { OpenForInstall(s); return; }
             FillTargets();
             _looks.Controls.Clear(); _step2.Visible = false;
             _status.Text = "Pick the version you want to change. (In matchmaking, the game can give you any of them.)"; _status.ForeColor = Theme.Muted;
@@ -293,6 +343,183 @@ namespace SkinManager.App
             _stagePage.AutoScrollPosition = Point.Empty;
             LayPage();
             RenderVersions(s);
+        }
+
+        // ----- install mode: tick versions, see the result, install
+
+        void OpenForInstall(Slot s)
+        {
+            _picked.Clear(); _newPlans = null;
+            _step1.Text = $"1. Which versions of {s.Name} should it go on? Tick as many as you like.";
+            foreach (Control c in _targets.Controls.Cast<Control>().ToList()) c.Dispose();
+            _targets.Controls.Clear();
+            var mods = Mods(s);
+            foreach (var v in s.All)
+            {
+                var targets = new List<Target> { new Target { V = v, Files = v.Files, Title = v.IsNormal ? "Normal " + s.Name + (v.Files.Count > 1 ? $" (all {v.Files.Count})" : "") : v.Label, Key = v.Spot.Entry + "|all" } };
+                // a normal version that's several files (Smashville's times of day): each one on its own too
+                if (v.IsNormal && v.Files.Count > 1)
+                    foreach (var f in v.Files)
+                        targets.Add(new Target { V = v, Files = new List<string> { f }, Title = "Normal: " + (Stages.Describe(f).Version is string tv && tv != "" ? tv : v.SubStages.TryGetValue(f, out var sub) ? sub : Path.GetFileNameWithoutExtension(f)), Key = v.Spot.Entry + "|" + f });
+                foreach (var t in targets)
+                {
+                    var on = mods.Where(m => m.Enabled && m.Entries.Any(e => t.Files.Contains(e.CardPath, StringComparer.OrdinalIgnoreCase))).Select(m => m.Name).Distinct().ToList();
+                    string sub = (on.Count > 0 ? "Now: " + string.Join(", ", on) : v.IsNormal ? (v.Files.Count == 1 ? "just pick it" : t.Files.Count > 1 ? "just pick it (the game picks one)" : "when the game picks this one") : HowTo(v));
+                    var tile = VersionTile(s, v, sub);
+                    tile.Title = t.Title; tile.Value = t;
+                    if (t.Files.Count == 1 && v.Files.Count > 1) tile.Badge = "One of them";
+                    var target = t;
+                    tile.Click += (o, e) => ToggleTarget(target, tile);
+                    _targets.Controls.Add(tile);
+                }
+            }
+            foreach (Control c in _looks.Controls.Cast<Control>().ToList()) c.Dispose();
+            _looks.Controls.Clear();
+            _step2.Visible = _new.Count > 1;
+            _step2.Text = "2. Which of the download's stage files?";
+            if (_new.Count > 1)
+                foreach (var n in _new)
+                {
+                    var tile = new PictureTile(214, 146) { Value = n, Title = n.Name, Badge = "New", Subtitle = Path.GetFileName(n.File), Selected = n == _newLook, Glyph = "★" };
+                    var look = n;
+                    tile.Click += (o, e) => { _newLook = look; foreach (var t in _looks.Controls.OfType<PictureTile>()) t.Selected = t.Value == look; Recheck(); };
+                    _looks.Controls.Add(tile);
+                }
+            _status.Text = "Tick the versions it should go on."; _status.ForeColor = Theme.Muted;
+            _use.Visible = true; _use.Enabled = false; _use.Text = "Install"; _move.Visible = false; _pic.Visible = _picCap.Visible = false;
+            _stagePage.AutoScrollPosition = Point.Empty;
+            LayPage();
+            RenderVersions(s);
+            DrawNewLooks();
+        }
+
+        bool _drawingNew;
+        async void DrawNewLooks()
+        {
+            if (_drawingNew) return; _drawingNew = true;
+            try
+            {
+                foreach (var n in _new)
+                {
+                    string key = "new:" + n.File;
+                    if (!_renders.ContainsKey(key))
+                    {
+                        Bitmap b = null;
+                        try { var f = n.File; b = await Task.Run(() => ModelPreview.RenderStage(File.ReadAllBytes(f), 320, 180)); } catch (Exception e) { Program.Trace("new look picture: " + e.Message); }
+                        if (IsDisposed) return;
+                        _renders[key] = b;
+                    }
+                    foreach (var t in _looks.Controls.OfType<PictureTile>()) if (t.Value == n && _renders[key] != null) t.Picture = _renders[key];
+                }
+            }
+            finally { _drawingNew = false; }
+        }
+
+        void ToggleTarget(Target t, PictureTile tile)
+        {
+            var have = _picked.FirstOrDefault(x => x.Key == t.Key);
+            if (have != null) _picked.Remove(have); else _picked.Add(t);
+            // "all of them" and one of them: whichever was ticked last stays
+            if (have == null)
+            {
+                bool all = t.Files.Count > 1;
+                _picked.RemoveAll(x => x != t && x.V == t.V && (all ? x.Files.Count == 1 : x.Files.Count > 1));
+            }
+            foreach (var x in _targets.Controls.OfType<PictureTile>()) x.Selected = x.Value is Target xt && _picked.Any(p => p.Key == xt.Key);
+            Recheck();
+        }
+
+        int _rechecks;
+        async void Recheck()
+        {
+            int me = ++_rechecks;
+            _newPlans = null; _use.Enabled = false; _pic.Visible = _picCap.Visible = false;
+            var look = _newLook; var picked = _picked.ToList(); var s = _slot;
+            if (look == null || picked.Count == 0) { _status.Text = "Tick the versions it should go on."; _status.ForeColor = Theme.Muted; LayPage(); return; }
+            _status.Text = $"Checking it on {picked.Count} version{(picked.Count == 1 ? "" : "s")}…"; _status.ForeColor = Theme.Muted;
+            await Task.Delay(350);   // ticking several in a row: checked once at the end
+            if (IsDisposed || me != _rechecks) return;
+            var lines = new List<string>(); var plans = new List<StagePlan>(); bool bad = false;
+            try
+            {
+                await Task.Run(() =>
+                {
+                    if (look.Gameplay == null) look.Gameplay = StageCheck.Gameplay(File.ReadAllBytes(look.File));
+                    using (var card = _installer.OpenCard())
+                        foreach (var t in picked)
+                        {
+                            if (me != _rechecks) return;
+                            string group = t.Files.Count > 1 ? Guid.NewGuid().ToString("N") : null;
+                            var verdicts = new List<string>(); bool first = true; string problem = null;
+                            foreach (var f in t.Files)
+                            {
+                                var (plan, how) = PlanFor(card, look, f);
+                                if (!plan.CanInstall) { problem = string.Join(" ", plan.Checks.Where(c => !c.Passed).Select(c => c.Detail ?? c.Title)); break; }
+                                plan.Name = look.Name; plan.Group = group;
+                                if (first) plan.SelectPictures = PicturesFor(Stages.Describe(f)); first = false;
+                                plans.Add(plan); verdicts.Add(how);
+                            }
+                            if (problem != null) { bad = true; lines.Add($"✗  {t.Title}: can't go on it: {problem}"); continue; }
+                            lines.Add($"✓  {t.Title}: " + string.Join("; ", verdicts.Distinct()));
+                        }
+                });
+            }
+            catch (Exception e) { lines.Add("✗  Couldn't check it: " + Friendly.Explain(e)); bad = true; plans.Clear(); }
+            if (IsDisposed || me != _rechecks) return;
+            _newPlans = plans;
+            _status.Text = string.Join("\r\n", lines) + (plans.Count > 0 ? "\r\nYou play on P+'s own floors, platforms and blast zones on each one, so it's safe online." : "");
+            _status.ForeColor = bad ? (plans.Count > 0 ? Theme.Warn : Theme.Bad) : lines.Any(l => l.Contains("doesn't line up") || l.Contains("check it once offline")) ? Theme.Warn : Theme.Good;
+            int on = picked.Count - lines.Count(l => l.StartsWith("✗"));
+            _use.Text = on <= 1 ? "Install" : $"Install on {on} versions";
+            _use.Enabled = plans.Count > 0;
+            LayPage();
+            _stagePage.ScrollControlIntoView(_use);
+            if (plans.Count > 0)
+            {
+                Bitmap shot = null;
+                try { var bytes = plans[0].Bytes; shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
+                if (IsDisposed || me != _rechecks) return;
+                var old = _pic.Image; _pic.Image = shot; old?.Dispose();
+                _pic.Visible = _picCap.Visible = shot != null;
+            }
+        }
+
+        /// <summary>The download's stage file on one of P+'s stage files: the whole file when it plays exactly like it (and
+        /// was made for its stage program), else made to play like it (P+'s gameplay copied in), else its looks on P+'s file.</summary>
+        (StagePlan Plan, string How) PlanFor(Fat32Image card, NewLook look, string target)
+        {
+            var t = Stages.Describe(target);
+            bool same = Stages.SameProgram(Stages.MadeFor(look.File, _info, _modules), target, _info);
+            if (same)
+            {
+                var whole = _installer.PlanStage(card, _pkg, look.File, t, look.Gameplay);
+                if (whole.CanInstall) return (whole, "made for it, it goes in as it is");
+                var fixd = _installer.PlanFixedStage(card, _pkg, look.File, t);
+                if (fixd.CanInstall) return (fixd, Lines(fixd) + "P+'s floors and blast zones copied into it");
+            }
+            var looks = _installer.PlanLooks(card, _pkg, look.File, t);
+            return (looks, Lines(looks) + "its scenery on P+'s stage" + (same ? "" : " (made for another stage: check it once offline)"));
+        }
+
+        static string Lines(StagePlan p)
+        {
+            var fit = p.Fit;
+            if (fit == null || fit.Floors >= 1e6f || float.IsNaN(fit.Floors)) return "";
+            return fit.Floors < 1f ? "lines up, " : fit.Floors < 6f ? "nearly lines up, " : "doesn't line up well (you may stand off its ground), ";
+        }
+
+        Dictionary<string, byte[]> PicturesFor(StageFile target)
+        {
+            var result = new Dictionary<string, byte[]>();
+            var spot = _select?.SpotsOf(target.CardPath).FirstOrDefault(x => x.Region != null && x.Picture >= 0);
+            foreach (var kv in StageSelect.FindPictures(_pkg.Folder, target, spot))
+                try
+                {
+                    using (var img = Image.FromFile(kv.Value)) using (var b = new Bitmap(img)) using (var ms = new MemoryStream())
+                    { b.Save(ms, System.Drawing.Imaging.ImageFormat.Png); result[kv.Key] = ms.ToArray(); }
+                }
+                catch (Exception e) { Program.Trace("picture " + kv.Value + ": " + e.Message); }
+            return result;
         }
 
         PictureTile VersionTile(Slot s, Version v, string sub)
@@ -493,11 +720,11 @@ namespace SkinManager.App
         /// <summary>Draws each version (its first file) in the background, for its tile.</summary>
         async void RenderVersions(Slot s)
         {
-            foreach (var v in s.All)
+            // each version's first file; adding a stage, every file of the normal one too (its times of day)
+            foreach (var (v, f) in s.All.Select(v => (v, v.Files[0])).Concat(_pkg != null ? s.Normal.Files.Skip(1).Select(x => (s.Normal, x)) : Enumerable.Empty<(Version, string)>()).ToList())
             {
                 if (_slot != s || IsDisposed) return;
-                string f = v.Files[0];
-                if (_renders.ContainsKey(f)) continue;
+                if (_renders.ContainsKey(f)) { ShowRender(f); continue; }
                 Bitmap b = null;
                 try
                 {
@@ -516,6 +743,7 @@ namespace SkinManager.App
                 if (b != null)
                     foreach (var tile in _targets.Controls.OfType<PictureTile>().Concat(_looks.Controls.OfType<PictureTile>()))
                         if (tile.Value is Version tv && string.Equals(tv.Files[0], f, StringComparison.OrdinalIgnoreCase) && !(ModOn(s, tv) != null && _targets.Controls.Contains(tile))) tile.Picture = b;
+                ShowRender(f);
             }
             // your mods on it, drawn from their own files
             foreach (var m in Mods(s))
@@ -532,6 +760,14 @@ namespace SkinManager.App
                 foreach (var tile in _looks.Controls.OfType<PictureTile>()) if (tile.Value == (object)m || (tile.Value is Mod tm && tm.First.Id == m.First.Id)) tile.Picture = b;
                 foreach (var tile in _targets.Controls.OfType<PictureTile>()) if (tile.Value is Version tv && ModOn(s, tv)?.First.Id == m.First.Id) tile.Picture = b;
             }
+        }
+
+        /// <summary>Adding a stage: a drawing of a P+ file on the tiles for it.</summary>
+        void ShowRender(string f)
+        {
+            if (!_renders.TryGetValue(f, out var b) || b == null) return;
+            foreach (var tile in _targets.Controls.OfType<PictureTile>())
+                if (tile.Value is Target t && string.Equals(t.Files[0], f, StringComparison.OrdinalIgnoreCase)) tile.Picture = b;
         }
 
         /// <summary>Works out what giving a version another's look would do: a real swap (the normal one, when they play
@@ -572,6 +808,13 @@ namespace SkinManager.App
 
         void Use()
         {
+            if (_pkg != null)
+            {
+                if (_newPlans == null || _newPlans.Count == 0) return;
+                Plans = _newPlans;
+                DialogResult = DialogResult.OK; Close();
+                return;
+            }
             var s = _slot; var t = _target; var v = _look;
             if (s == null || t == null) return;
             var change = new Installer.Change();
