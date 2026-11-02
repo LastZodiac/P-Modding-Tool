@@ -63,6 +63,8 @@ namespace SkinManager.Core
         public LastSave Undo { get; set; }
         /// <summary>Edits the card file itself, with no safety copy: only for a throwaway copy (making the clean card).</summary>
         public bool WorkInPlace { get; set; }
+        /// <summary>Saves write only what changes on the card, after a journal of what was there (no copy of the whole card).</summary>
+        public bool FastSave { get; set; }
         /// <summary>Which card is in place (normal or big), for the undo point.</summary>
         public string CardName { get; set; } = Cards.Normal;
         /// <summary>Set after a save when no undo point could be kept.</summary>
@@ -76,6 +78,17 @@ namespace SkinManager.Core
         }
 
         public Fat32Image OpenCard() => new Fat32Image(_install.CardPath, false);
+
+        /// <summary>The mods list this installer works with.</summary>
+        public Library Lib => _lib;
+
+        /// <summary>The costume file in this slot on the card right now (yours, if a skin is there), or P+'s from the disc
+        /// when the card has none.</summary>
+        public byte[] CostumeNow(Fat32Image card, Character c, CostumeSlot slot)
+        {
+            string path = slot.CostumePath(c);
+            return card.Exists(path) ? card.ReadFile(path) : OriginalCostume(card, c, slot, out _);
+        }
 
         // ---------- planning ----------
 
@@ -396,6 +409,10 @@ namespace SkinManager.Core
             return list;
         }
 
+        /// <summary>What a stage mod looks like, to put on another version of its stage: the map it came as (a looks
+        /// install) or the file saved for it, and its stage select pictures.</summary>
+        public (byte[] Map, Dictionary<string, byte[]> Pictures) ModLooks(InstalledStage s) => (LooksSource(s) ?? StageCopy(s), SelectPicturesOf(s));
+
         byte[] LooksSource(InstalledStage s)
         {
             string f = Path.Combine(_lib.StageFolder(s.Id), "looks-map.pac");
@@ -410,19 +427,30 @@ namespace SkinManager.Core
             if (s.IsSwap) return SwapForNow(card, s, out why);
             var bytes = StageCopy(s);
             if (s.Kind != null) return bytes;   // songs: no gameplay
-            // too big for the game's stage memory (the game crashes loading it): looks put on P+'s stage by an older version
-            // kept all of P+'s pictures; those nothing shows any more are made tiny, which is usually plenty
-            if (bytes != null && StageCheck.MemorySize(bytes) > StageCheck.StageHeap)
+            // too big for the stage memory its stage program leaves (the game freezes loading it): looks put on P+'s stage by
+            // an older version kept all of P+'s pictures (those nothing shows any more are made tiny, which is usually plenty);
+            // else the biggest pictures are made smaller (StageCheck.FitMemory)
+            long room = StageCheck.RoomFor(_stageIndex.ProgramOf(card, s.CardPath));
+            if (bytes != null && StageCheck.MemorySize(bytes) > room)
             {
                 var slim = s.LooksOnly ? StageCheck.Slim(bytes, out _) : null;
-                if (slim == null || StageCheck.MemorySize(slim) > StageCheck.StageHeap)
+                bool hiddenOnly = slim != null && StageCheck.MemorySize(slim) <= room;
+                if (!hiddenOnly)
                 {
-                    why = $"{s.Name} is too big for the game's stage memory on {s.Target.Label} (the game would crash loading it)";
+                    RefreshOriginal(card, s.CardPath);
+                    try { slim = StageCheck.FitMemory(slim ?? bytes, _lib.OriginalFile(s.CardPath), room).Bytes; } catch { slim = null; }
+                }
+                if (slim == null || StageCheck.MemorySize(slim) > room)
+                {
+                    why = $"{s.Name} is too big for the stage memory {s.Target.Label} leaves it (the game would freeze loading it)";
                     return null;
                 }
                 File.WriteAllBytes(Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath)), slim);
                 s.Sha256 = Library.Sha256(slim);
-                if (!Notes.Any(n => n.StartsWith(s.Name + " was too big"))) Notes.Add($"{s.Name} was too big for the game's stage memory (it would crash the game), so P+'s pictures it hides were made smaller. It looks the same.");
+                if (!Notes.Any(n => n.StartsWith(s.Name + " was too big")))
+                    Notes.Add(hiddenOnly
+                        ? $"{s.Name} was too big for the game's stage memory (it would crash the game), so P+'s pictures it hides were made smaller. It looks the same."
+                        : $"{s.Name} was too big for the stage memory {s.Target.Label} leaves it (it would freeze the game), so its biggest pictures were made smaller.");
                 bytes = slim;
             }
             RefreshOriginal(card, s.CardPath);
@@ -436,7 +464,9 @@ namespace SkinManager.Core
                 // its looks on P+'s stage: made again on P+'s current file
                 var src = LooksSource(s);
                 var redone = src == null ? new StageCheck.LooksResult() : StageCheck.SwapLooks(src, original, program);
-                if (redone.Bytes != null && StageCheck.MemorySize(redone.Bytes) <= StageCheck.StageHeap && StageCheck.Compare(StageCheck.Gameplay(redone.Bytes), theirs, "", program).Passed)
+                if (redone.Bytes != null && StageCheck.MemorySize(redone.Bytes) > room)
+                    try { redone.Bytes = StageCheck.FitMemory(redone.Bytes, original, room).Bytes; } catch { redone.Bytes = null; }
+                if (redone.Bytes != null && StageCheck.MemorySize(redone.Bytes) <= room && StageCheck.Compare(StageCheck.Gameplay(redone.Bytes), theirs, "", program).Passed)
                 {
                     File.WriteAllBytes(Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath)), redone.Bytes);
                     s.Sha256 = Library.Sha256(redone.Bytes);
@@ -462,10 +492,13 @@ namespace SkinManager.Core
             if (_install.IsRunning(out string what))
                 throw new InvalidOperationException($"Close {what} first. It uses the SD card, so the card can't be changed while it is open.");
 
-            string cardPath = _install.CardPath, newPath = WorkInPlace ? cardPath : cardPath + ".skinmanager-new", backupPath = cardPath + ".skinmanager-backup";
+            bool fast = FastSave && !WorkInPlace;
+            string cardPath = _install.CardPath, newPath = WorkInPlace || fast ? cardPath : cardPath + ".skinmanager-new", backupPath = cardPath + ".skinmanager-backup";
+            string journal = fast ? (Undo?.NewJournal ?? Path.Combine(Path.GetTempPath(), "pplus-card-before.journal")) : null;
+            bool written = false;   // fast: the card has started to change (the journal can put it back)
             var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(cardPath)));
             long cardSize = new FileInfo(cardPath).Length;
-            if (!WorkInPlace && drive.AvailableFreeSpace < cardSize + 64L * 1024 * 1024)
+            if (!WorkInPlace && !fast && drive.AvailableFreeSpace < cardSize + 64L * 1024 * 1024)
                 throw new IOException($"Drive {drive.Name} needs {cardSize / (1024 * 1024) + 64} MB free to make a safe copy of the SD card.");
 
             LastSave.RemoveOldBackup(cardPath);   // older versions kept a 2 GB copy here, on the card's drive
@@ -480,8 +513,8 @@ namespace SkinManager.Core
             var newSkinFolders = new List<KeyValuePair<string, SkinPlan>>();
             try
             {
-                if (!WorkInPlace) CopyWithProgress(cardPath, newPath, p => progress?.Invoke("Making a safe copy of the SD card", p));
-                using (var card = new Fat32Image(newPath, true))
+                if (!WorkInPlace && !fast) CopyWithProgress(cardPath, newPath, p => progress?.Invoke("Making a safe copy of the SD card", p));
+                using (var card = fast ? new Fat32Image(cardPath, true, deferred: true) : new Fat32Image(newPath, true))
                 {
                     int step = 0, steps = change.Remove.Count + change.Install.Count + change.Reapply.Count + change.Refit.Count + change.Enable.Count + change.Disable.Count;
                     foreach (var asked in change.Disable)
@@ -562,6 +595,13 @@ namespace SkinManager.Core
                     ApplyStages(card, change, stages, newStageCopies, expected, progress);
                     if (card.FreeBytes < PPlusCard.MinFreeBytes)
                         throw new IOException($"The SD card would have only {card.FreeBytes / (1024 * 1024)} MB free. P+ needs about {PPlusCard.MinFreeBytes / (1024 * 1024)} MB to save replays and settings.");
+                    if (fast)
+                    {
+                        // everything so far was kept in memory: now the journal, then only the changed parts of the card
+                        progress?.Invoke("Writing to the SD card", 90);
+                        written = true;
+                        card.Commit(journal, p => progress?.Invoke("Writing to the SD card", 90 + p * 5 / 100));
+                    }
                 }
 
                 progress?.Invoke("Checking the new SD card", 95);
@@ -576,12 +616,19 @@ namespace SkinManager.Core
                 }
 
                 progress?.Invoke("Swapping in the new SD card", 98);
-                if (!WorkInPlace) File.Replace(newPath, cardPath, backupPath);
+                if (!WorkInPlace && !fast) File.Replace(newPath, cardPath, backupPath);
             }
             catch
             {
-                if (!WorkInPlace) try { if (File.Exists(newPath)) File.Delete(newPath); } catch { }
+                if (fast)
+                {
+                    // the card goes back exactly as it was (if anything was written to it at all)
+                    if (written && CardJournal.State(journal, out _, out _) != 0)
+                        try { CardJournal.RollBack(journal, cardPath); } catch (Exception e) { throw new IOException("Saving failed, and the SD card couldn't be put back (" + Friendly.Explain(e) + "). Close the app and reopen it: it puts the card back when it starts.", e); }
+                }
+                else if (!WorkInPlace) try { if (File.Exists(newPath)) File.Delete(newPath); } catch { }
                 Undo?.Cancel();
+                if (Undo == null && fast) try { File.Delete(journal); } catch { }
                 throw;
             }
 
@@ -608,6 +655,7 @@ namespace SkinManager.Core
             _lib.Written.Clear(); foreach (var kv in _written) _lib.Written[kv.Key] = kv.Value;
             Exception listFailed = null;
             try { _lib.Save(); } catch (Exception e) { listFailed = e; }
+            if (fast && listFailed == null) try { CardJournal.SetState(journal, CardJournal.Done); } catch { }
             if (listFailed == null)
             {
                 foreach (var removed in goneSkins) try { Directory.Delete(_lib.SkinFolder(removed.Id), true); } catch { }
@@ -617,6 +665,11 @@ namespace SkinManager.Core
             try
             {
                 if (WorkInPlace) { }
+                else if (fast)
+                {
+                    if (Undo != null) Undo.FinishJournal(cardPath, CardName, Describe(change));
+                    else try { File.Delete(journal); } catch { }
+                }
                 else if (Undo == null || !Undo.Finish(backupPath, cardPath, CardName, Describe(change), p => progress?.Invoke("Keeping the old SD card for \"Undo last save\"", p)))
                 {
                     try { if (File.Exists(backupPath)) File.Delete(backupPath); } catch { }
@@ -807,15 +860,46 @@ namespace SkinManager.Core
                 Name = pkg.Name + (pkg.StageFiles.Count > 1 ? " (" + Path.GetFileNameWithoutExtension(stageFile) + ")" : ""),
                 Target = target, Source = pkg.Source, SourcePath = pkg.SourcePath, PackageKey = StageKey(pkg, stageFile),
             };
-            plan.Bytes = File.ReadAllBytes(stageFile);
+            plan.Bytes = FitStageMemory(card, target, File.ReadAllBytes(stageFile), plan);
             plan.Checks.Add(SkinCheck.Size(target.FileName, plan.Bytes.Length, StageCheck.MaxStageBytes));
-            plan.Checks.Add(StageCheck.MemoryCheck(target.FileName, plan.Bytes));
             var original = _stageIndex.Of(card, _lib, target.CardPath);
             plan.Checks.Add(original == null
                 ? new CheckResult { Passed = false, Title = "P+'s " + target.Label + " couldn't be read", Detail = "Without it the app can't compare the two." }
                 : StageCheck.Compare(gameplay, original, "P+'s " + target.Label, _stageIndex.ProgramNames(card, target.CardPath)));
             return plan;
         }
+
+        /// <summary>A stage file made to fit the stage memory the slot's stage program leaves it (StageCheck.FitMemory), with
+        /// the memory check added to the plan. Returns the file to use.</summary>
+        byte[] FitStageMemory(Fat32Image card, StageFile target, byte[] bytes, StagePlan plan)
+        {
+            string program = _stageIndex.ProgramOf(card, target.CardPath);
+            long room = StageCheck.RoomFor(program);
+            long n = StageCheck.MemorySize(bytes);
+            if (n > room)
+            {
+                byte[] original = null;
+                try { original = _lib.HasOriginalFile(target.CardPath) ? _lib.OriginalFile(target.CardPath) : card.ReadFile(target.CardPath); } catch { }
+                StageCheck.MemoryFit fit = null;
+                try { fit = StageCheck.FitMemory(bytes, original, room); } catch { }
+                if (fit?.Bytes != null)
+                {
+                    plan.Checks.Add(new CheckResult
+                    {
+                        Passed = true, Title = "Made to fit this stage's memory",
+                        Detail = $"It unpacked to {n / 1024} KB, more than this stage leaves it ({room / 1024} KB), so the app " +
+                                 Words(fit.Changes.Take(6).Concat(fit.Changes.Count > 6 ? new[] { $"made {fit.Changes.Count - 6} more pictures smaller" } : new string[0]).ToList()) +
+                                 $". Now {fit.After / 1024} KB.",
+                    });
+                    bytes = fit.Bytes;
+                }
+            }
+            plan.Checks.Add(StageCheck.MemoryCheck(target.FileName, bytes, program));
+            return bytes;
+        }
+
+        static string Words(IList<string> parts) =>
+            parts.Count <= 1 ? string.Join("", parts) : string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[parts.Count - 1];
 
         /// <summary>A plan for a stage that doesn't match: the app copies the gameplay parts of P+'s stage
         /// (floors, blast zones, spawns, camera, moving parts) into the reskin, keeps its looks, and checks the result.</summary>
@@ -843,9 +927,9 @@ namespace SkinManager.Core
                 plan.Checks.Add(new CheckResult { Passed = false, Title = "Couldn't make it play like P+'s " + target.Label, Detail = problem });
                 return plan;
             }
+            made = FitStageMemory(card, target, made, plan);
             plan.Bytes = made;
             plan.Checks.Add(SkinCheck.Size(target.FileName, made.Length, StageCheck.MaxStageBytes));
-            plan.Checks.Add(StageCheck.MemoryCheck(target.FileName, made));
             Dictionary<string, string> after;
             after = StageCheck.Gameplay(made);
             var original = _stageIndex.Of(card, _lib, target.CardPath);
@@ -880,11 +964,10 @@ namespace SkinManager.Core
                 plan.Checks.Add(new CheckResult { Passed = false, Title = "Couldn't put its looks on P+'s " + target.Label, Detail = looks.Problem });
                 return plan;
             }
-            plan.Bytes = looks.Bytes;
+            plan.Bytes = FitStageMemory(card, target, looks.Bytes, plan);
             plan.Fit = StageCheck.HowFarOff(map, originalBytes);
-            plan.Checks.Add(SkinCheck.Size(target.FileName, looks.Bytes.Length, StageCheck.MaxStageBytes));
-            plan.Checks.Add(StageCheck.MemoryCheck(target.FileName, looks.Bytes));
-            var compare = StageCheck.Compare(StageCheck.Gameplay(looks.Bytes), StageCheck.Gameplay(originalBytes), "P+'s " + target.Label, program);
+            plan.Checks.Add(SkinCheck.Size(target.FileName, plan.Bytes.Length, StageCheck.MaxStageBytes));
+            var compare = StageCheck.Compare(StageCheck.Gameplay(plan.Bytes), StageCheck.Gameplay(originalBytes), "P+'s " + target.Label, program);
             if (compare.Passed) compare.Title = "Plays exactly like P+'s " + target.Label + " (it is P+'s stage underneath)";
             plan.Checks.Add(compare);
             return plan;

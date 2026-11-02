@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 using SkinManager.Core;
 
@@ -160,9 +161,111 @@ namespace SkinManager.App
                 _look.CardFile = null; _look.Save(); Application.Restart(); Environment.Exit(0);
             };
             card5.Controls.AddRange(new Control[] { h5, now5, t5, pick, back });
+            // frame data: how sure each row is
+            var card6 = new GlassPanel { Location = new Point(28, card5.Bottom + 16), Size = new Size(720, 120), Tint = 215, TintColor = Theme.Panel };
+            // the cards stay stacked when one changes height (only on a size change: scrolling moves them all itself)
+            void Stack() { card4.Top = card3.Bottom + 16; card5.Top = card4.Bottom + 16; card6.Top = card5.Bottom + 16; }
+            card3.SizeChanged += (s, e) => Stack(); card4.SizeChanged += (s, e) => Stack(); card5.SizeChanged += (s, e) => Stack();
+            var h6 = Theme.Label("Frame data", Theme.Heading); h6.Location = new Point(20, 16);
+            var t6 = Theme.Label("For each fighter (or the whole cast): which rows are read straight from P+'s files, which needed an assumption, and what isn't drawn.", Theme.Small, Theme.Muted);
+            t6.Location = new Point(22, 44); t6.AutoSize = false; t6.Size = new Size(680, 20);
+            var sure = Theme.Secondary("How accurate is the frame data?");
+            sure.Location = new Point(20, 72);
+            sure.Click += (s, e) => (FindForm() as MainForm)?.ShowFrameDataAccuracy();
+            card6.Controls.AddRange(new Control[] { h6, t6, sure });
+            // replays: where the Stat Tracker reads them from, and other folders to read
+            var card7 = new GlassPanel { Location = new Point(28, card6.Bottom + 16), Size = new Size(720, 150), Tint = 215, TintColor = Theme.Panel };
+            card6.SizeChanged += (s, e) => card7.Top = card6.Bottom + 16;
+            card5.SizeChanged += (s, e) => card7.Top = card6.Bottom + 16;
+            var h7 = Theme.Label("Replays", Theme.Heading); h7.Location = new Point(20, 16);
+            var t7 = Theme.Label("The Stat Tracker reads your replays from these folders (only reads them, never changes them). Keep replays somewhere else too? Add that folder.", Theme.Small, Theme.Muted);
+            t7.Location = new Point(22, 44); t7.AutoSize = false; t7.Size = new Size(680, 34);
+            _replayRows.Location = new Point(20, 82); _replayRows.Width = 680;
+            var addFolder = Theme.Secondary("Add a replay folder...");
+            addFolder.Click += (s, e) => AddReplayFolder();
+            card7.Controls.AddRange(new Control[] { h7, t7, _replayRows, addFolder });
+            void PlaceReplays() { addFolder.Location = new Point(20, _replayRows.Bottom + 10); card7.Height = addFolder.Bottom + 16; }
+            _replayRows.SizeChanged += (s, e) => PlaceReplays();
+            PlaceReplays();
+            VisibleChanged += (s, e) => { if (Visible) ShowReplayFolders(); };
             AutoScroll = true;
-            Controls.AddRange(new Control[] { title, card, card2, card3, card4, card5 });
+            Controls.AddRange(new Control[] { title, card, card2, card3, card4, card5, card6, card7 });
             ShowPreview();
+        }
+
+        /// <summary>Brawl Online's history file (set by the main window; null: Brawl Online isn't set up).</summary>
+        public Func<string> DatabasePath;
+        /// <summary>Called after the replay folders change (the Stat Tracker reads them again).</summary>
+        public Action ReplayFoldersChanged;
+        readonly Panel _replayRows = new Panel { BackColor = Color.Transparent, Height = 24 };
+        int _replayAsk;
+
+        async void ShowReplayFolders()
+        {
+            int me = ++_replayAsk;
+            string db = DatabasePath?.Invoke();
+            List<(string Folder, string Why, int Replays, bool Chosen)> folders;
+            try { folders = await System.Threading.Tasks.Task.Run(() => db == null ? new List<(string, string, int, bool)>() : MatchHistory.ReplayFolders(db)); }
+            catch { folders = new List<(string, string, int, bool)>(); }
+            if (IsDisposed || me != _replayAsk) return;
+            _replayRows.SuspendLayout();
+            foreach (Control c in _replayRows.Controls.Cast<Control>().ToList()) c.Dispose();
+            _replayRows.Controls.Clear();
+            int y = 0;
+            if (folders.Count == 0)
+            {
+                var none = Theme.Label(db == null ? "Brawl Online isn't set up on this PC yet." : "No replay folders found yet.", Theme.Body, Theme.Muted);
+                none.Location = new Point(2, 0); _replayRows.Controls.Add(none); y = 24;
+            }
+            foreach (var f in folders)
+            {
+                bool here = f.Replays >= 0;
+                var path = new Label { Text = f.Folder, Font = Theme.BodyBold, ForeColor = here ? Theme.Text : Theme.Muted, AutoSize = false, AutoEllipsis = true, Location = new Point(2, y), Size = new Size(520, 20), BackColor = Color.Transparent };
+                var why = new Label { Text = (here ? (f.Replays == 1 ? "1 replay" : $"{f.Replays:N0} replays") : "not found on this PC") + "  ·  " + f.Why, Font = Theme.Small, ForeColor = here && f.Replays > 0 ? Theme.Good : Theme.Muted, AutoSize = false, Location = new Point(2, y + 20), Size = new Size(520, 18), BackColor = Color.Transparent };
+                new ToolTip().SetToolTip(path, f.Folder);
+                _replayRows.Controls.AddRange(new Control[] { path, why });
+                var folder = f.Folder;
+                if (here)
+                {
+                    var open = new LinkLabel { Text = "Open", AutoSize = true, Location = new Point(540, y + 2), LinkColor = Theme.Accent, Font = Theme.Small, BackColor = Color.Transparent };
+                    open.Click += (s, e) => { try { Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true }); } catch { } };
+                    _replayRows.Controls.Add(open);
+                }
+                if (f.Chosen)
+                {
+                    var remove = new LinkLabel { Text = "Stop reading it", AutoSize = true, Location = new Point(590, y + 2), LinkColor = Theme.Accent, Font = Theme.Small, BackColor = Color.Transparent };
+                    remove.Click += (s, e) => { _look.ReplayFolders?.RemoveAll(x => string.Equals(x, folder, StringComparison.OrdinalIgnoreCase)); ReplayFoldersSaved(); };
+                    _replayRows.Controls.Add(remove);
+                }
+                y += 46;
+            }
+            _replayRows.Height = Math.Max(24, y);
+            _replayRows.ResumeLayout();
+        }
+
+        void AddReplayFolder()
+        {
+            using (var dlg = new FolderBrowserDialog { Description = "Pick a folder with your Brawl Online replays (.brep files, loose or in month folders)", ShowNewFolderButton = false })
+            {
+                if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+                string picked = dlg.SelectedPath;
+                int n = 0;
+                try { n = Directory.GetFiles(picked, "*.brep").Length + Directory.GetDirectories(picked).Sum(d => { try { return Directory.GetFiles(d, "*.brep").Length; } catch { return 0; } }); } catch { }
+                if (n == 0 && Dialog.Show(FindForm(), "There are no replays (.brep files) in that folder or the folders in it. Read it anyway (for replays saved there later)?",
+                        "Replays", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (_look.ReplayFolders == null) _look.ReplayFolders = new List<string>();
+                if (!_look.ReplayFolders.Any(x => string.Equals(x, picked, StringComparison.OrdinalIgnoreCase))) _look.ReplayFolders.Add(picked);
+                ReplayFoldersSaved();
+            }
+        }
+
+        void ReplayFoldersSaved()
+        {
+            if (_look.ReplayFolders != null && _look.ReplayFolders.Count == 0) _look.ReplayFolders = null;
+            _look.ApplyReplayFolders(); MatchHistory.ReplayFoldersChanged();
+            _look.Save();
+            ShowReplayFolders();
+            ReplayFoldersChanged?.Invoke();
         }
 
         static readonly Color[] Swatches =

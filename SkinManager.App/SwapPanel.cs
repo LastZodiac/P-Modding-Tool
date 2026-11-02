@@ -29,8 +29,8 @@ namespace SkinManager.App
         readonly Label _theirsText = Theme.Label("P+'s costume", Theme.Small, Theme.Muted), _mineText = Theme.Label("Yours", Theme.Small, Theme.Muted);
         readonly Label _status = Theme.Label("", Theme.Small, Theme.Muted);
         readonly Button _make = Theme.Primary("Make it a costume...");
-        readonly Button _pictures = Theme.Secondary("Save P+ Model Pictures...");
-        readonly Button _export3d = Theme.Secondary("Save P+ Model as 3D...");
+        readonly Button _pictures = Theme.Secondary("Save its pictures...");
+        readonly Button _export3d = Theme.Secondary("Save it as 3D...");
         readonly Button _lineUp = Theme.Secondary("Line up the joints...");
         List<SwapJoint> _joints;
         SwapMesh _placed;
@@ -42,7 +42,7 @@ namespace SkinManager.App
         string _path;
         SwapMesh _mesh;
         byte[] _target, _motion;
-        Character _targetFor; CostumeSlot _targetSlot;
+        Character _targetFor; CostumeSlot _targetSlot; bool _targetYours;
         ModelSwap.Result _built;
         int _turn, _gen;
         readonly Timer _later = new Timer { Interval = 500 };
@@ -123,7 +123,8 @@ namespace SkinManager.App
             _character.SelectedIndex = 0;
             string testChar = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_CHARACTER");   // UI tests
             if (testChar != null) _character.SelectedItem = _character.Items.Cast<Character>().FirstOrDefault(x => x.Name == testChar);
-            VisibleChanged += (s, e) => { if (Visible && _slot.Items.Count == 0) FillSlots(); };
+            // the costumes are listed again once the app has looked for ones put on the card by hand
+            VisibleChanged += (s, e) => { if (Visible && (_slot.Items.Count == 0 || _scanSeen != HandMods.Last)) FillSlots(); };
         }
 
         void Later() { _later.Stop(); _later.Start(); }
@@ -138,8 +139,11 @@ namespace SkinManager.App
             return done.Task;
         }
 
+        HandScan _scanSeen;
         void FillSlots()
         {
+            string was = (_slot.SelectedItem as SlotItem)?.Text;
+            _scanSeen = HandMods.Last;
             _slot.Items.Clear();
             var c = _character.SelectedItem as Character;
             if (c == null) return;
@@ -148,7 +152,20 @@ namespace SkinManager.App
             try
             {
                 using (var card = installer.OpenCard())
-                    foreach (var s in PPlusCard.ReadSlots(card, c)) _slot.Items.Add(new SlotItem { Slot = s, Text = $"costume {s.Index + 1}{(s.OnCard ? "" : " (P+'s own, from the game disc)")}" });
+                    foreach (var s in PPlusCard.ReadSlots(card, c))
+                    {
+                        // a costume of yours in this slot (added with the app, or put on the card by hand) is listed too
+                        var mine = installer.Lib?.Skins.FirstOrDefault(k => k.Enabled && k.SlotListId == c.SlotListId && k.FileNumber == s.FileNumber);
+                        var hand = mine == null ? HandMods.Last?.Costume(c, s.Index) : null;
+                        if (hand != null)
+                            // put on by hand: P+'s own isn't kept anywhere, so only yours is there
+                            _slot.Items.Add(new SlotItem { Slot = s, Yours = true, Text = $"costume {s.Index + 1}: yours (put on by hand)" });
+                        else
+                        {
+                            _slot.Items.Add(new SlotItem { Slot = s, Text = $"costume {s.Index + 1}{(s.OnCard ? "" : " (P+'s own, from the game disc)")}" });
+                            if (mine != null) _slot.Items.Add(new SlotItem { Slot = s, Yours = true, Text = $"costume {s.Index + 1}: {mine.Name}" });
+                        }
+                    }
             }
             catch (Exception e)
             {
@@ -158,11 +175,35 @@ namespace SkinManager.App
             }
             // start on a costume that's on the SD card (the others are read from the Brawl disc)
             int first = _slot.Items.Cast<SlotItem>().ToList().FindIndex(i => i.Slot.OnCard);
-            if (_slot.Items.Count > 0) _slot.SelectedIndex = Math.Max(0, first);
+            int same = was == null ? -1 : _slot.Items.Cast<SlotItem>().ToList().FindIndex(i => i.Text == was);
+            if (_slot.Items.Count > 0) _slot.SelectedIndex = same >= 0 ? same : Math.Max(0, first);
             _motion = null;
         }
 
-        class SlotItem { public CostumeSlot Slot; public string Text; public override string ToString() => Text; }
+        class SlotItem { public CostumeSlot Slot; public bool Yours; public string Text; public override string ToString() => Text; }
+
+        /// <summary>The costume picked: yours as it is on the card, or P+'s own.</summary>
+        static byte[] CostumeOf(Installer installer, Fat32Image card, Character c, SlotItem item) =>
+            item.Yours ? installer.CostumeNow(card, c, item.Slot) : installer.OriginalCostume(card, c, item.Slot, out _);
+
+        /// <summary>Bones of what the fighter normally hides (items in hand, other faces), from its moveset.</summary>
+        static List<int> HiddenBones(byte[] fighter)
+        {
+            if (fighter == null) return null;
+            try
+            {
+                lock (BrawlGate.Lock)
+                using (var tmp = new TempFile(".pac", fighter))
+                using (var root = BrawlLib.SSBB.ResourceNodes.NodeFactory.FromFile(null, tmp.Path))
+                {
+                    var src = root.Children[0].WorkingUncompressed;
+                    var bytes = new byte[src.Length];
+                    System.Runtime.InteropServices.Marshal.Copy((IntPtr)src.Address, bytes, 0, src.Length);
+                    return new Moveset(bytes).DefaultHidden().ToList();
+                }
+            }
+            catch { return null; }
+        }
 
         /// <summary>The chosen P+ costume as a 3D file (GLB): its exact shape, pictures and how they wrap around it, for
         /// re-texturing tools (paint a new look on P+'s own shape, then bring it back here: it fits perfectly).</summary>
@@ -190,27 +231,13 @@ namespace SkinManager.App
                     byte[] costume, fighter = null;
                     using (var card = installer.OpenCard())
                     {
-                        costume = installer.OriginalCostume(card, c, slotItem.Slot, out _);
+                        costume = CostumeOf(installer, card, c, slotItem);
                         string fit = c.FighterFolderPath + "/Fit" + c.FilePrefix + ".pac";
                         try { if (card.Exists(fit)) fighter = card.ReadFile(fit); } catch { }
                     }
                     if (costume == null) throw new InvalidOperationException("P+'s costume for that slot couldn't be read.");
                     // what the fighter normally hides (items in hand, other faces): from its moveset
-                    IEnumerable<int> hidden = null;
-                    if (fighter != null)
-                        try
-                        {
-                            lock (BrawlGate.Lock)
-                            using (var tmp = new TempFile(".pac", fighter))
-                            using (var root = BrawlLib.SSBB.ResourceNodes.NodeFactory.FromFile(null, tmp.Path))
-                            {
-                                var src = root.Children[0].WorkingUncompressed;
-                                var bytes = new byte[src.Length];
-                                System.Runtime.InteropServices.Marshal.Copy((IntPtr)src.Address, bytes, 0, src.Length);
-                                hidden = new Moveset(bytes).DefaultHidden().ToList();
-                            }
-                        }
-                        catch { }
+                    IEnumerable<int> hidden = HiddenBones(fighter);
                     var glb = ModelExport.ToGlb(costume, out int t, hidden);
                     File.WriteAllBytes(path, glb);
                     return t;
@@ -218,7 +245,8 @@ namespace SkinManager.App
                 _status.Text = before;
                 Dialog.Show(FindForm(),
                     $"Saved: {Path.GetFileName(path)} ({tris:N0} triangles, with its pictures).\r\n\r\n" +
-                    "This is P+'s exact model, so anything you make from it keeps P+'s proportions. To give it a new look:\r\n\r\n" +
+                    (slotItem.Yours ? "This is your costume's model exactly as it is on your SD card (its own shape, rigging and pictures).\r\n\r\n" : "This is P+'s exact model, so anything you make from it keeps P+'s proportions. ") +
+                    "To give it a new look:\r\n\r\n" +
                     "1. Open this file in a 3D program (Blender, for example).\r\n" +
                     "2. Paint or change its pictures (textures) to the look you want. Keep its shape and pose.\r\n" +
                     "3. Save the result as GLB.\r\n" +
@@ -241,7 +269,7 @@ namespace SkinManager.App
         async void SavePictures()
         {
             var c = _character.SelectedItem as Character;
-            var slot = (_slot.SelectedItem as SlotItem)?.Slot;
+            var slotPicked = _slot.SelectedItem as SlotItem; var slot = slotPicked?.Slot;
             var installer = _installer();
             if (c == null || slot == null || installer == null) return;
             string folder;
@@ -261,7 +289,7 @@ namespace SkinManager.App
                 var r = await Task.Run(() =>
                 {
                     byte[] costume;
-                    using (var card = installer.OpenCard()) costume = installer.OriginalCostume(card, c, slot, out _);
+                    using (var card = installer.OpenCard()) costume = CostumeOf(installer, card, c, slotPicked);
                     if (costume == null) throw new InvalidOperationException("P+'s costume for that slot couldn't be read.");
                     return ModelPreview.RenderViews(costume, 1024);
                 });
@@ -324,9 +352,10 @@ namespace SkinManager.App
         async void Refresh2()
         {
             var c = _character.SelectedItem as Character;
-            var slot = (_slot.SelectedItem as SlotItem)?.Slot;
+            var slotItem = _slot.SelectedItem as SlotItem; var slot = slotItem?.Slot;
             if (c == null || slot == null) return;
             int gen = ++_gen;
+            _theirsText.Text = slotItem.Yours ? "Your costume" : "P+'s costume";
             var mesh = _mesh;
             var fit = new SwapFit { StandUp = _standUp.Checked, Turn = _turn, Size = _size.Value / 100f };
             int budget = Details[Math.Max(0, _detail.SelectedIndex)].Budget;
@@ -338,13 +367,13 @@ namespace SkinManager.App
             {
                 var installer = _installer();
                 if (installer == null) { _status.Text = "Brawl Online isn't set up on this PC yet."; return; }
-                if (_target == null || _targetFor != c || _targetSlot != slot)
+                if (_target == null || _targetFor != c || _targetSlot != slot || _targetYours != slotItem.Yours)
                 {
                     var r = await Task.Run(() =>
                     {
                         using (var card = installer.OpenCard())
                         {
-                            var t = installer.OriginalCostume(card, c, slot, out _);
+                            var t = CostumeOf(installer, card, c, slotItem);
                             byte[] m = null;
                             foreach (var name in new[] { $"Fit{c.FilePrefix}MotionEtc.pac", $"Fit{c.FilePrefix}Motion.pac" })
                             {
@@ -356,7 +385,7 @@ namespace SkinManager.App
                     });
                     if (gen != _gen) return;
                     if (r.t == null) { _status.Text = "P+'s costume for that slot couldn't be read."; _status.ForeColor = Theme.Bad; return; }
-                    _target = r.t; _motion = r.m; _targetFor = c; _targetSlot = slot; _joints = null;
+                    _target = r.t; _motion = r.m; _targetFor = c; _targetSlot = slot; _targetYours = slotItem.Yours; _joints = null;
                 }
                 byte[] target = _target, motion = _motion;
                 string key = _path + "|" + c.Name + "|" + slot.FileNumber;

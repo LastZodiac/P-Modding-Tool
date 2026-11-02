@@ -40,7 +40,7 @@ namespace SkinManager.App
         int Para(Graphics g, string text, Font font, int y, int w, Color color)
         {
             var rect = new Rectangle(0, y, w, 400);
-            TextRenderer.DrawText(g, text, font, rect, color, TextFormatFlags.WordBreak);
+            DrawT(g, text, font, rect, color, TextFormatFlags.WordBreak);
             return TextRenderer.MeasureText(g, text, font, new Size(w, 400), TextFormatFlags.WordBreak).Height;
         }
 
@@ -48,9 +48,9 @@ namespace SkinManager.App
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             int w = width - 14, y = 64;
-            if (_r == null) { ContentHeight = y + 60; TextRenderer.DrawText(g, _status ?? "", Theme.Body, new Rectangle(0, y, w, 60), Theme.Muted, TextFormatFlags.WordBreak); return; }
+            if (_r == null) { ContentHeight = y + 60; DrawT(g, _status ?? "", Theme.Body, new Rectangle(0, y, w, 60), Theme.Muted, TextFormatFlags.WordBreak); return; }
             var m = _r.Theirs;
-            TextRenderer.DrawText(g, "When " + m.Name + " hits your shield", Theme.Bold(13f), new Point(0, y), Theme.Text); y += 30;
+            DrawT(g, "When " + m.Name + " hits your shield", Theme.Bold(13f), new Point(0, y), Theme.Text); y += 30;
             if (_r.Problem != null) { y += Para(g, _r.Problem, Theme.Body, y, w, Theme.Muted); ContentHeight = y + 20; return; }
             string adv = (_r.Advantage >= 0 ? "+" : "") + _r.Advantage;
             string line = _r.Advantage >= 0
@@ -59,20 +59,20 @@ namespace SkinManager.App
             y += Para(g, line, Theme.Body, y, w, _r.Advantage >= 0 ? Theme.Bad : Theme.Text) + 4;
             y += Para(g, (_r.LastOfSeveral ? $"Its last hit (the one that keeps you in shield longest) lands on frame {_r.HitFrame}" : $"It hits on frame {_r.HitFrame}") +
                 $" for {_r.Damage:0.#}% (shield stun {_r.Stun} frames)" + (_r.TheirReach > 0 ? $", reaching {_r.TheirReach:0} units out." : "."), Theme.Small, y, w, Theme.Muted) + 12;
-            if (_r.Rows.Count == 0) { TextRenderer.DrawText(g, "No out-of-shield options found for this fighter.", Theme.Body, new Point(0, y), Theme.Muted); ContentHeight = y + 30; return; }
+            if (_r.Rows.Count == 0) { DrawT(g, "No out-of-shield options found for this fighter.", Theme.Body, new Point(0, y), Theme.Muted); ContentHeight = y + 30; return; }
             foreach (var row in _r.Rows)
             {
                 var rect = new Rectangle(0, y, w, 50);
                 using (var path = Theme.Rounded(rect, 8)) using (var b = new SolidBrush(Color.FromArgb(row.Works ? 36 : 22, 255, 255, 255))) g.FillPath(b, path);
                 var mark = row.Works && row.Reaches ? ("✓", Theme.Good) : row.Works ? ("~", Theme.Warn) : ("✗", Theme.Bad);
-                TextRenderer.DrawText(g, mark.Item1, Theme.Bold(15f), new Rectangle(8, y, 28, 50), mark.Item2, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
-                TextRenderer.DrawText(g, row.Name, Theme.BodyBold, new Point(42, y + 7), Theme.Text);
-                TextRenderer.DrawText(g, $"hits on frame {row.Startup}" + (row.Jump > 0 ? $" after a {row.Jump}-frame jump" : " straight out of shield") + (row.Reach > 0 ? $"  ·  reaches {row.Reach:0} units" : ""),
+                DrawT(g, mark.Item1, Theme.Bold(15f), new Rectangle(8, y, 28, 50), mark.Item2, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+                DrawT(g, row.Name, Theme.BodyBold, new Point(42, y + 7), Theme.Text);
+                DrawT(g, $"hits on frame {row.Startup}" + (row.Jump > 0 ? $" after a {row.Jump}-frame jump" : " straight out of shield") + (row.Reach > 0 ? $"  ·  reaches {row.Reach:0} units" : ""),
                     Theme.Small, new Point(42, y + 28), Theme.Muted);
                 string verdict = !row.Works ? $"{-row.Spare} frame{(-row.Spare == 1 ? "" : "s")} too slow"
                     : (row.Spare == 0 ? "just in time" : $"{row.Spare} frame{(row.Spare == 1 ? "" : "s")} to spare") + (row.Reaches ? "" : " · only if they're close");
                 var vs = TextRenderer.MeasureText(verdict, Theme.BodyBold);
-                TextRenderer.DrawText(g, verdict, Theme.BodyBold, new Point(rect.Right - vs.Width - 12, y + 15), mark.Item2);
+                DrawT(g, verdict, Theme.BodyBold, new Point(rect.Right - vs.Width - 12, y + 15), mark.Item2);
                 y += 56;
             }
             y += 6;

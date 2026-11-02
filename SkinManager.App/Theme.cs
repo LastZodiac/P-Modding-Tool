@@ -43,7 +43,8 @@ namespace SkinManager.App
             {
                 if (sizes.TryGetValue(key, out var b)) return b;
                 if (sizes.Count > 8) { foreach (var old in sizes.Values) old.Dispose(); sizes.Clear(); }   // window resized a lot: start over
-                b = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                try { b = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppPArgb); }
+                catch (ArgumentException) { foreach (var old in sizes.Values) old.Dispose(); sizes.Clear(); return null; }   // out of memory: draw nothing rather than fail the paint
                 using (var g = Graphics.FromImage(b))
                 {
                     g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
@@ -101,6 +102,17 @@ namespace SkinManager.App
         }
 
         /// <summary>Copies a picture 1:1 (no resizing, whatever the screen's scaling).</summary>
+        /// <summary>Draws a picture stretched to a box without keeping a resized copy (animations: many frames, each on
+        /// show briefly; keeping a window-sized copy of each ran the app out of memory).</summary>
+        public static void Stretch(Graphics g, Image img, Rectangle r)
+        {
+            if (img == null || r.Width <= 0 || r.Height <= 0) return;
+            var mode = g.InterpolationMode; var off = g.PixelOffsetMode;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear; g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            lock (img) g.DrawImage(img, r, 0, 0, img.Width, img.Height, GraphicsUnit.Pixel);
+            g.InterpolationMode = mode; g.PixelOffsetMode = off;
+        }
+
         public static void Blit(Graphics g, Image b, int x, int y) { if (b != null) g.DrawImage(b, new Rectangle(x, y, b.Width, b.Height), 0, 0, b.Width, b.Height, GraphicsUnit.Pixel); }
 
         static Icon _icon; static Image _logo;

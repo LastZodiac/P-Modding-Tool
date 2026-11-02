@@ -22,6 +22,24 @@ namespace SkinManager.Core
         public override string ToString() => Label;
     }
 
+    /// <summary>A place music plays: a stage (by its stage select icon) or a menu, and its songs (one track list).</summary>
+    public sealed class SongPlace
+    {
+        public const int Stage = 0, Menu = 1, Other = 2;
+        public string List;            // the track list ("Battlefield Melee": pf/sound/tracklist/Battlefield_Melee.tlst)
+        public string Title;           // what it's called here
+        public string About;           // a line about it (menus)
+        public int Kind = Stage;
+        public int Slot = -1;          // the stage select icon it's on (-1: none)
+        public string SlotName, Region, HowToPick;   // the icon's stage; its part of the preview ("main", "L"...); how to get it (null: just pick it)
+        public string File;            // a stage file that plays it (for drawing it when the stage select has no picture)
+        public int Picture = -1, Page, Order;
+        public bool OnePerFighter;     // victory themes, credits: each song belongs to a fighter, so songs can only be replaced
+        public List<SongInfo> Songs = new List<SongInfo>();
+        public string TrackListFile => List.Replace(' ', '_') + ".tlst";
+        public override string ToString() => Title;
+    }
+
     public static class Songs
     {
         public static string StrmFolder => Build.Pf + "/sound/strm";
@@ -156,6 +174,37 @@ namespace SkinManager.Core
                 }
                 return File.ReadAllBytes(outFile.Path);
             }
+        }
+
+        /// <summary>The places music plays: each track list, with the stage select icon it's for (or a menu).</summary>
+        public static List<SongPlace> Places(Fat32Image card, List<SongInfo> songs)
+        {
+            var lists = songs.SelectMany(x => x.Lists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var places = lists.ToDictionary(l => l, l => new SongPlace { List = l, Title = l, Songs = songs.Where(x => x.Lists.Any(y => string.Equals(y, l, StringComparison.OrdinalIgnoreCase))).ToList() }, StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, (string TrackList, string Module)> info;
+            StageSelect select;
+            try { info = StageInfo(card); select = StageSelect.Read(card); } catch { info = null; select = null; }
+            if (info != null && select != null)
+            {
+                // the stage select's versions in order (page, row, icon; then the normal one, L, R, Z, the lists)
+                foreach (var spot in select.All.Where(x => x.Page > 0).OrderBy(x => x.Page).ThenBy(x => x.Row).ThenBy(x => x.Column).ThenBy(x => x.Button == 0 ? 0 : x.Region != null ? 1 : 2).ThenBy(x => x.Entry))
+                {
+                    if (!info.TryGetValue(Path.GetFileNameWithoutExtension(spot.File ?? "").ToUpperInvariant(), out var i) || string.IsNullOrEmpty(i.TrackList)) continue;
+                    if (!places.TryGetValue(i.TrackList, out var p) || p.Slot >= 0) continue;
+                    p.Slot = spot.Slot; p.SlotName = spot.SlotName; p.Picture = spot.Picture; p.Region = spot.Region ?? "main";
+                    p.Page = spot.Page; p.Order = (spot.Page * 100 + (spot.Row - 1) * 7 + spot.Column) * 100 + (spot.Button == 0 ? 0 : spot.Region != null ? 1 : 2);
+                    p.HowToPick = spot.Button == 0 ? null : spot.HowToPick; p.File = spot.File;
+                }
+            }
+            foreach (var p in places.Values.Where(x => x.Slot < 0))
+            {
+                string key = p.List.ToLowerInvariant();
+                if (key == "menu") { p.Kind = SongPlace.Menu; p.Title = "Menus"; p.About = "The main menu, character select and stage select"; p.Order = 0; }
+                else if (key == "results") { p.Kind = SongPlace.Menu; p.Title = "Victory themes"; p.About = "The results screen: one song per fighter"; p.OnePerFighter = true; p.Order = 1; }
+                else if (key == "credits") { p.Kind = SongPlace.Menu; p.Title = "Credits"; p.About = "The credits after Classic mode: one song per fighter"; p.OnePerFighter = true; p.Order = 2; }
+                else { p.Kind = SongPlace.Other; p.About = "Not an icon on the stage select"; p.Order = 10; }
+            }
+            return places.Values.OrderBy(p => p.Kind).ThenBy(p => p.Order).ThenBy(p => p.Title, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         /// <summary>Is this a Wii stream file (BRSTM) the game can play?</summary>

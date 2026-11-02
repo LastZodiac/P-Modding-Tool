@@ -15,6 +15,10 @@ namespace SkinManager.Core
 
         string Staging => _folder + ".new";
         string CardCopy => Path.Combine(_folder, "sd.raw");
+        const string JournalName = "card-before.journal";
+        string Journal => Path.Combine(_folder, JournalName);
+        /// <summary>Where a save writes its journal (what it replaces on the card) before touching the card.</summary>
+        public string NewJournal => Path.Combine(Staging, JournalName);
         string InfoFile => Path.Combine(_folder, "info.txt");
         static readonly string[] Parts = { "installed.json", "Originals", "Skins", "StageMods" };
 
@@ -29,7 +33,7 @@ namespace SkinManager.Core
         {
             try
             {
-                if (!File.Exists(CardCopy) || !File.Exists(InfoFile)) return null;
+                if (!(File.Exists(CardCopy) || File.Exists(Journal)) || !File.Exists(InfoFile)) return null;
                 var l = File.ReadAllLines(InfoFile);
                 return new Info
                 {
@@ -94,6 +98,32 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Step 2 of a save that wrote only what changed on the card (with a journal of what was there): the
+        /// journal and the mods list as they were become the undo point. Nothing big to copy or move.</summary>
+        public void FinishJournal(string cardPath, string cardName, string what)
+        {
+            var f = new FileInfo(cardPath);
+            File.WriteAllLines(Path.Combine(Staging, "info.txt"), new[]
+            {
+                cardName, DateTime.Now.Ticks.ToString(), f.Length.ToString(), f.LastWriteTimeUtc.Ticks.ToString(), (what ?? "").Replace("\r", " ").Replace("\n", " "),
+            });
+            Clear(_folder);   // only one undo point is ever kept (an older one may be a whole copy of the card)
+            Directory.Move(Staging, _folder);
+        }
+
+        /// <summary>When the app starts: a save that was stopped halfway (the app closed, the PC turned off) is put back,
+        /// so the card is exactly as before that save. Returns what happened, for a message (null: nothing to do).</summary>
+        public string RecoverInterruptedSave(string cardPath)
+        {
+            int state = CardJournal.State(NewJournal, out string journalCard, out long length);
+            if (state == 0) return null;
+            if (journalCard != null && !string.Equals(Path.GetFullPath(journalCard), Path.GetFullPath(cardPath), StringComparison.OrdinalIgnoreCase)) return null;
+            if (state == CardJournal.Done) return null;   // the save finished; only its undo point wasn't set up
+            CardJournal.RollBack(NewJournal, cardPath);
+            Clear(Staging);
+            return "Your last save was stopped before it finished, so your SD card was put back the way it was before it. Your mods are as they were; save again if you want those changes.";
+        }
+
         /// <summary>A save that failed: forget the copy of the mods list.</summary>
         public void Cancel() => Clear(Staging);
 
@@ -105,6 +135,13 @@ namespace SkinManager.Core
             if (install.IsRunning(out string what))
                 throw new InvalidOperationException($"Close {what} first. It uses the SD card, so the card can't be changed while it is open.");
             string cardPath = install.CardPath, newPath = cardPath + ".skinmanager-new";
+            if (File.Exists(Journal))
+            {
+                progress?.Invoke("Putting the SD card back", 10);
+                CardJournal.RollBack(Journal, cardPath);   // only the parts the save changed go back: a few seconds
+            }
+            else
+            {
             bool sameDrive = string.Equals(Path.GetPathRoot(Path.GetFullPath(cardPath)), Path.GetPathRoot(Path.GetFullPath(CardCopy)), StringComparison.OrdinalIgnoreCase);
             if (sameDrive) File.Replace(CardCopy, cardPath, null);   // nothing to copy: it just moves back
             else
@@ -119,6 +156,7 @@ namespace SkinManager.Core
                     File.Replace(newPath, cardPath, null);
                 }
                 catch { try { if (File.Exists(newPath)) File.Delete(newPath); } catch { } throw; }
+            }
             }
             // the card is back now: a problem from here on must say so
             progress?.Invoke("Putting the mods list back", 97);

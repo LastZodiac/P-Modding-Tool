@@ -89,6 +89,11 @@ namespace SkinManager.App
 
         public void Status(string s) { _status = s; Invalidate(); }
 
+        /// <summary>The move's pictures on show (the page lets go of them only when they aren't).</summary>
+        public List<Bitmap> Pictures => _pics;
+        /// <summary>Stops showing the move's pictures (they're about to be let go of).</summary>
+        public void Forget() { _pics = null; _cam = null; Invalidate(); }
+
         public void Show(FighterBook me, MoveEntry move, List<Bitmap> pics, ModelPreview.MoveCamera cam, Body them, Character themChar)
         {
             bool newMove = _move != move || _me != me || !ReferenceEquals(_cam, cam);
@@ -202,7 +207,7 @@ namespace SkinManager.App
         {
             if (_pics == null || _pics.Count == 0 || _cam == null) { Muted(g, "Drawing the move…", _pic.X + 14, _pic.Y + 14); return; }
             int f = Math.Min(_frame, _pics.Count - 1);
-            using (var path = StatsArt.Round(_pic, 10)) { g.SetClip(path); Theme.Blit(g, Theme.Scaled(_pics[f], _pic.Width, _pic.Height), _pic.X, _pic.Y); g.ResetClip(); }
+            using (var path = StatsArt.Round(_pic, 10)) { g.SetClip(path); Theme.Stretch(g, _pics[f], _pic); g.ResetClip(); }
             using (var t = new SolidBrush(Theme.Text)) g.DrawString($"{f + 1}", Theme.Bold(16f), t, _pic.X + 10, _pic.Y + 6);
             using (var m = new SolidBrush(Color.FromArgb(190, Theme.Text))) g.DrawString("drag your fighter onto the move", Theme.Small, m, _pic.X + 12, _pic.Bottom - 22);
             if (_dot == null) return;

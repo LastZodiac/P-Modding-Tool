@@ -76,6 +76,7 @@ namespace SkinManager.App
             _strip.Picked += c => ShowFighter(c);
             _list.Picked += m => ShowMove(m);
             _view.SaveGif += SaveGif;
+            _view.LowMemory += () => { foreach (var k in _frameOrder.ToList()) if (_frames.TryGetValue(k, out var l) && !ReferenceEquals(l, _view.Pictures) && !ReferenceEquals(l, _di.Pictures)) { foreach (var b in l) b.Dispose(); _frames.Remove(k); _cams.Remove(k); _frameOrder.Remove(k); } GC.Collect(); };
             _view.HurtboxesChanged += () => { ClearFrames(); if (_move != null) ShowMove(_move); };
             Resize += (s, e) => Arrange();
             VisibleChanged += (s, e) => { if (Visible && _cast == null) Start(); };
@@ -90,8 +91,9 @@ namespace SkinManager.App
             _who.Location = new Point(28, 32); _who.AutoSize = true;
             _note.Location = new Point(30, 64); _note.Size = new Size(w, 18);
             _strip.Location = new Point(28, 86); _strip.Width = w; _strip.Height = _strip.Needed(w);
-            _tabSure.Location = new Point(28 + w - _tabSure.PreferredSize.Width, 24);
-            _tabPunish.Location = new Point(_tabSure.Left - 8 - _tabPunish.PreferredSize.Width, 24);
+            // "How accurate" lives in Settings now (ShowAccuracy); its view is still here
+            _tabSure.Visible = false;
+            _tabPunish.Location = new Point(28 + w - _tabPunish.PreferredSize.Width, 24);
             _tabCompare.Location = new Point(_tabPunish.Left - 8 - _tabCompare.PreferredSize.Width, 24);
             _tabDi.Location = new Point(_tabCompare.Left - 8 - _tabDi.PreferredSize.Width, 24);
             _tabCombos.Location = new Point(_tabDi.Left - 8 - _tabCombos.PreferredSize.Width, 24);
@@ -99,10 +101,27 @@ namespace SkinManager.App
             int top = _strip.Bottom + 10;
             int listW = Math.Max(340, (int)(w * 0.40));
             _chips.Location = new Point(28, top); _chips.Size = new Size(listW, 28);
+            FitChips(listW);
             _list.Location = new Point(28, top + 32); _list.Size = new Size(listW, Math.Max(200, h - top - 44));
             _view.Location = new Point(28 + listW + 14, top); _view.Size = new Size(w - listW - 14, Math.Max(200, h - top - 12));
             _combo.Bounds = _view.Bounds; _di.Bounds = _view.Bounds; _sure.Bounds = _view.Bounds; _punish.Bounds = _view.Bounds; _compare.Bounds = _view.Bounds;
         }
+
+        /// <summary>The move filter buttons fit the list's width: their own size when there's room, else shared evenly.</summary>
+        void FitChips(int width)
+        {
+            var chips = _chips.Controls.OfType<Button>().ToList();
+            if (chips.Count == 0) return;
+            const int gap = 5;
+            foreach (var b in chips) { b.AutoSize = true; b.Padding = new Padding(4, 1, 4, 1); }
+            int need = chips.Sum(b => b.PreferredSize.Width) + gap * (chips.Count - 1);
+            if (need <= width) return;
+            int each = (width - gap * (chips.Count - 1)) / chips.Count;
+            foreach (var b in chips) { b.AutoSize = false; b.Padding = new Padding(0); b.Size = new Size(each, 26); }
+        }
+
+        /// <summary>Opens the "how accurate" view (from Settings).</summary>
+        public void ShowAccuracy() => ShowTab(3);
 
         bool _starting;
         async void Start()
@@ -307,7 +326,31 @@ namespace SkinManager.App
             catch (Exception e) { Program.Log("combos", e); _combo.Status("Couldn't work it out: " + e.Message); }
         }
 
-        void ClearFrames() { foreach (var l in _frames.Values) foreach (var b in l) b.Dispose(); _frames.Clear(); _frameOrder.Clear(); _cams.Clear(); }
+        void ClearFrames()
+        {
+            _view.Show(_book, _move, null); _di.Forget();
+            foreach (var l in _frames.Values) foreach (var b in l) b.Dispose();
+            _frames.Clear(); _frameOrder.Clear(); _cams.Clear();
+        }
+
+        /// <summary>Drawn moves kept for going back to them: at most this many pictures in all (each is 520x400, 0.8 MB).
+        /// The app is a 32-bit program (2 GB): R.O.B.'s side B alone is 417 pictures.</summary>
+        const int KeptPictures = 450;
+
+        /// <summary>Lets go of the oldest drawn moves until the rest fit in KeptPictures (never one on show).</summary>
+        void TrimFrames()
+        {
+            bool OnShow(List<Bitmap> l) => ReferenceEquals(l, _view.Pictures) || ReferenceEquals(l, _di.Pictures);
+            int Total() => _frames.Values.Sum(l => l.Count);
+            for (int i = 0; i < _frameOrder.Count && (_frameOrder.Count > 8 || Total() > KeptPictures);)
+            {
+                var old = _frameOrder[i];
+                if (_frames.TryGetValue(old, out var l) && OnShow(l)) { i++; continue; }
+                _frameOrder.RemoveAt(i);
+                if (l != null) foreach (var b in l) b.Dispose();
+                _frames.Remove(old); _cams.Remove(old);
+            }
+        }
 
         string Key(MoveEntry m) => _book.Character.FilePrefix + "|" + m.Group + "|" + m.Name + "|" + string.Join("+", m.Parts);
 
@@ -330,10 +373,11 @@ namespace SkinManager.App
                 var pics = await Task.Run(() => ModelPreview.RenderMove(book.Costume, book.Motion, book.Moves, m.Data, 520, 400, hurt,
                     (i, n) => BeginInvoke((Action)(() => { if (_move == m) _view.Progress(i, n); })), () => cts.IsCancellationRequested, cam));
                 if (cts.IsCancellationRequested || pics.Count == 0) { foreach (var p in pics) p.Dispose(); return; }
-                if (_frames.TryGetValue(key, out var stale)) foreach (var b in stale) if (!ReferenceEquals(stale, _view.Pictures)) b.Dispose();
-                _frames[key] = pics; _cams[key] = cam; if (!_frameOrder.Contains(key)) _frameOrder.Add(key);
-                while (_frameOrder.Count > 8) { var old = _frameOrder[0]; _frameOrder.RemoveAt(0); if (_frames.TryGetValue(old, out var l) && !ReferenceEquals(l, _view.Pictures)) foreach (var b in l) b.Dispose(); _frames.Remove(old); _cams.Remove(old); }
-                if (_move == m) { _view.Show(book, m, pics); ShowDi(); }
+                if (_move == m) { _view.Show(book, m, pics); }
+                if (_frames.TryGetValue(key, out var stale) && !ReferenceEquals(stale, _view.Pictures) && !ReferenceEquals(stale, _di.Pictures)) foreach (var b in stale) b.Dispose();
+                _frames[key] = pics; _cams[key] = cam; _frameOrder.Remove(key); _frameOrder.Add(key);
+                TrimFrames();
+                if (_move == m) ShowDi();
             }
             catch (Exception e) { Program.Log("frame data draw", e); if (_move == m) _view.Failed(e.Message); }
         }
@@ -344,14 +388,14 @@ namespace SkinManager.App
             using (var d = new SaveFileDialog { Filter = "Animated picture (*.gif)|*.gif", FileName = $"{_book.Character.Name} - {_move.Name}.gif".Replace("/", "-") })
             {
                 if (d.ShowDialog(this) != DialogResult.OK) return;
-                var labelled = new List<Bitmap>();
                 try
                 {
-                    // each picture with its frame number and what's happening, like on the page
-                    var data = _move.Data;
-                    for (int i = 0; i < _view.Pictures.Count; i++)
+                    // each picture with its frame number and what's happening, like on the page (made one at a time:
+                    // a long move's pictures twice over don't fit in the app's memory)
+                    var data = _move.Data; var pics = _view.Pictures;
+                    Bitmap Labelled(int i)
                     {
-                        var b = new Bitmap(_view.Pictures[i]);
+                        var b = new Bitmap(pics[i]);
                         var f = i < data.Frames.Count ? data.Frames[i] : null;
                         using (var g = Graphics.FromImage(b))
                         using (var big = new Font("Segoe UI", 16f, FontStyle.Bold))
@@ -364,12 +408,11 @@ namespace SkinManager.App
                             var name = _book.Character.Name + " · " + _move.Name;
                             using (var br = new SolidBrush(Color.FromArgb(200, 255, 255, 255))) g.DrawString(name, small, br, b.Width - 10 - g.MeasureString(name, small).Width, 10);
                         }
-                        labelled.Add(b);
+                        return b;
                     }
-                    GifWriter.Save(d.FileName, labelled, 2); _note.Text = "Saved " + Path.GetFileName(d.FileName) + ".";
+                    GifWriter.Save(d.FileName, pics.Count, Labelled, 2); _note.Text = "Saved " + Path.GetFileName(d.FileName) + ".";
                 }
                 catch (Exception e) { _note.Text = "Couldn't save it: " + Friendly.Explain(e); }
-                finally { foreach (var b in labelled) b.Dispose(); }
             }
         }
     }
@@ -583,16 +626,31 @@ namespace SkinManager.App
         public static Color StateColor(string state) =>
             state == "ACTIVE" ? Theme.Bad : state == "GRAB" ? Color.FromArgb(170, 80, 255) : state == "CAN ACT" ? Theme.Good : Color.FromArgb(90, 150, 255);
 
+        public event Action LowMemory;
+        DateTime _lastPaintError;
+
+        // A paint that fails must not escape: Windows then crosses the box out in red for good, whatever is shown next.
         protected override void OnPaint(PaintEventArgs e)
         {
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            try { PaintMove(e.Graphics); }
+            catch (Exception ex)
+            {
+                if (DateTime.UtcNow - _lastPaintError > TimeSpan.FromMinutes(1)) { _lastPaintError = DateTime.UtcNow; Program.Log("frame data paint", ex); }
+                LowMemory?.Invoke();
+                try { using (var m = new SolidBrush(Theme.Muted)) e.Graphics.DrawString("Couldn't show this frame. Pick the move again.", Theme.Body, m, _pic.X + 16, _pic.Y + 16); } catch { }
+            }
+        }
+
+        void PaintMove(Graphics g)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias; g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             using (var bg = new SolidBrush(Color.FromArgb(200, 20, 22, 28))) using (var path = StatsArt.Round(_pic, 10)) g.FillPath(bg, path);
             if (_move == null) return;
             var d = _move.Data; var mvNote = _move.Note;
             int n = Math.Max(1, d.Frames.Count);
             var f = _frame < d.Frames.Count ? d.Frames[_frame] : null;
             if (Pictures != null && _frame < Pictures.Count)
-                using (var path = StatsArt.Round(_pic, 10)) { g.SetClip(path); Theme.Blit(g, Theme.Scaled(Pictures[_frame], _pic.Width, _pic.Height), _pic.X, _pic.Y); g.ResetClip(); }   // each frame shrunk once, then just copied
+                using (var path = StatsArt.Round(_pic, 10)) { g.SetClip(path); Theme.Stretch(g, Pictures[_frame], _pic); g.ResetClip(); }   // drawn at the box's size each time (no resized copy of every frame kept)
             else using (var m = new SolidBrush(Theme.Muted)) g.DrawString(_status ?? "", Theme.Body, m, _pic.X + 16, _pic.Y + 16);
             // frame counter over the picture
             if (f != null)

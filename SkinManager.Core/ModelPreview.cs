@@ -319,8 +319,7 @@ namespace SkinManager.Core
                 var anim = animation == null ? null : root.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().FirstOrDefault(a => a.Name == animation);
                 foreach (var m in models) { try { m.ApplyCHR(anim, anim == null ? 0 : frame); } catch { } }
                 var tris = Gather(root, models, 0);
-                var floors = StageCheck.Surfaces(root);
-                if (floors.Count == 0) floors = StageCheck.Surfaces(root, moving: true);   // a stage you stand on moving parts of: where they start
+                var floors = StageCheck.StandOn(root);   // fixed floors, or where the moving ones start
                 var stand = floors.Where(f => f.floor).ToList();
                 if (stand.Count == 0) return null;
                 float fx0 = stand.Min(f => Math.Min(f.x1, f.x2)), fx1 = stand.Max(f => Math.Max(f.x1, f.x2));
@@ -410,7 +409,7 @@ namespace SkinManager.Core
                 if (t.a._z > nearZ || t.b._z > nearZ || t.c._z > nearZ) continue;
                 float ax = (t.a._x - fx0) / Res, ay = (fy1 - t.a._y) / Res, bx = (t.b._x - fx0) / Res, by = (fy1 - t.b._y) / Res, cx = (t.c._x - fx0) / Res, cy = (fy1 - t.c._y) / Res;
                 float area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-                if (Math.Abs(area) < 1e-6f || Math.Sign(area) == Cull) continue;   // its back faces the camera
+                if (!(Math.Abs(area) >= 1e-6f) || Math.Sign(area) == Cull) continue;   // its back faces the camera (or a broken point: not a number)
                 int x0 = Math.Max(0, (int)Math.Floor(Math.Min(ax, Math.Min(bx, cx)))), x1 = Math.Min(W - 1, (int)Math.Ceiling(Math.Max(ax, Math.Max(bx, cx))));
                 int y0 = Math.Max(0, (int)Math.Floor(Math.Min(ay, Math.Min(by, cy)))), y1 = Math.Min(H - 1, (int)Math.Ceiling(Math.Max(ay, Math.Max(by, cy))));
                 for (int py = y0; py <= y1; py++)
@@ -471,7 +470,7 @@ namespace SkinManager.Core
             {
                 Installer.Quiet();
                 var models = root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(m => (m.FindChild("Objects", false)?.Children.Count ?? 0) > 0).ToList();
-                var floors = StageCheck.Surfaces(root);
+                var floors = StageCheck.StandOn(root);
                 foreach (var m in models) { try { m.ApplyCHR(null, 0); } catch { } }
                 var worst = Measure(Gather(root, models, 0), floors);
                 foreach (var m in models) { try { m.ApplyCHR(null, 0); } catch { } }
@@ -505,7 +504,7 @@ namespace SkinManager.Core
                     float bx = ox + t.b._x * scale, by = oy - t.b._y * scale;
                     float cx = ox + t.c._x * scale, cyy = oy - t.c._y * scale;
                     float area = (bx - ax) * (cyy - ay) - (by - ay) * (cx - ax);
-                    if (Math.Abs(area) < 1e-6f) continue;
+                    if (!(Math.Abs(area) >= 1e-6f)) continue;   // too thin, or a broken point (not a number)
                     if (cull != 0 && Math.Sign(area) == cull) continue;   // its back faces the camera (the near side of a sky dome)
                     if (t.a._z > nearZ || t.b._z > nearZ || t.c._z > nearZ) continue;   // behind the camera
                     int x0 = Math.Max(0, (int)Math.Floor(Math.Min(ax, Math.Min(bx, cx)))), x1 = Math.Min(W - 1, (int)Math.Ceiling(Math.Max(ax, Math.Max(bx, cx))));

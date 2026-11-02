@@ -315,7 +315,9 @@ namespace SkinManager.App
             DragDrop += (s, e) =>
             {
                 if (!(e.Data.GetData(DataFormats.FileDrop) is string[] f) || f.Length == 0) return;
-                if (f.Any(MusicImport.IsAudio)) AddOwnMusic(f.Where(MusicImport.IsAudio).ToList());   // your own songs (MP3/WAV)
+                if (f.Any(MusicImport.IsAudio)) AddOwnMusic(MusicImportForm.AudioIn(f));   // your own songs (MP3/WAV)
+                // a folder with only your own songs in it (no mod files): all its songs
+                else if (f.Length == 1 && Directory.Exists(f[0]) && MusicImportForm.AudioIn(f).Count > 0 && !LooksLikeMod(f[0])) AddOwnMusic(MusicImportForm.AudioIn(f));
                 else AddSkin(f[0]);
             };
 
@@ -428,6 +430,8 @@ namespace SkinManager.App
             _swap = new SwapPanel(() => _installer, folder => AddSkin(folder)) { Visible = false };
             _look.ApplyOverlay();
             _settings = new SettingsPanel(_look, () => { _look.ApplyOverlay(); _card?.Invalidate(); _report?.Invalidate(); _full?.Invalidate(); _backdrop.Apply(_look); _statsToggle?.Invoke(); ApplyHotkey(); Invalidate(true); }) { Visible = false, SaveFirst = () => SavedFirst() };
+            _settings.DatabasePath = () => _install == null ? null : MatchHistory.DatabasePath(_install);
+            _settings.ReplayFoldersChanged = () => { _cardHistory = null; _stats?.CheckNewGame(); };
             _content.Controls.Add(_library); _content.Controls.Add(_store); _content.Controls.Add(_slotsPage); _content.Controls.Add(_swap); _content.Controls.Add(_settings);
             _credits = new CreditsPanel { Visible = false }; _content.Controls.Add(_credits);
             _stats = new StatsPanel(() => _install, () => _installer) { Visible = false }; _content.Controls.Add(_stats);
@@ -530,6 +534,9 @@ namespace SkinManager.App
             _tour.Start(this);
         }
 
+        /// <summary>Settings' "How accurate is the frame data?": Frame Data, on its accuracy view.</summary>
+        public void ShowFrameDataAccuracy() { ShowPage(_frameData); _frameData.ShowAccuracy(); }
+
         void ShowPage(Control page)
         {
             Frozen(_content, () =>
@@ -627,6 +634,17 @@ namespace SkinManager.App
         {
             _cards = new Cards(_install, CardData);
             _lastSave = new LastSave(CardData);
+            // a save that was stopped halfway (the app or the PC shut down) is put back before anything else
+            try
+            {
+                string note = _lastSave.RecoverInterruptedSave(_install.CardPath);
+                if (note != null) BeginInvoke((Action)(() => Dialog.Show(this, note, "Your last save", MessageBoxButtons.OK, MessageBoxIcon.Information)));
+            }
+            catch (Exception e)
+            {
+                BeginInvoke((Action)(() => Dialog.Show(this, "Your last save was stopped before it finished, and the SD card couldn't be put back yet (" + Friendly.Explain(e) +
+                    "). Close Brawl Online if it's open, then close and reopen this app.", "Your last save", MessageBoxButtons.OK, MessageBoxIcon.Warning)));
+            }
             _launchClean.Visible = _install.OwnCard;
             if (!_install.OwnCard) _launchModded.Text = "Open my Dolphin";
             _textures = new TexturePacks(_install, Program.DataFolder);
@@ -1058,7 +1076,7 @@ namespace SkinManager.App
         /// <summary>Where this card's mods lists are kept: the Data folder for Brawl Online's card, a folder of its own for
         /// another Dolphin's (so the two never mix).</summary>
         string CardData => _install == null || _install.OwnCard ? Program.DataFolder : OtherCards.DataFolderFor(Program.DataFolder, _install.CardPath);
-        Installer NewInstaller() => new Installer(_install, _lib) { Undo = _lastSave, CardName = _cards?.Active ?? Cards.Normal };
+        Installer NewInstaller() => new Installer(_install, _lib) { Undo = _lastSave, CardName = _cards?.Active ?? Cards.Normal, FastSave = Program.FastSave };
 
         /// <summary>"Undo last save" from Settings.</summary>
         public void UndoLastSaveAsked() { if (_install == null || _cards == null) { Dialog.Show(this, "There's no save to undo yet.", "Undo last save"); return; } UndoLastSave(); }
@@ -1884,13 +1902,19 @@ namespace SkinManager.App
                 if (f.ShowDialog(this) == DialogResult.OK && f.Change != null && !f.Change.IsEmpty) Run(f.Change, f.Done);
         }
 
+        /// <summary>Does a folder have mod files in it (costumes, stages, game songs, archives)?</summary>
+        static bool LooksLikeMod(string folder)
+        {
+            try { return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Any(x => { var e = Path.GetExtension(x).ToLowerInvariant(); return e == ".pac" || e == ".pcs" || e == ".brstm" || e == ".zip" || e == ".rar" || e == ".7z"; }); }
+            catch { return false; }
+        }
+
         public void AddOwnMusic(List<string> files = null)
         {
             if (_busy) return;
             if (_installer == null) { AddSkin(null); return; }
-            files = files ?? MusicImportForm.Pick(this);
-            if (files == null || files.Count == 0) return;
-            using (var f = new MusicImportForm(files))
+            // no songs yet: the window opens empty, with its buttons to add songs or a whole folder (or drop them on it)
+            using (var f = new MusicImportForm(files ?? new List<string>()))
                 if (f.ShowDialog(this) != DialogResult.OK || f.ResultFolder == null) return;
                 else AddSkin(f.ResultFolder);
         }

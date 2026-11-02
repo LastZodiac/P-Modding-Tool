@@ -329,6 +329,14 @@ namespace SkinManager.Core
 
         /// <summary>The names a P+ stage's program looks up in its stage file (every text in the program file, like
         /// "StgGreenhillMain"). Models with these names must be exactly P+'s for the stage to play the same.</summary>
+        /// <summary>The stage program (module) a stage file on the card runs on, or null.</summary>
+        public string ProgramOf(Fat32Image card, string cardPath)
+        {
+            if (_info == null) { try { _info = Songs.StageInfo(card); } catch { _info = new Dictionary<string, (string, string)>(); } }
+            string stem = Path.GetFileNameWithoutExtension(cardPath ?? "").ToUpperInvariant();
+            return _info.TryGetValue(stem, out var i) && !string.IsNullOrEmpty(i.Module) ? i.Module : Stages.MadeFor(cardPath, _info);
+        }
+
         public HashSet<string> ProgramNames(Fat32Image card, string cardPath)
         {
             if (_info == null) { try { _info = Songs.StageInfo(card); } catch { _info = new Dictionary<string, (string, string)>(); } }

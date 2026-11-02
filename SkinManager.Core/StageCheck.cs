@@ -348,8 +348,7 @@ namespace SkinManager.Core
             using (var tmp = new TempFile(".pac", stage))
             lock (BrawlGate.Lock) using (var root = NodeFactory.FromFile(null, tmp.Path))
             {
-                var s = Surfaces(root);
-                return s.Count > 0 ? s : Surfaces(root, moving: true);
+                return StandOn(root);
             }
         }
 
@@ -424,6 +423,30 @@ namespace SkinManager.Core
             lock (BrawlGate.Lock) using (var root = NodeFactory.FromFile(null, tmp.Path)) return Surfaces(root);
         }
 
+        /// <summary>The surfaces fighters stand on when the match starts. Normally a stage's fixed ones; a stage with nothing
+        /// fixed to stand on gets its moving ones (as before); a stage whose fixed surfaces are only walls and ceilings, with
+        /// every floor riding on a part (Pokemon Stadium 2 and its alts: the floors ride on the stage's main bone), also gets
+        /// the floors of its first set of collisions that has any (the later sets are its other forms, like Stadium's
+        /// transformations). Surfaces whose ends aren't numbers are left out.</summary>
+        internal static List<(float x1, float y1, float x2, float y2, bool floor)> StandOn(ResourceNode root)
+        {
+            bool Real((float x1, float y1, float x2, float y2, bool floor) f) => !float.IsNaN(f.x1) && !float.IsNaN(f.y1) && !float.IsNaN(f.x2) && !float.IsNaN(f.y2) && !float.IsInfinity(f.x1) && !float.IsInfinity(f.y1) && !float.IsInfinity(f.x2) && !float.IsInfinity(f.y2);
+            var s = Surfaces(root).Where(Real).ToList();
+            if (s.Count == 0) return Surfaces(root, moving: true).Where(Real).ToList();
+            if (s.Any(f => f.floor)) return s;
+            foreach (var col in root.FindChildrenByType(null, ResourceType.CollisionDef).OfType<CollisionNode>())
+            {
+                var riding = new List<(float x1, float y1, float x2, float y2, bool floor)>();
+                foreach (var o in col.Children.OfType<CollisionObject>().Where(o => !string.IsNullOrEmpty(o._boneName)))
+                    foreach (var pl in o._planes.Where(pl => pl._linkLeft != null && pl._linkRight != null))
+                        riding.Add((pl._linkLeft._rawValue._x, pl._linkLeft._rawValue._y, pl._linkRight._rawValue._x, pl._linkRight._rawValue._y,
+                                    (pl._type & BrawlLib.SSBB.Types.CollisionPlaneType.Floor) != 0));   // a floor (a rotating stage's sides are floor, wall and ceiling at once)
+                riding = riding.Where(Real).ToList();
+                if (riding.Any(f => f.floor)) { s.AddRange(riding); return s; }
+            }
+            return s;
+        }
+
         /// <summary>A stage's fixed surfaces (moving platforms left out).</summary>
         internal static List<(float x1, float y1, float x2, float y2, bool floor)> Surfaces(ResourceNode root, bool moving = false)
         {
@@ -432,7 +455,7 @@ namespace SkinManager.Core
                     foreach (var o in col.Children.OfType<CollisionObject>().Where(o => moving || string.IsNullOrEmpty(o._boneName)))
                         foreach (var pl in o._planes.Where(pl => pl._linkLeft != null && pl._linkRight != null))
                             list.Add((pl._linkLeft._rawValue._x, pl._linkLeft._rawValue._y, pl._linkRight._rawValue._x, pl._linkRight._rawValue._y,
-                                      pl._type == BrawlLib.SSBB.Types.CollisionPlaneType.Floor));
+                                      (pl._type & BrawlLib.SSBB.Types.CollisionPlaneType.Floor) != 0));   // a floor (a rotating stage's sides are floor, wall and ceiling at once)
             return list;
         }
 

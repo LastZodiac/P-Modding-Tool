@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- P+ Blender Bridge: a separate test tool (not part of P+ Modding Tool). Uses the same core code, read only. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <AssemblyName>P+ Blender Bridge</AssemblyName>
+    <RootNamespace>PPlusBlenderBridge</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>../../SkinManager.App/Assets/app.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <Product>P+ Blender Bridge</Product>
+    <Company>Last Zodiac</Company>
+    <Authors>Last Zodiac</Authors>
+    <Copyright>Copyright (c) 2026 Last Zodiac. Licensed under the GNU GPL v3.0.</Copyright>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../SkinManager.Core/*.cs" />
+    <Compile Include="../../SkinManager.Core/ThirdParty/NLayer/**/*.cs" />
+    <Reference Include="BrawlLib"><HintPath>$(BrawlLibPath)</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+</Project>

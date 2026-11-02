@@ -24,7 +24,20 @@ namespace SkinManager.App
         }
 
         int MaxScroll => Math.Max(0, ContentHeight - Height);
-        public void ToTop() { Scroll = 0; Invalidate(); }
+        public void ToTop() { Scroll = 0; MoveChildren(); Invalidate(); }
+
+        // controls on the view (a "You play" dropdown) scroll with what's drawn, so nothing slides under them
+        readonly Dictionary<Control, int> _childTop = new Dictionary<Control, int>();
+        bool _movingChildren;
+        protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); _childTop[e.Control] = e.Control.Top + Scroll; e.Control.LocationChanged += ChildMoved; }
+        protected override void OnControlRemoved(ControlEventArgs e) { base.OnControlRemoved(e); _childTop.Remove(e.Control); e.Control.LocationChanged -= ChildMoved; }
+        void ChildMoved(object s, EventArgs e) { if (!_movingChildren && s is Control c) _childTop[c] = c.Top + Scroll; }
+        void MoveChildren()
+        {
+            _movingChildren = true;
+            try { foreach (var kv in _childTop) if (kv.Key.Top != kv.Value - Scroll) kv.Key.Top = kv.Value - Scroll; }
+            finally { _movingChildren = false; }
+        }
         protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); if (FindForm()?.ActiveControl is TextBox == false) Focus(); }
         // the wheel glides (see SmoothScroll): each notch moves the goal, the view eases there
         Timer _glide; float _glidePos; int _glideGoal;
@@ -48,7 +61,7 @@ namespace SkinManager.App
             _glideGoal = Math.Max(0, Math.Min(MaxScroll, _glideGoal - e.Delta * step / 120));
             _glide.Start();
         }
-        void SetScroll(int v) { int s = Math.Max(0, Math.Min(MaxScroll, v)); if (s != Scroll) { Scroll = s; Invalidate(); } }
+        void SetScroll(int v) { int s = Math.Max(0, Math.Min(MaxScroll, v)); if (s != Scroll) { Scroll = s; MoveChildren(); Invalidate(); } }
         protected override void OnResize(EventArgs e) { base.OnResize(e); Layout2(); SetScroll(Scroll); }
 
         RectangleF Thumb()
@@ -77,6 +90,14 @@ namespace SkinManager.App
         protected virtual void Clicked(Point p, MouseButtons b) { }
         protected virtual void Hover(Point p) { }
         protected abstract void Draw(Graphics g, int width);
+
+        // TextRenderer (GDI text) ignores the scroll offset on Windows unless told to keep it: without these flags the
+        // text stays put while the shapes behind it scroll away
+        const TextFormatFlags Keep = TextFormatFlags.PreserveGraphicsTranslateTransform | TextFormatFlags.PreserveGraphicsClipping;
+        protected static void DrawT(Graphics g, string text, Font font, Point at, Color color, TextFormatFlags flags = TextFormatFlags.Default) =>
+            TextRenderer.DrawText(g, text, font, at, color, flags | Keep);
+        protected static void DrawT(Graphics g, string text, Font font, Rectangle r, Color color, TextFormatFlags flags = TextFormatFlags.Default) =>
+            TextRenderer.DrawText(g, text, font, r, color, flags | Keep);
 
         protected override void OnPaint(PaintEventArgs e)
         {

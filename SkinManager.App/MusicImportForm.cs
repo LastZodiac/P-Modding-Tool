@@ -27,7 +27,7 @@ namespace SkinManager.App
         readonly FlowLayoutPanel _list = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(24, 4, 24, 4), BackColor = Theme.Back };
         readonly ComboBox _quality = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 360, BackColor = Theme.Panel, ForeColor = Theme.Text, FlatStyle = FlatStyle.Flat };
         readonly CheckBox _even = new CheckBox { Text = "Make them as loud as P+'s own songs", Checked = true, AutoSize = true, ForeColor = Theme.Text, BackColor = Color.Transparent };
-        readonly Button _next = Theme.Primary("Next: choose where they play  →"), _add = Theme.Secondary("+ Add more songs…");
+        readonly Button _next = Theme.Primary("Next: choose where they play  →"), _add = Theme.Secondary("+ Add more songs…"), _addFolder = Theme.Secondary("+ Add a folder…");
         readonly Label _summary = Theme.Label("", Theme.Body, Theme.Muted);
         readonly ProgressBar _bar = new ProgressBar { Visible = false, Width = 260, Height = 10 };
         System.Media.SoundPlayer _player;
@@ -52,8 +52,14 @@ namespace SkinManager.App
             _quality.Location = new Point(26, 96); _even.Location = new Point(400, 99);
             _add.Location = new Point(head.Width - 180, 94); _add.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             _add.Click += (s, e) => { var more = Pick(this); if (more != null) AddFiles(more); };
-            head.Controls.AddRange(new Control[] { title, hint, _quality, _even, _add });
-            head.Resize += (s, e) => { hint.Width = head.Width - 50; _add.Left = head.Width - _add.Width - 24; };
+            _addFolder.Location = new Point(head.Width - 360, 94); _addFolder.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            _addFolder.Click += (s, e) => { var folder = PickFolder(this); if (folder != null) AddFiles(AudioIn(new[] { folder })); };
+            head.Controls.AddRange(new Control[] { title, hint, _quality, _even, _add, _addFolder });
+            head.Resize += (s, e) => { hint.Width = head.Width - 50; _add.Left = head.Width - _add.Width - 24; _addFolder.Left = _add.Left - _addFolder.Width - 10; };
+            // songs or folders of songs dropped on the window
+            AllowDrop = true;
+            DragEnter += (s, e) => e.Effect = !_working && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+            DragDrop += (s, e) => { if (!_working && e.Data.GetData(DataFormats.FileDrop) is string[] f) AddFiles(AudioIn(f)); };
 
             var foot = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = Theme.Panel };
             _summary.Location = new Point(24, 14); _summary.AutoSize = false; _summary.Size = new Size(520, 22);
@@ -68,6 +74,27 @@ namespace SkinManager.App
             _list.Resize += (s, e) => { foreach (Control c in _list.Controls) c.Width = Math.Max(700, _list.ClientSize.Width - 50); };
             FormClosed += (s, e) => { try { _player?.Stop(); _player?.Dispose(); } catch { } };
             AddFiles(files);
+        }
+
+        /// <summary>The music files among these (folders: every MP3/WAV in them and the folders in them), in name order.</summary>
+        public static List<string> AudioIn(IEnumerable<string> paths)
+        {
+            var result = new List<string>();
+            foreach (var p in paths ?? new string[0])
+                try
+                {
+                    if (Directory.Exists(p)) result.AddRange(Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories).Where(MusicImport.IsAudio).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+                    else if (MusicImport.IsAudio(p)) result.Add(p);
+                }
+                catch { }
+            return result.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>The folder picker for a folder of music.</summary>
+        public static string PickFolder(IWin32Window owner)
+        {
+            using (var d = new FolderBrowserDialog { Description = "Pick a folder of music (every MP3 and WAV in it is added, folders inside it too)", ShowNewFolderButton = false })
+                return d.ShowDialog(owner) == DialogResult.OK ? d.SelectedPath : null;
         }
 
         /// <summary>The file picker for music (several at once).</summary>
@@ -166,7 +193,7 @@ namespace SkinManager.App
         void Summary()
         {
             int ok = _rows.Count(r => r.Clip != null);
-            _summary.Text = _rows.Count == 0 ? "Add some songs with \"+ Add more songs…\"." : $"{ok} song{(ok == 1 ? "" : "s")} ready" + (ok < _rows.Count ? $" ({_rows.Count - ok} still reading or couldn't be read)" : "");
+            _summary.Text = _rows.Count == 0 ? "Add some songs with \"+ Add more songs…\" or \"+ Add a folder…\", or drop them here." : $"{ok} song{(ok == 1 ? "" : "s")} ready" + (ok < _rows.Count ? $" ({_rows.Count - ok} still reading or couldn't be read)" : "");
             _next.Enabled = ok > 0 && !_working;
         }
 

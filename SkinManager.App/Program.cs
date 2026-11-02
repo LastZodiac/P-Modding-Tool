@@ -66,6 +66,9 @@ namespace SkinManager.App
         static string CardLine => Busy ? "It happened while the SD card was being changed: check My Mods to see whether the change went through." : "Your SD card was not changed.";
 
         public static string DataFolder => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
+        /// <summary>Saves write only what changes on the SD card, after a journal of what was there (tried as a test build,
+        /// then made the normal way to save).</summary>
+        public static bool FastSave => true;
 
         /// <summary>Notes an error the app recovered from in Data\errors.log (to find out later what went wrong).</summary>
         public static void Log(string what, Exception e)

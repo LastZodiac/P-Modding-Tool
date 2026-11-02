@@ -1,0 +1,75 @@
+P+ Blender Kit (test)
+=====================
+
+Separate from P+ Modding Tool. Nothing here changes your SD card: the costume file it makes is added
+with P+ Modding Tool's "Add from file...", through the usual safety checks.
+You need Blender 4 (or newer) installed. Nothing has to be installed into Blender.
+
+
+THE WHOLE THING, START TO FINISH
+  1. Open "P+ Blender Bridge.exe".
+  2. Pick the fighter and the costume (for example Peach, costume 11) > "Open it in Blender".
+     (The first time, if your Blender isn't found, it asks where blender.exe is. Only once.)
+  3. Blender opens with the costume loaded and the "P+ Kit" panel open on the right.
+     The panel shows 6 steps and only what to do on the step you're on:
+       1  Open the costume         (already done by the Bridge)
+       2  Your model               "Open your model" > pick it (GLB, glTF, FBX or OBJ)
+       3  Clean it up              Turn it, make it bigger/smaller, take off the hair and other pieces
+       4  Line up the joints       "Show the joint dots", move any dot that's off, "Fit my model to P+"
+       5  Shape it and finish      Fix small things with the shape handles, then "Use P+'s head"
+                                   or "Keep my model's head"
+       6  Check and save           "Play a test move", then "Save and make the costume file"
+  4. The Bridge pops up by itself and makes the costume file, with before/after pictures
+     (standing, waiting, side smash). A folder opens with the costume file in it.
+  5. P+ Modding Tool > "Add from file..." > that costume file.
+  Made a mistake anywhere? Ctrl+Z steps back, as many times as you need.
+
+
+STEP 3: CLEANING UP YOUR MODEL
+  - It comes in at the costume's size (matched by where the hands are, so long hair or a crown
+    don't throw it off). Still off? "Smaller" / "Bigger".
+  - "Take off the hair (for P+'s head)": takes off the hair and other loose pieces on the head
+    (earrings, hats) in one click, when they're separate pieces of the model.
+  - Anything left: "Click pieces" > click it (it turns orange) > "Take off the whole piece".
+    For a part that's joined to the body: "Box a part" > drag a box around it >
+    "Take off just what's selected".
+  - "Put it all back" brings back your model as it came in.
+
+
+STEP 4: LINING UP THE JOINTS
+  - The dots sit on P+'s joints (hips, neck, shoulders, elbows, wrists, knees, ankles, toes).
+  - Click a dot, then move it onto the same joint of your model with the arrow buttons
+    (or G and the mouse). "Both sides at once" moves the other side's dot too.
+  - "Front view" / "Side view" to check both ways. Then "Fit my model to P+".
+
+
+STEP 5: SHAPE HANDLES (small fixes without remodelling)
+  "Show the shape handles" puts a handle on each part (hips, body, head, upper arms, forearms,
+  hands, thighs, shins, feet). Click one, then:
+    Up / Down / Left / Right / Toward front / Toward back   nudge it
+    Longer / Shorter                                        stretch it (the rest of the arm or leg follows)
+    Thicker / Thinner                                       make it wider or slimmer
+    Turn                                                    turn it a little
+    Reset this one / Reset all                              undo the changes
+  "Both sides at once" does the same to the other side. "Keep this shape" when you're happy.
+  Examples: arms a bit short > click a forearm > Longer. A foot pointing out > click it > Turn.
+
+
+GOOD TO KNOW
+  - Where's the costume file? Documents > P+ Blender Kit > (the costume) > "(the costume) (from Blender)",
+    for example Documents\P+ Blender Kit\Peach costume 11\Peach costume 11 (from Blender)\FitPeach19.pac.
+    The Bridge's "Show the costume file" button opens that folder with the file picked out.
+  - Your model's picture is redone when you finish (one tidy picture for what's left of it, without the
+    hair that was taken off), so it stays sharp when it's made smaller to fit the game's memory.
+  - "Use P+'s head" keeps the costume's own head, hair, eyes and blinking exactly as they were.
+    It takes a lot of the fighter's memory, so your model's pictures may be made smaller to fit
+    (the Bridge says so). "Keep my model's head" leaves more room for sharper pictures.
+  - Always save with the panel's "Save and make the costume file". A file saved with Blender's own
+    Export has no P+ skeleton (or has the costume in it twice), and the Bridge says so.
+  - If the Bridge didn't pop up after saving: open it, pick the fighter and costume, use
+    "Choose what you saved from Blender..." and pick the "... - from Blender.glb" file.
+  - "Install the P+ Kit into Blender anyway (optional)" puts the P+ Kit tab in Blender for good
+    (press N over the 3D view to see it), for opening Blender on your own. You don't need it
+    when you use "Open it in Blender".
+  - Things the fighter only shows sometimes (Peach's racket, pan and club, other faces) aren't
+    sent to Blender; they're always put back from the costume.

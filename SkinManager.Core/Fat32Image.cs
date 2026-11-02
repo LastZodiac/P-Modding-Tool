@@ -34,6 +34,13 @@ namespace SkinManager.Core
         uint[] _fat;
         uint _nextFreeHint = 2;
 
+        /// <summary>deferred: changes are kept in memory (reads see them) and only reach the card in Commit, with a
+        /// journal of what they replace written first. Nothing is written to the card before Commit.</summary>
+        public Fat32Image(string path, bool writable, bool deferred) : this(path, writable)
+        {
+            if (deferred) _pending = new Dictionary<long, byte[]>();
+        }
+
         public Fat32Image(string path, bool writable)
         {
             _fs = new FileStream(path, FileMode.Open, writable ? FileAccess.ReadWrite : FileAccess.Read,
@@ -379,7 +386,7 @@ namespace SkinManager.Core
                     WriteAt(off, fsi);
                 }
             }
-            _fs.Flush(true);
+            if (_pending == null) _fs.Flush(true);
         }
 
         long ClusterOffset(uint c) => _dataStart + (long)(c - 2) * _clusterBytes;
@@ -464,9 +471,66 @@ namespace SkinManager.Core
             BitConverter.GetBytes(date).CopyTo(e, 24);
         }
 
+        // ---------- deferred writing ----------
+
+        const int Block = 4096;
+        Dictionary<long, byte[]> _pending;   // block number -> its new bytes; null: writes go straight to the card
+
+        int BlockLength(long block) => (int)Math.Min(Block, _fs.Length - block * Block);
+
+        /// <summary>Writes the changes kept in memory to the card. First the journal: every block of the card about to
+        /// change, as it is now, saved and flushed to disk; then the blocks; then the journal is marked written. If anything
+        /// goes wrong after the journal is saved, CardJournal.RollBack puts the card back exactly. Returns the blocks written.</summary>
+        public int Commit(string journalPath, Action<int> progress)
+        {
+            if (_pending == null) return 0;
+            var changed = new List<KeyValuePair<long, byte[]>>();   // offset -> the bytes there now
+            foreach (var kv in _pending.OrderBy(k => k.Key))
+            {
+                var now = ReadRaw(kv.Key * Block, kv.Value.Length);
+                if (!now.SequenceEqual(kv.Value)) changed.Add(new KeyValuePair<long, byte[]>(kv.Key * Block, now));
+            }
+            CardJournal.Write(journalPath, _fs.Name, _fs.Length, changed);
+            int i = 0;
+            foreach (var kv in changed)
+            {
+                WriteRaw(kv.Key, _pending[kv.Key / Block]);
+                if (++i % 64 == 0) progress?.Invoke(i * 100 / changed.Count);
+            }
+            _fs.Flush(true);
+            CardJournal.SetState(journalPath, CardJournal.Written);
+            _pending.Clear();
+            return changed.Count;
+        }
+
         // ---------- raw I/O ----------
 
         byte[] ReadAt(long off, int n)
+        {
+            var b = ReadRaw(off, n);
+            if (_pending != null && _pending.Count > 0 && n > 0)
+                for (long blk = off / Block; blk <= (off + n - 1) / Block; blk++)
+                {
+                    if (!_pending.TryGetValue(blk, out var nb)) continue;
+                    long start = Math.Max(off, blk * Block), end = Math.Min(off + n, blk * Block + nb.Length);
+                    if (end > start) Buffer.BlockCopy(nb, (int)(start - blk * Block), b, (int)(start - off), (int)(end - start));
+                }
+            return b;
+        }
+
+        void WriteAt(long off, byte[] b)
+        {
+            if (_pending == null) { WriteRaw(off, b); return; }
+            if (b.Length == 0) return;
+            for (long blk = off / Block; blk <= (off + b.Length - 1) / Block; blk++)
+            {
+                if (!_pending.TryGetValue(blk, out var nb)) _pending[blk] = nb = ReadRaw(blk * Block, BlockLength(blk));
+                long start = Math.Max(off, blk * Block), end = Math.Min(off + b.Length, blk * Block + nb.Length);
+                if (end > start) Buffer.BlockCopy(b, (int)(start - off), nb, (int)(start - blk * Block), (int)(end - start));
+            }
+        }
+
+        byte[] ReadRaw(long off, int n)
         {
             var b = new byte[n];
             _fs.Position = off;
@@ -480,10 +544,81 @@ namespace SkinManager.Core
             return b;
         }
 
-        void WriteAt(long off, byte[] b)
+        void WriteRaw(long off, byte[] b)
         {
             _fs.Position = off;
             _fs.Write(b, 0, b.Length);
+        }
+    }
+
+    /// <summary>What a save replaced on the SD card, block by block: written (and flushed) before the card is touched, so a
+    /// save that stops halfway can be put back, and kept afterwards for "Undo last save". A few MB instead of a copy of the
+    /// whole card. State: 1 = being written to the card, 2 = on the card, 3 = the mods list saved too.</summary>
+    public static class CardJournal
+    {
+        public const int Writing = 1, Written = 2, Done = 3;
+        const uint Magic = 0x4A434350;   // "PCCJ"
+
+        public static void Write(string path, string cardPath, long cardLength, List<KeyValuePair<long, byte[]>> blocks)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
+            using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.WriteThrough))
+            using (var w = new BinaryWriter(fs))
+            {
+                w.Write(Magic); w.Write(1); w.Write(Writing); w.Write(cardLength); w.Write(Path.GetFullPath(cardPath)); w.Write(blocks.Count);
+                foreach (var kv in blocks) { w.Write(kv.Key); w.Write(kv.Value.Length); w.Write(kv.Value); }
+                w.Write(Magic);
+                w.Flush(); fs.Flush(true);
+            }
+        }
+
+        public static void SetState(string path, int state)
+        {
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                fs.Position = 8;
+                fs.Write(BitConverter.GetBytes(state), 0, 4);
+                fs.Flush(true);
+            }
+        }
+
+        /// <summary>The journal's state, or 0 when there is none (or it was never finished being written: the card
+        /// wasn't touched then).</summary>
+        public static int State(string path, out string cardPath, out long cardLength)
+        {
+            cardPath = null; cardLength = 0;
+            try
+            {
+                if (!File.Exists(path)) return 0;
+                using (var r = new BinaryReader(File.OpenRead(path)))
+                {
+                    if (r.ReadUInt32() != Magic || r.ReadInt32() != 1) return 0;
+                    int state = r.ReadInt32(); cardLength = r.ReadInt64(); cardPath = r.ReadString();
+                    int n = r.ReadInt32();
+                    for (int i = 0; i < n; i++) { r.ReadInt64(); int len = r.ReadInt32(); r.BaseStream.Seek(len, SeekOrigin.Current); }
+                    return r.ReadUInt32() == Magic ? state : 0;
+                }
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>Puts every block the journal saved back on the card: the card is then exactly as it was before.</summary>
+        public static void RollBack(string path, string cardPath)
+        {
+            if (State(path, out _, out long length) == 0) throw new InvalidDataException("The record of the last save is damaged, so it can't be put back.");
+            using (var r = new BinaryReader(File.OpenRead(path)))
+            using (var card = new FileStream(cardPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                if (card.Length != length) throw new InvalidOperationException("The SD card isn't the one that save was made on.");
+                r.ReadUInt32(); r.ReadInt32(); r.ReadInt32(); r.ReadInt64(); r.ReadString();
+                int n = r.ReadInt32();
+                for (int i = 0; i < n; i++)
+                {
+                    long off = r.ReadInt64(); int len = r.ReadInt32(); var b = r.ReadBytes(len);
+                    card.Position = off; card.Write(b, 0, b.Length);
+                }
+                card.Flush(true);
+            }
         }
     }
 }

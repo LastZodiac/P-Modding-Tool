@@ -271,6 +271,108 @@ namespace SkinManager.Core
             try { return Path.Combine(Path.GetDirectoryName(databasePath), "netplay", "User", "Replays"); } catch { return null; }
         }
 
+        /// <summary>Replay folders picked in the app's Settings (read as well as Brawl Online's own).</summary>
+        public static List<string> ChosenReplayFolders = new List<string>();
+
+        /// <summary>Every folder the app reads replays from, with why and how many replays are in it (its month folders
+        /// included): Brawl Online's own list (where its history says its replays are), Documents\Brawl Online, its backup
+        /// folder, the folders set in Brawl Online's settings, and the ones picked in this app.</summary>
+        public static List<(string Folder, string Why, int Replays, bool Chosen)> ReplayFolders(string databasePath, bool count = true)
+        {
+            var result = new List<(string, string, int, bool)>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void Add(string folder, string why, bool chosen = false)
+            {
+                if (string.IsNullOrWhiteSpace(folder)) return;
+                string full; try { full = Path.GetFullPath(folder).TrimEnd('\\', '/'); } catch { return; }
+                if (!seen.Add(full)) return;
+                result.Add((full, why, count ? CountReplays(full) : (Directory.Exists(full) ? 1 : -1), chosen));
+            }
+            try
+            {
+                if (File.Exists(databasePath))
+                {
+                    var db = SqliteReader.Open(databasePath);
+                    if (db.HasTable("file"))
+                        foreach (var dir in db.Table("file").Select(r => S(r, "folder")).Where(d => !string.IsNullOrEmpty(d)).Distinct(StringComparer.OrdinalIgnoreCase))
+                            try { Add(Path.GetDirectoryName(dir.TrimEnd('\\', '/')), "where Brawl Online's history says your replays are"); } catch { }
+                }
+            }
+            catch { }
+            try { Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Brawl Online"), "Brawl Online's usual replay folder"); } catch { }
+            foreach (var f in BrawlOnlineReplayFolders(databasePath)) Add(f, "set in Brawl Online's settings");
+            Add(BackupReplayFolder(databasePath), "Brawl Online's backup replay folder");
+            lock (ChosenReplayFolders) foreach (var f in ChosenReplayFolders.ToList()) Add(f, "picked by you", chosen: true);
+            return result;
+        }
+
+        static int CountReplays(string folder)
+        {
+            int n = 0;
+            try
+            {
+                if (!Directory.Exists(folder)) return -1;
+                n += Directory.GetFiles(folder, "*.brep").Length;
+                foreach (var d in Directory.GetDirectories(folder)) try { n += Directory.GetFiles(d, "*.brep").Length; } catch { }
+            }
+            catch { }
+            return n;
+        }
+
+        /// <summary>Replay folders set in Brawl Online's own settings file (its Settings: "rootSlpPath", "extraSlpPaths").</summary>
+        public static List<string> BrawlOnlineReplayFolders(string databasePath)
+        {
+            var list = new List<string>();
+            try
+            {
+                string settings = Path.Combine(Path.GetDirectoryName(databasePath), "Settings");
+                if (!File.Exists(settings)) return list;
+                string text = File.ReadAllText(settings);
+                foreach (var key in new[] { "rootSlpPath", "extraSlpPaths" })
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(text, "\"" + key + "\"\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|\\[[^\\]]*\\])");
+                    if (!m.Success) continue;
+                    foreach (System.Text.RegularExpressions.Match q in System.Text.RegularExpressions.Regex.Matches(m.Groups[1].Value, "\"((?:[^\"\\\\]|\\\\.)*)\""))
+                        list.Add(System.Text.RegularExpressions.Regex.Unescape(q.Groups[1].Value));
+                }
+            }
+            catch { }
+            return list;
+        }
+
+        sealed class Cache { public string Db; public DateTime At; public List<string> List; }
+        static readonly Cache FolderCache = new Cache();
+        /// <summary>Forgets the replay folders found (after the folders picked in Settings change).</summary>
+        public static void ReplayFoldersChanged() { lock (FolderCache) FolderCache.List = null; }
+
+        /// <summary>Where a replay is now: where Brawl Online saved it, or the same file in any replay folder (by its
+        /// month folder or loose in it).</summary>
+        public static string FindReplay(string file, string databasePath)
+        {
+            if (string.IsNullOrEmpty(file)) return null;
+            try
+            {
+                if (File.Exists(file)) return file;
+                var parts = file.Split('\\', '/');
+                string name = parts[parts.Length - 1], month = parts.Length > 1 ? parts[parts.Length - 2] : "";
+                List<string> folders;
+                lock (FolderCache)
+                {
+                    if (FolderCache.Db != databasePath || DateTime.UtcNow - FolderCache.At > TimeSpan.FromSeconds(60) || FolderCache.List == null)
+                    { FolderCache.Db = databasePath; FolderCache.At = DateTime.UtcNow; FolderCache.List = ReplayFolders(databasePath, count: false).Where(x => x.Replays > 0).Select(x => x.Folder).ToList(); }
+                    folders = FolderCache.List;
+                }
+                foreach (var f in folders.Select(x => (Folder: x, Replays: 1)))
+                {
+                    string a = Path.Combine(f.Folder, month, name), b = Path.Combine(f.Folder, name);
+                    if (File.Exists(a)) return a;
+                    if (File.Exists(b)) return b;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         // replays that couldn't be read yet (still being written, or broken): not read again unless they change
         static readonly HashSet<string> Unreadable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -287,6 +389,9 @@ namespace SkinManager.Core
                 try { var month = Path.GetDirectoryName(g.File); var root = Path.GetDirectoryName(month); if (Directory.Exists(root)) roots.Add(root); } catch { }
             try { var docs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Brawl Online"); if (Directory.Exists(docs)) roots.Add(docs); } catch { }
             try { if (backupFolder != null && Directory.Exists(backupFolder)) roots.Add(backupFolder); } catch { }
+            // the folders set in Brawl Online's settings and the ones picked in the app
+            try { foreach (var f in BrawlOnlineReplayFolders(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(backupFolder))), "x"))) if (Directory.Exists(f)) roots.Add(f); } catch { }
+            lock (ChosenReplayFolders) foreach (var f in ChosenReplayFolders) try { if (Directory.Exists(f)) roots.Add(f); } catch { }
             foreach (var root in roots)
             {
                 var folders = new List<string> { root };

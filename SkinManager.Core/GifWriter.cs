@@ -13,14 +13,20 @@ namespace SkinManager.Core
     public static class GifWriter
     {
         /// <summary>delay: hundredths of a second per picture (2 = 50 a second, about game speed).</summary>
-        public static void Save(string path, IList<Bitmap> frames, int delay = 2)
+        public static void Save(string path, IList<Bitmap> frames, int delay = 2) =>
+            Save(path, frames.Count, i => new Bitmap(frames[i]), delay);
+
+        /// <summary>The same, with each picture made when it's needed (and let go of right after): a long move's pictures
+        /// don't all have to be in memory twice. frame(i) is asked for twice per picture.</summary>
+        public static void Save(string path, int count, Func<int, Bitmap> frame, int delay = 2)
         {
-            if (frames.Count == 0) return;
-            int w = frames[0].Width, h = frames[0].Height;
-            var pixels = frames.Select(f => Pixels(f, w, h)).ToList();
+            if (count == 0) return;
+            int w, h;
+            using (var first = frame(0)) { w = first.Width; h = first.Height; }
+            int[] PixelsOf(int i) { using (var b = frame(i)) return Pixels(b, w, h); }
             // palette: most common colours, rounded to 5 bits a channel
             var counts = new Dictionary<int, int>();
-            foreach (var px in pixels) for (int i = 0; i < px.Length; i += 3) { int k = Key(px[i]); counts.TryGetValue(k, out int c); counts[k] = c + 1; }
+            for (int f = 0; f < count; f++) { var px = PixelsOf(f); for (int i = 0; i < px.Length; i += 3) { int k = Key(px[i]); counts.TryGetValue(k, out int c); counts[k] = c + 1; } }
             var palette = counts.OrderByDescending(kv => kv.Value).Take(256).Select(kv => kv.Key).ToList();
             while (palette.Count < 256) palette.Add(0);
             var pr = palette.Select(k => ((k >> 10) & 31) * 255 / 31).ToArray();
@@ -43,8 +49,9 @@ namespace SkinManager.Core
                 for (int i = 0; i < 256; i++) { o.Write((byte)pr[i]); o.Write((byte)pg[i]); o.Write((byte)pb[i]); }
                 // loop forever
                 o.Write(new byte[] { 0x21, 0xFF, 0x0B }); o.Write(System.Text.Encoding.ASCII.GetBytes("NETSCAPE2.0")); o.Write(new byte[] { 3, 1, 0, 0, 0 });
-                foreach (var px in pixels)
+                for (int f = 0; f < count; f++)
                 {
+                    var px = PixelsOf(f);
                     o.Write(new byte[] { 0x21, 0xF9, 4, 0 }); o.Write((ushort)delay); o.Write((byte)0); o.Write((byte)0);
                     o.Write((byte)0x2C); o.Write((ushort)0); o.Write((ushort)0); o.Write((ushort)w); o.Write((ushort)h); o.Write((byte)0);
                     var idx = new byte[w * h];

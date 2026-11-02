@@ -438,7 +438,11 @@ namespace SkinManager.App
                 catch (Exception e) { Program.Trace("preview of P+'s stage: " + e.Message); }
             if (IsDisposed) return;
             if (before != null) leftPic.Image = before;
-            if (now == null && before == null) { box.Height = 0; box.Margin = Padding.Empty; Relayout(r); }
+            // no picture (a stage with nothing to stand on that the app can find, like Castle Siege's first part): say so in the
+            // boxes rather than taking them away again, which made the list jump
+            void NoPicture(PictureBox p) => p.Controls.Add(new Label { Text = "No picture of this one", Font = Theme.Small, ForeColor = Theme.Muted, BackColor = Color.Transparent, AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
+            if (now == null) NoPicture(rightPic);
+            if (before == null) NoPicture(leftPic);
         }
 
         /// <summary>The map on all the files of a stage's normal version (Smashville's five times of day), as one choice.</summary>

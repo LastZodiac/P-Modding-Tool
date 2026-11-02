@@ -509,3 +509,158 @@ Set `SKINMANAGER_GB_BASE` / `SKINMANAGER_GB_IMAGES` to point the app at a local 
 - Mod Store collections: right-click a mod -> add to a collection / new collection (Favorite.Lists in favorites.json);
   Favorites has a dropdown to show one collection.
 - Frame Data: on a narrow window "Save GIF..." becomes "GIF..." so it doesn't cover the "Pause on quick hits" box.
+- Punish it / Compare: their text stayed put while the boxes behind it scrolled (on Windows, TextRenderer ignores the
+  view's scroll offset unless given PreserveGraphicsTranslateTransform: ScrollView.DrawT adds it). Controls on a
+  ScrollView ("You play", "Compare with") now scroll with it instead of covering the rows.
+- Frame Data's move filter buttons share the list's width when they don't fit ("Defense" was cut off).
+- "How accurate" left Frame Data's tab row: Settings → Frame data → "How accurate is the frame data?" opens it.
+  Settings' cards restack when one changes height (the SD card card could end up out of place).
+- Model Swapper lists your own costumes too: "costume 11: <skin name>" for ones added with the app (P+'s is still listed
+  above it), "costume N: yours (put on by hand)" for hand-installed ones (HandMods.Last; the list refreshes when that
+  look at the card finishes). Picking one previews it, "Save it as 3D" / "Save its pictures" use it, and it's the
+  costume the new model goes on (Installer.CostumeNow: the card's file).
+- (A "keep the costume's own head" option was tried in the Model Swapper and taken back out the same day: it's being
+  made as a separate Blender tool instead, BlenderKit/.)
+- Found while looking at Striker Peach (a hand-installed FitPeach19): P+'s Peach already has full legs under the dress
+  (polygon9 has points on LLegJ/LKneeJ/LFootJ), so a dress-less costume is the dress object (polygon19, skirt bones)
+  left out plus new parts rigged to P+'s bones. Smash 4 ZSS keeps Brawl's ZSS head objects (samus03_kao, matsuge).
+- Model Swapper buttons renamed "Save its pictures..." / "Save it as 3D..." (they now save whichever costume is picked).
+
+## Blender Kit (separate test tool, 2026-11-01) — BlenderKit/, built to "G:\P+ ModManager\Blender Kit"
+- P+ Blender Bridge.exe (BlenderKit/Bridge, compiles the Core sources, not part of the app):
+  - Send: costume → rigged GLB (RiggedExport): every bone as a node (local = inv(parent bind) × bind), skin with
+    inverse bind matrices, each default-shown object as its own mesh with JOINTS_0/WEIGHTS_0 (top 4), its picture
+    (image named after the TEX0). Objects ≥80% head-weighted are named "PPlusFace_". Folder: Documents\P+ Blender
+    Kit\<label>\ with costume.pac + pplus-costume.json (fighter, file number, hidden bones).
+  - Bring back (BlenderImport + ModelSwapKeeping.BuildKeeping, a copy of ModelSwap.Build): weights read from the GLB
+    skin by bone name, matched by position; keeps the costume's own objects that are hidden by default (items, other
+    faces) and, if ticked, its PPlusFace ones; a material's shader is only removed when no kept material shares it
+    (removing a shared one left a dangling Shaders entry: BrawlLib then crashed reading the file); pictures that come
+    back unchanged reuse the costume's own TEX0; cut-out alpha → CMPR. Then CheckModel (every MDL0 group entry inside
+    the model) and the app's memory budget (CostumeMemory.Shrink if over). Output "<label> (from Blender)\Fit*.pac".
+  - Checked: Striker Peach round trip (Blender 4.2 and 5.2): every point's bones identical, 1,002 KB / 1,029 KB,
+    passes P+ Modding Tool's checks; kpop body + Peach's head: 1,004 KB / 1,010 KB.
+- pplus_blender_kit.py v0.2 (Blender 4.0+, tested headless on 4.2.23 and 5.2.3): a 5-step panel (Open the costume, Your
+  model, Line up the joints, Finish, Save) that shows the current step's instructions. Save pictures for a 3D model maker
+  (Workbench, flat light, orthographic front/side/back, 1024 px, see-through background, same scale). Joint dots
+  (empties "Dot: <bone>" in "Joint dots") on HipN, NeckN, L/R ShoulderJ, ArmJ, HandN, LegJ, KneeJ, FootJ, ToeN; Fit =
+  segment warp (each bone segment rotated/stretched onto P+'s; inverse-distance^4 blend of the 3 nearest segments;
+  hands/head rigid), Undo fit, Compare. Finish: "Use P+'s head" / "Keep my model's head" (pplus_own_head). Rigging by
+  Data Transfer from a hidden joined copy of the costume (nearest face interpolated, limit 4, normalized).
+  Fit check (Striker with arms +25%, legs -15%): mean error 2.73% -> 0.31% of height.
+- pplus_start.py: the Bridge's "Open it in Blender" runs blender --python pplus_start.py -- "<glb>" "<bridge exe>":
+  loads the kit from its folder (nothing installed), opens the costume, opens the sidebar on the "P+ Kit" tab. The
+  panel's Save runs the Bridge with --bring "<glb>" [--own-head], which makes the costume file by itself.
+  Blender is found from blender-path.txt (Documents\P+ Blender Kit), the Uninstall registry keys, Program Files\Blender
+  Foundation, Steam, or the .blend association (newest version); otherwise asked once.
+- RiggedExport flattens layered eye materials (lid / shine / iris / white on TexCoord0..3) into one picture on the lid
+  UVs, so eyes aren't black in Blender and in the pictures.
+- If a costume is still over the memory budget after CostumeMemory.Shrink, the pictures that came from Blender (not the
+  costume's own TEX0 names) are halved, biggest first, down to 128 px, and the notes say so (P+ head + its blink
+  textures leave little room: Striker + kpop body with P+ head came to 1,013 KB / 1,029 KB with the body picture at 128).
+- "Install the P+ Kit into Blender anyway" runs Blender in the background: addon_install + addon_enable + save_userpref.
+- Kit v0.3 (after the first real try with kpop peach 2 on Striker Peach): 6 steps (open, your model, clean up, joints,
+  shape and finish, check and save).
+  - Model import welds UV-seam splits (glTF merge_vertices), so a Meshy model is a few real pieces (body, hair, shoes...)
+    instead of ~1,200. Sized by the hands' height when its arms are out (hair/crown don't count); Bigger/Smaller.
+  - Clean up: "Take off the hair" removes non-body pieces reaching above the neck; Click pieces / Box a part + Take off
+    (whole piece or just the selection); Put it all back (hidden copy "Your model (as it came in)").
+  - Fit rewritten: parts = segments (limbs, spine), ends (hands, head) and regions (hips = pelvis+hips, chest =
+    neck+shoulders, one affine map each: the old pelvis->hip segments turned the crotch in opposite directions and
+    pinched it). Smooth inverse-distance^4 weights with no nearest-3 cut-off (the cut-off made creases), never across
+    the body's middle.
+  - Shape handles: an armature on the fitted model (Hips, Body, Head, upper arm/forearm/hand, thigh/shin/foot, parented,
+    inherit_scale NONE) with the same weights; buttons nudge / longer / shorter / thicker / thinner / turn the selected
+    handle (and its mirror with "Both sides"), reset, keep (applies the modifier). Arrow buttons move selected joint dots too.
+  - Rigging: after the Data Transfer, weights are smoothed over the model's surface (10 passes) and a point never keeps
+    an other-side bone (pieces off to one side, like shoes, count as that side; all-wrong points get the mirrored bone).
+    Fixed the shards in poses (feet touching took the other leg's bones; Striker's own boots have some).
+  - Test move is a keyframed loop (world-axis rotations, play/stop toggle); every step has Undo; Save explains when the
+    model isn't finished; "Keep my model's head" no longer leaves the costume's body visible (it was saved twice).
+- Bridge: a GLB not in a Bridge folder is made for the costume picked in the Bridge (asks first); a GLB with shapes not
+  rigged to P+ (Blender's own Export) is refused with what to do. Checked: kpop peach 2 on Peach costume 11 (P+ head),
+  Blender 4.2.23 and 5.2.3, Bridge in game poses, 1,028 KB / 1,029 KB.
+- Kit Finish redoes the model's picture: new Smart UV layout ("P+ picture"), Cycles bake of the diffuse colour from the
+  old picture to a 1024 one, one plain material. A Meshy atlas (4096, hundreds of scraps, mostly hair) turned to noise
+  when the Bridge shrank it to fit; the baked one stays clean. Bridge: pictures no material points at (the old body's
+  speclevel, Striker's leftover p_u_* dress pictures) are taken out first (frames like PeachTexEyeLid.0N stay);
+  new pictures are halved down to 128 at most. kpop peach 2 + P+ head on costume 11: body picture 512, 1,006 / 1,029 KB.
+- The Bridge shows where it saved the costume (full path), opens Explorer with it selected, and has a
+  "Show the costume file" button over the results.
+- CRASH FIX (2026-11-01): taking out "unused" pictures removed p_u_canopy/frill/shank/top_frill from the costume's
+  "Texture Data [0] [Group 1]": Peach's parasol (WpnPeachKassar, in FitPeachEtcNN.pac) takes its pictures from there,
+  so the game crashed loading her. Now: a picture is only taken out if it's in the costume model's own BRRES and no
+  MDL0 in Fit<P>.pac / every Fit<P>Etc*.pac on the card points at it (no card: nothing is taken out); and any picture
+  those files use that the costume had and lost is put back (TEX0 exported from the original, re-added to the BRRES of
+  the same name). Shrinking now halves one step at a time with the lighter formats after each, so pictures only get
+  as small as needed (kpop peach 2 + P+ head: 256, 1,022 / 1,029 KB, parasol pictures kept).
+- CRASH FIX 2: that costume still crashed. Peach's card: FitPeach19 (Striker) unpacks to 1,035,456 + Etc19 224,800 and
+  works; ours was 1,044,672 (+9 KB), under the computed room (FighterBlock - Headroom - Motion - Etc = 1,053,568) but
+  over every costume known to work. The Bridge's budget is now the original costume's own unpacked size (the computed
+  room isn't reliable). The kit's Finish also lightens models over 4,000 triangles (Decimate collapse) before rigging:
+  kpop peach 2 6,765 -> 5,450 triangles in the costume, body picture 512, 1,033,152 <= 1,035,456. NOTE: P+ Modding
+  Tool's own check (max(room, original)) let the 1,044,672 file through: the app's rule needs the same change.
+- CRASH FIX 3 (the real one, from Brawl Online's dolphin.log): every crash was at "fighter instance create PEACH" with
+  "Invalid write to 0x0000011c, PC = 0x807135b4" while Fighter1Resource was only 96% used (5.09 MB). The costumes had
+  477 / 472 bone mixes (BrawlLib _influences) where Striker has 300: BuildKeeping budgeted the NEW shapes' mixes at the
+  costume's whole count and forgot the kept shapes (P+ head, faces, items) have their own (180). Now: new mixes get
+  original - kept (300 - 180 = 120); the Bridge counts the result and rebuilds with a lower budget if it's still over.
+  kpop peach 2 on costume 11: 280 mixes, 995 KB / 1,011 KB.
+
+
+## Fast save (2026-11-01: tried as "P+ Modding Tool (fast save test).exe", now the normal way to save)
+- Why saves were slow: each save copied the whole SD card (4 GB) to sd.raw.skinmanager-new, changed it, swapped it in,
+  then moved the old card to Data\LastSave for "Undo last save" (another 4 GB copy when Data is on another drive).
+- Fast save (Installer.FastSave; Program.FastSave is true since the test build worked on Senpai's card):
+  Fat32Image(path, writable, deferred: true) keeps every write in memory (4 KB blocks; reads see them). Nothing reaches
+  the card until Commit: the blocks that really changed are compared with the card, their current bytes written to a
+  journal (Data\LastSave.new\card-before.journal, flushed, state 1), then the new blocks written and flushed (state 2),
+  then the usual read-back check; the mods list saved (state 3); LastSave.FinishJournal makes it the undo point.
+  A failed save before Commit leaves the card untouched; after it, CardJournal.RollBack puts it back.
+  Undo last save = RollBack of that journal. On start, RecoverInterruptedSave rolls back a journal left at state 1 or 2
+  (the save stopped halfway; the mods list is still the old one).
+- Checked: 5 random sequences of 60 writes/deletes on a FAT32 image (mkfs.fat): old way and fast way give the same
+  files, folders and free space (only folder-entry clock stamps differ); undo puts the image back byte for byte; a
+  journal with half the blocks written and the save stopped puts it back byte for byte; recovery acts on states 1-2
+  and not 3. Installer on the 2 GB test card (install, undo, off, on, a failing save, delete both): same results as
+  before, card untouched by the failing save, undo exact; about 1 s a save against 10-12 s copying the card.
+
+## Stage problems we know, and what catches each (regression list)
+Every stage mod goes through these before it's put on the card. When a new kind of failure turns up, it's added here
+with its evidence, and a check for it.
+1. Too big a file for online play: SkinCheck.Size against StageCheck.MaxStageBytes (P+'s biggest stage file).
+2. Unpacks past the game's stage memory: StageCheck.MemoryCheck (StageResource 0x666700 bytes; a stage that unpacked to
+   8.2 MB gave "gfPoolFree Error" right after loading, then froze). Pictures nothing visible uses are made tiny in
+   "looks" installs so a map plus P+'s pictures fits.
+3. Plays differently (online desync, not a crash): StageCheck.Compare of floors, platforms, blast zones, spawns, camera,
+   moving parts and the models the stage program names. Fixed by MakeMatch (P+'s gameplay parts copied in) or by
+   "its looks on P+'s stage" (SwapLooks).
+4. The stage program works with parts the map built differently: StageCheck.ProgramParts (names from the slot's module,
+   like StgGreenhillMain) -> refused for 1:1, goes in as looks.
+5. Unpacks past the room its stage program leaves (freezes as the stage loads): StageCheck.RoomFor + MemoryCheck(file,
+   bytes, program), fixed by StageCheck.FitMemory. The game loads a stage file at the end of stage memory and unpacks it
+   in place from the front; some stage programs take memory first. Pokemon Stadium 2 (st_stadium_static.rel) takes
+   0x209800 bytes, leaving 0x45CF00 (4,468 KB; the app allows 4,403 KB, 64 KB kept free). "KOF Stadium [PS2 ALT]"
+   unpacked to 4,807 KB (whole file) and 5,666 KB (looks on P+'s file): the unpacked parts ran into packed data not yet
+   read and the game froze (dolphin.log: invalid reads at PC 0x80014de4 = gfArchive's entry walk, then "gfPoolFree
+   Error"). Evidence: main.dol disassembly (0x80014da8 walks ARC entry headers) and a simulation of the in-place unpack
+   that reproduces the game's exact bad address (0xa1ae2dea) from the looks file; the same model puts P+'s Stadium 2
+   file and its Gateway and Abandoned alts inside the room and both KOF installs past it. FitMemory first leaves out
+   effects banks P+'s file doesn't have, then halves the biggest pictures until the file fits; StageForNow re-fits
+   stages already on the card at the next save. KOF now: 4,364 KB "made to match" (effects bank left out, one shadow
+   picture at half size), simulated unpack ends 103 KB clear. Other stage programs: only the whole stage memory is
+   known (item 2); add a program to StageCheck.TakenFirst when one is measured.
+   (Earlier guess, withdrawn: that KOF's effects bank ef_StgStadium froze the game. A looks install without it froze
+   the same way, and FD [PM] carries an effects bank P+'s file doesn't and works. The structure check that sent such
+   maps to looks installs is removed.)
+
+## Stage pictures (previews): what used to come out blank, and why
+Checked on all 286 stage files on the card: 281 draw now (before: 256). Still blank: Castle Siege's three files (no
+floors in the file at all) and two files that aren't stages (character roll, dual dummy).
+- Floors that all ride on a part, with only walls fixed (Pokemon Stadium 2 and its alts, KOF Stadium, Port Town's PS2
+  alt...): StageCheck.StandOn now takes the floors of the first set of collisions that has any.
+- A rotating stage's sides are floor, wall and ceiling at once (Brinstar Depths): any surface with the floor bit counts.
+- Broken points (not a number) in a model made the drawing stop (Golden Temple's Tempest, Pictochat alts, Luigi's
+  Mansion alts): those triangles are skipped.
+- When there's still no picture, the stage window says "No picture of this one" instead of taking the box away (which
+  made the window jump).

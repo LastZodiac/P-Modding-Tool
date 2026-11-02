@@ -206,8 +206,8 @@ namespace SkinManager.App
                 case "Model Swapper": return new List<TutorialStep>
                 {
                     new TutorialStep("Model Swapper (work in progress)", "Put a 3D model from another game or program on a P+ character. It keeps P+'s skeleton and animations, so hits stay the same for both players. Results still vary from model to model."),
-                    new TutorialStep("Best results: start from P+'s own model", "\"Save P+ Model as 3D\" gives you the character's real model. Paint a new look on it in a 3D program (Blender, for example), then load the result here: it fits the skeleton exactly.", Button(p, "Save P+ Model as 3D")),
-                    new TutorialStep("Or bring any model", "Choose a .glb, .gltf, .obj or .dae file. Most 3D programs can save one; \"Save P+ Model Pictures\" gives you P+'s proportions to copy.", Button(p, "Choose a model")),
+                    new TutorialStep("Best results: start from P+'s own model", "\"Save it as 3D\" gives you the costume's real model (P+'s, or one of yours on your card). Paint a new look on it in a 3D program (Blender, for example), then load the result here: it fits the skeleton exactly.", Button(p, "Save it as 3D")),
+                    new TutorialStep("Or bring any model", "Choose a .glb, .gltf, .obj or .dae file. Most 3D programs can save one; \"Save its pictures\" gives you the costume's proportions to copy.", Button(p, "Choose a model")),
                     new TutorialStep("Which character and costume", "Pick the fighter and the costume slot whose skeleton it uses.", Of<ComboBox>(p)),
                     new TutorialStep("Fix the fit", "If arms or legs look off, \"Line up the joints\" lets you drag dots onto the joints. Try a few poses with \"Show it\".", Button(p, "Line up the joints")),
                     new TutorialStep("Make it a costume", "When it looks right in a few poses, make it a costume. It goes through the same safety checks as any skin.", Button(p, "Make it a costume")),

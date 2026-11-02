@@ -311,22 +311,12 @@ namespace SkinManager.App
             } while (_again);
         }
 
-        /// <summary>Where a replay is: where Brawl Online saved it, or the same month folder in this PC's Documents.</summary>
-        static string Locate(string file)
+        /// <summary>Where a replay is now: where Brawl Online saved it, or the same file in any replay folder (Brawl Online's
+        /// and the ones picked in Settings).</summary>
+        string Locate(string file)
         {
-            if (string.IsNullOrEmpty(file)) return null;
-            try
-            {
-                if (System.IO.File.Exists(file)) return file;
-                var parts = file.Split('\\', '/');
-                string month = parts.Length > 1 ? parts[parts.Length - 2] : "";
-                string here = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Brawl Online", month, parts[parts.Length - 1]);
-                if (System.IO.File.Exists(here)) return here;
-                // Brawl Online's backup replay folder (used when it can't save in Documents)
-                string backup = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Brawl Online", "netplay", "User", "Replays", month, parts[parts.Length - 1]);
-                return System.IO.File.Exists(backup) ? backup : null;
-            }
-            catch { return null; }
+            var install = _install();
+            return install == null ? (System.IO.File.Exists(file ?? "") ? file : null) : MatchHistory.FindReplay(file, MatchHistory.DatabasePath(install));
         }
 
         Dictionary<int, MoveTable> _tables;

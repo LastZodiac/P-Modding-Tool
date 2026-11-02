@@ -6,7 +6,9 @@
   </trustInfo>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <!-- not DPI-aware on purpose: the app draws its pages at fixed sizes, and with Windows scaling (150% etc.) the text grew
+           while the boxes it sits in didn't, so it was cut off. Windows scales the whole window up instead. -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">false</dpiAware>
     </windowsSettings>
   </application>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">

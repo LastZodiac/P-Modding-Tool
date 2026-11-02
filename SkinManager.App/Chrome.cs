@@ -32,15 +32,20 @@ namespace SkinManager.App
         [DataMember] public int? Glow, Glow2;                 // the built-in background's two glows (ARGB; null: gold and blue)
         public static readonly Color GlowGold = Color.FromArgb(255, 176, 46), GlowBlue = Color.FromArgb(90, 110, 255);
         [DataMember] public string CardFile;                  // your own Dolphin's sd.raw (or its folder) to mod instead of Brawl Online's (null: Brawl Online's)
+        [DataMember] public System.Collections.Generic.List<string> ReplayFolders;   // replay folders picked in Settings (read as well as Brawl Online's)
+        public void ApplyReplayFolders() { lock (SkinManager.Core.MatchHistory.ChosenReplayFolders) { SkinManager.Core.MatchHistory.ChosenReplayFolders.Clear(); if (ReplayFolders != null) SkinManager.Core.MatchHistory.ChosenReplayFolders.AddRange(ReplayFolders); } }
         public string HotkeyText { get => string.IsNullOrEmpty(Hotkey) ? "Alt+T" : Hotkey; set => Hotkey = value == "Alt+T" ? null : value; }
 
         static string FilePath => Path.Combine(Program.DataFolder, "look.json");
 
         public static LookSettings Load()
         {
-            try { if (File.Exists(FilePath)) using (var s = File.OpenRead(FilePath)) return (LookSettings)new DataContractJsonSerializer(typeof(LookSettings)).ReadObject(s); }
+            LookSettings look = null;
+            try { if (File.Exists(FilePath)) using (var s = File.OpenRead(FilePath)) look = (LookSettings)new DataContractJsonSerializer(typeof(LookSettings)).ReadObject(s); }
             catch { }
-            return new LookSettings();
+            look = look ?? new LookSettings();
+            look.ApplyReplayFolders();
+            return look;
         }
 
         public void Save()

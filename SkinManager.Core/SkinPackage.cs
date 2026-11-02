@@ -221,7 +221,8 @@ namespace SkinManager.Core
             double shape = (double)size.Width / Math.Max(1, size.Height) / want;
             if (shape > 1.3 || shape < 0.7) return null;
             var num = Regex.Matches(System.IO.Path.GetFileNameWithoutExtension(file), @"\d+").Cast<Match>().LastOrDefault();
-            return new PackagePicture { Path = path, Kind = kind.Value, Number = num != null ? (int?)int.Parse(num.Value) : null };
+            // a long run of digits (a date or an id in the name, "csp_20261101123456") isn't a costume number
+            return new PackagePicture { Path = path, Kind = kind.Value, Number = num != null && int.TryParse(num.Value, out int n) ? (int?)n : null };
         }
 
         /// <summary>The picture of a kind that best fits a costume (same number in its name, else the only one).</summary>
