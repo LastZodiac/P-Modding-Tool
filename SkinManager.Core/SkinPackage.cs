@@ -8,11 +8,15 @@ using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>One costume file in a download, and what kind of part it is (the costume itself, Etc, Final Smash, a
+    /// Kirby hat...).</summary>
     public sealed class CostumeFile
     {
         public string Path;
         public string Kind;      // "" main costume, "Etc", "Final", "Entry", "Result", a Kirby hat (e.g. "Donkey"), or "Nana"
         public int Number;       // NN in the file name (-1 for XX)
+        /// <summary>The file name this part gets on the card when it goes in a given costume slot (Nana's files use her
+        /// own name).</summary>
         public string TargetName(Character c, int fileNumber)
         {
             if (Kind == "Nana") return $"Fit{c.PartnerPrefixes[0]}{fileNumber:00}.pac";
@@ -22,6 +26,7 @@ namespace SkinManager.Core
             Kind == "Nana" ? Build.Pf + "/fighter/" + c.PartnerPrefixes[0] : c.FighterFolderPath;
     }
 
+    /// <summary>One costume found in a download: its character, number, version and all its files.</summary>
     public sealed class PackageCostume
     {
         public Character Character;
@@ -49,6 +54,8 @@ namespace SkinManager.Core
 
         static readonly string[] Extras = { "Etc", "Final", "Entry", "Result" };
 
+        /// <summary>Reads a costume file name such as FitMarioEtc05 [vBrawl].pac; null if it isn't a costume file of a
+        /// fighter the app knows.</summary>
         public static CostumeName Parse(string file)
         {
             string ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
@@ -90,6 +97,7 @@ namespace SkinManager.Core
         }
     }
 
+    /// <summary>A picture found in a download that looks like a CSP, battle portrait or stock icon.</summary>
     public sealed class PackagePicture
     {
         public string Path;
@@ -108,6 +116,7 @@ namespace SkinManager.Core
         public string ThumbUrl;
     }
 
+    /// <summary>What a downloaded skin contains: its costumes, pictures, stage files and songs.</summary>
     public sealed class SkinPackage
     {
         public string Folder;
@@ -120,6 +129,8 @@ namespace SkinManager.Core
         public List<string> StageFiles = new List<string>();   // STGxxx.pac files in the download
         public List<string> SongFiles = new List<string>();    // .brstm music files in the download
 
+        /// <summary>Looks through every file in an unpacked download and sorts it into costumes, pictures, stages,
+        /// songs or ignored.</summary>
         public static SkinPackage Scan(string folder, string name)
         {
             var pkg = new SkinPackage { Folder = folder, Name = name };
@@ -198,6 +209,8 @@ namespace SkinManager.Core
                 .ToList();
         }
 
+        /// <summary>Treats a picture as a CSP, battle portrait or stock icon, by its name or else its shape; null if
+        /// it's none of them (or is shaped too unlike the game's frame to use).</summary>
         static PackagePicture TryPicture(string path, string file)
         {
             Size size;

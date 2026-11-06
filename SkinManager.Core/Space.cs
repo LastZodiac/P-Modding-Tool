@@ -3,10 +3,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>How the card's space splits up: P+, the mods that are on, the margin kept free, and what each mod costs.</summary>
     public sealed class SpaceReport
     {
         public long Total, Free, Margin = PPlusCard.MinFreeBytes;
@@ -16,8 +16,11 @@ namespace SkinManager.Core
         public Dictionary<string, long> Cost = new Dictionary<string, long>();   // mod id -> extra space when on (can be negative)
     }
 
+    /// <summary>Works out how much room the card has and what each mod takes.</summary>
     public static class Space
     {
+        /// <summary>Measures the card: each mod's cost is the size of its files minus the files they replace (as stored on the
+        /// card), and the mods that are on are added up.</summary>
         public static SpaceReport Measure(Fat32Image card, Library lib)
         {
             var r = new SpaceReport { Total = card.TotalBytes, Free = card.FreeBytes };
@@ -28,7 +31,7 @@ namespace SkinManager.Core
                 {
                     string copy = Path.Combine(lib.SkinFolder(s.Id), Path.GetFileName(f.CardPath));
                     long mine = File.Exists(copy) ? new FileInfo(copy).Length : 0;
-                    cost += card.OnCard(mine) - card.OnCard(lib.OriginalSize(f.CardPath) ?? PPlusSize(card, f.CardPath, s.Enabled ? -1 : 0));
+                    cost += card.OnCard(mine) - card.OnCard(lib.OriginalSize(f.CardPath) ?? PPlusSize(card, f.CardPath));
                 }
                 r.Cost[s.Id] = cost;
                 if (s.Enabled) r.Mods += cost;
@@ -37,7 +40,7 @@ namespace SkinManager.Core
             {
                 string copy = Path.Combine(lib.StageFolder(s.Id), Path.GetFileName(s.CardPath));
                 long mine = File.Exists(copy) ? new FileInfo(copy).Length : 0;
-                long cost = card.OnCard(mine) - card.OnCard(lib.OriginalSize(s.CardPath) ?? PPlusSize(card, s.CardPath, s.Enabled ? -1 : 0));
+                long cost = card.OnCard(mine) - card.OnCard(lib.OriginalSize(s.CardPath) ?? PPlusSize(card, s.CardPath));
                 r.Cost[s.Id] = cost;
                 if (s.Enabled) r.Mods += cost;
             }
@@ -45,12 +48,9 @@ namespace SkinManager.Core
         }
 
         // no original saved (it's saved when a mod first goes on): what's on the card now is P+'s
-        static long PPlusSize(Fat32Image card, string path, long unused) => card.Exists(path) ? card.FileSize(path) : 0;
+        static long PPlusSize(Fat32Image card, string path) => card.Exists(path) ? card.FileSize(path) : 0;
 
-        /// <summary>Extra space putting a file of this size at this path takes (what's there now is replaced).</summary>
-        public static long Extra(Fat32Image card, string path, long newSize) =>
-            card.OnCard(newSize) - (card.Exists(path) ? card.OnCard(card.FileSize(path)) : 0);
-
+        /// <summary>A size in words ("12 MB", "1.4 GB", "300 KB"); negative sizes get a minus sign.</summary>
         public static string MB(long bytes) => bytes < 0 ? "−" + MB(-bytes)
             : bytes >= 1000L * 1024 * 1024 ? $"{bytes / 1073741824.0:0.0} GB"
             : bytes >= 10L * 1024 * 1024 ? $"{bytes / 1048576.0:0} MB" : bytes >= 1024 * 1024 ? $"{bytes / 1048576.0:0.0} MB" : $"{Math.Max(0, bytes / 1024)} KB";

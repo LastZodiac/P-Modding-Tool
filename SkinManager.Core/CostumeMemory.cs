@@ -10,14 +10,12 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using BrawlLib.Imaging;
-using BrawlLib.Internal.Drawing;
-using BrawlLib.Internal.IO;
 using BrawlLib.SSBB.ResourceNodes;
 using BrawlLib.Wii.Textures;
 
 namespace SkinManager.Core
 {
+    /// <summary>Checks a costume fits in the game's memory and makes it smaller when it doesn't (so it can't crash a match).</summary>
     public static class CostumeMemory
     {
         /// <summary>The memory block each player's character gets (Fighter1Resource..Fighter4Resource: 5.33 MB).</summary>
@@ -38,6 +36,7 @@ namespace SkinManager.Core
             return pac.Length;
         }
 
+        /// <summary>What shrinking a costume did: the new file (if it fits now), the sizes before and after, and what changed.</summary>
         public sealed class Shrunk
         {
             public byte[] Bytes;          // the smaller costume (null: it couldn't be made small enough)

@@ -6,6 +6,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Turns a player's habits into a few plain lines about what they tend to do and how to punish
+    /// it.</summary>
     public static class Scouting
     {
         /// <summary>The most telling habits first. games: how many replays they're from. typical: everyone's habits

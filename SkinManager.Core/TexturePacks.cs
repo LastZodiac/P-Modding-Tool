@@ -14,6 +14,8 @@ using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>One Dolphin texture pack in My Mods: where its pictures are, whether it's on, and where it came
+    /// from.</summary>
     [DataContract]
     public sealed class TexturePack
     {
@@ -32,6 +34,7 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public string SourcePath;
     }
 
+    /// <summary>Adds, turns on and off, and deletes Dolphin texture packs for Brawl Online's Dolphin.</summary>
     public sealed class TexturePacks
     {
         public const string GameId = "RSBE01";
@@ -42,6 +45,8 @@ namespace SkinManager.Core
         readonly string _data;
         public List<TexturePack> All { get; private set; } = new List<TexturePack>();
 
+        /// <summary>Loads the list of packs from the app's Data folder (an empty list if it's missing or
+        /// unreadable).</summary>
         public TexturePacks(BrawlOnlineInstall install, string dataFolder)
         {
             _install = install; _data = dataFolder;
@@ -61,6 +66,7 @@ namespace SkinManager.Core
         public string OffFolder(TexturePack p) => Path.Combine(_data, "TexturePacks", p.Id);
         public string FolderOf(TexturePack p) => p.Enabled ? OnFolder(p) : OffFolder(p);
 
+        /// <summary>Saves the list of packs (through a temporary file).</summary>
         void Save()
         {
             Directory.CreateDirectory(_data);
@@ -110,12 +116,15 @@ namespace SkinManager.Core
             File.WriteAllText(GfxIni, string.Join("\r\n", lines) + "\r\n", new UTF8Encoding(false));
         }
 
+        /// <summary>Stops with a message if Brawl Online or its Dolphin is open (Dolphin would overwrite the settings
+        /// on closing).</summary>
         void NotRunning()
         {
             if (_install.IsRunning(out string what))
                 throw new InvalidOperationException($"Close {what} first. Dolphin reads its texture settings when it starts and saves them when it closes.");
         }
 
+        /// <summary>Stops with a message if the drive can't fit this many bytes plus a 1 GB cushion.</summary>
         void Room(long bytes)
         {
             var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(UserFolder)));
@@ -177,6 +186,7 @@ namespace SkinManager.Core
             Save();
         }
 
+        /// <summary>Deletes a pack's pictures and takes it off the list.</summary>
         public void Delete(TexturePack pack)
         {
             if (pack.Enabled) NotRunning();
@@ -186,6 +196,8 @@ namespace SkinManager.Core
             Save();
         }
 
+        /// <summary>A folder name under RSBE01 that no other pack (or folder) uses yet, adding " 2", " 3"... if
+        /// needed.</summary>
         string UniqueFolder(string baseName)
         {
             string n = baseName; int k = 2;
@@ -193,12 +205,14 @@ namespace SkinManager.Core
             return n;
         }
 
+        /// <summary>A pack name made safe to use as a folder name (at most 60 characters).</summary>
         static string Safe(string name)
         {
             string s = Regex.Replace(name ?? "Texture pack", @"[^\w\-\. ]", "_").Trim(' ', '.');
             return s.Length == 0 ? "Texture pack" : s.Length > 60 ? s.Substring(0, 60) : s;
         }
 
+        /// <summary>The folder holding the nearest RSBE01 folder above dir (not going above stop), or null.</summary>
         static string FindUp(string dir, string stop)
         {
             for (var d = dir; d != null && d.Length >= stop.Length; d = Path.GetDirectoryName(d))
@@ -206,6 +220,7 @@ namespace SkinManager.Core
             return null;
         }
 
+        /// <summary>The deepest folder that all the given folders are inside.</summary>
         static string CommonRoot(List<string> dirs)
         {
             string root = dirs[0];
@@ -214,6 +229,8 @@ namespace SkinManager.Core
             return root;
         }
 
+        /// <summary>Moves a folder: a quick rename on the same drive, otherwise a copy (with progress) and then
+        /// deleting the old one.</summary>
         static void MoveFolder(string from, string to, Action<int> progress)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(to));

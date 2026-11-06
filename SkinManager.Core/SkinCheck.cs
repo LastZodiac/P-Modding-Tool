@@ -7,6 +7,7 @@ using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>One line of a skin check: passed or not, a short title and a plain-language explanation.</summary>
     public sealed class CheckResult
     {
         public bool Passed;
@@ -14,9 +15,11 @@ namespace SkinManager.Core
         public string Detail;    // plain-language explanation
     }
 
+    /// <summary>Checks a costume before it goes on the card: file size for online play and whether it's safe for
+    /// gameplay.</summary>
     public static unsafe class SkinCheck
     {
-        /// <summary>The model bones the character's hurtboxes ride on, read from the fighter's moveset (Fit<Name>.pac).</summary>
+        /// <summary>The model bones the character's hurtboxes ride on, read from the fighter's moveset (Fit&lt;Name&gt;.pac).</summary>
         public static int[] HurtboxBones(byte[] fighterPac)
         {
             using (var tmp = new TempFile(".pac", fighterPac))
@@ -37,6 +40,8 @@ namespace SkinManager.Core
 
         static int BE(byte[] b, int at) => at < 0 || at + 4 > b.Length ? -1 : (b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3];
 
+        /// <summary>Finds the hurtbox list in a raw moveset file and returns the bone each hurtbox rides on; null if it
+        /// isn't a moveset.</summary>
         static int[] ParseHurtboxes(byte[] b)
         {
             int size = BE(b, 0), lookupOff = BE(b, 4), lookupCount = BE(b, 8), dataCount = BE(b, 12), extCount = BE(b, 16);
@@ -94,6 +99,8 @@ namespace SkinManager.Core
             : kind == "Etc" || kind == "Final" || kind == "Entry" || kind == "Result" ? PPlusCard.MaxExtraFileBytes
             : PPlusCard.MaxKirbyHatBytes;
 
+        /// <summary>Whether a costume file is small enough for online play, compared with the biggest file of its kind
+        /// P+ ships.</summary>
         public static CheckResult Size(string fileName, long bytes, long limit) => new CheckResult
         {
             Passed = bytes <= limit,
@@ -110,6 +117,7 @@ namespace SkinManager.Core
             public float[][] Matrices;
         }
 
+        /// <summary>Reads the bone names and bind poses from a costume file's model; null if it has no model.</summary>
         public static Skeleton ReadSkeleton(byte[] costume)
         {
             using (var tmp = new TempFile(".pac", costume))
@@ -154,6 +162,8 @@ namespace SkinManager.Core
             };
         }
 
+        /// <summary>Why two skeletons differ in a way that matters (hurtbox bones' names and places, then bone order);
+        /// null if they match.</summary>
         static string Compare(Skeleton a, Skeleton b, int[] hurtboxBones)
         {
             int common = Math.Min(a.Names.Length, b.Names.Length);

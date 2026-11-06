@@ -1,12 +1,12 @@
 // The P+ v3.2 characters the modding tool supports, with the IDs P+ uses for each.
 // Every row was checked against the real card: the slot list (costumeslots/NN.masq) has as many
 // entries as the character's battle portraits (InfFaceCCCC) and select-screen portraits.
-using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>One P+ fighter: where its costume files, costume slot list, CSPs, battle portraits and stock icons live
+    /// on the card.</summary>
     public sealed class Character
     {
         public int SlotListId;      // costumeslots/NN.masq
@@ -27,6 +27,7 @@ namespace SkinManager.Core
         public override string ToString() => Name;
     }
 
+    /// <summary>Every P+ fighter the app knows, with the numbers the game uses to find its files.</summary>
     public static class Characters
     {
         static Character C(int slotList, int cosmetic, string name, string folder, string prefix, params string[] partners) =>
@@ -77,10 +78,5 @@ namespace SkinManager.Core
             C(41, 39, "Roy", "Roy", "Roy"),
             C(42, 42, "Knuckles", "Knuckles", "Knuckles"),
         };
-
-        /// <summary>The character whose costume files start with Fit + this prefix (or a partner prefix).</summary>
-        public static Character ByFilePrefix(string prefix) =>
-            All.FirstOrDefault(c => string.Equals(c.FilePrefix, prefix, StringComparison.OrdinalIgnoreCase)) ??
-            All.FirstOrDefault(c => c.PartnerPrefixes.Any(p => string.Equals(p, prefix, StringComparison.OrdinalIgnoreCase)));
     }
 }

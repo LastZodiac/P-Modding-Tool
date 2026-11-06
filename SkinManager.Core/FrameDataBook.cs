@@ -2,13 +2,14 @@
 // players say them (jab, forward tilt, nair, up B...), grouped like a frame data site.
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>One row of a fighter's frame data: a move's name, its section, the animations it plays and its
+    /// numbers.</summary>
     public sealed class MoveEntry
     {
         public string Group, Name;      // "Aerials", "Neutral air"
@@ -21,6 +22,8 @@ namespace SkinManager.Core
         public bool Sets;               // it puts out something that only hits later, when set off (Snake's C4)
     }
 
+    /// <summary>Everything read for one fighter's frame data: its moveset, its model and animations (for drawing) and
+    /// its rows.</summary>
     public sealed class FighterBook
     {
         public Character Character;
@@ -28,7 +31,6 @@ namespace SkinManager.Core
         public byte[] Costume, Motion;  // for drawing
         public Dictionary<string, int> Lengths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         public List<MoveEntry> Entries = new List<MoveEntry>();
-        public float LandingLag(int off) => Moves.Attr(off);
         public Body Body;                                   // weight, gravity, size... and the standing body
         public Dictionary<MoveData, List<FramePlace>> Places; // where each move's hitboxes are (read when combos are first asked for)
         public Moveset Item;                                // an item the fighter makes, its own scripts (R.O.B.'s gyro)
@@ -46,10 +48,13 @@ namespace SkinManager.Core
         }
     }
 
+    /// <summary>Reads a fighter's moveset off the card and turns it into named rows, grouped like a frame data
+    /// site.</summary>
     public static class FrameDataBook
     {
         public static readonly string[] Groups = { "Ground attacks", "Aerials", "Neutral B", "Side B", "Up B", "Down B", "Grabs & throws", "Dodges & getups", "Other moves" };
         public static readonly string[] Tabs = { "All", "Ground", "Air", "Specials", "Grabs", "Defense" };
+        /// <summary>True when a row belongs under a filter button ("Ground", "Air", "Specials"...).</summary>
         public static bool InTab(MoveEntry e, string tab) =>
             tab == "All" || tab == "Ground" && e.Group == "Ground attacks" || tab == "Air" && e.Group == "Aerials" ||
             tab == "Specials" && e.Group.EndsWith(" B") || tab == "Grabs" && e.Group == "Grabs & throws" || tab == "Defense" && e.Group == "Dodges & getups";
@@ -146,6 +151,8 @@ namespace SkinManager.Core
             ("Diddy", "SpecialN", "peanut", "ItmDiddyPeanutsParam"),
         };
 
+        /// <summary>Reads the items some specials pull out (Link's bomb, Peach's turnip...) from the fighter's own item
+        /// file or P+'s shared item file, so their hitboxes can be shown.</summary>
         static void ReadItems(Fat32Image card, Character c, FighterBook book)
         {
             foreach (var it in ItemMoves.Where(x => x.Fighter == c.FilePrefix))
@@ -222,6 +229,9 @@ namespace SkinManager.Core
             catch { book.Item = null; }
         }
 
+        /// <summary>Makes the fighter's rows: the standard moves by name, then every special, then anything else that
+        /// hits, with the projectiles, items and one-off fixes for particular fighters, then merged and put in
+        /// order.</summary>
         static void Build(FighterBook b)
         {
             var m = b.Moves;
@@ -450,6 +460,8 @@ namespace SkinManager.Core
             b.Entries = b.Entries.Select((e, i) => (e, i)).OrderBy(x => Section(x.e.Group)).ThenBy(x => x.i).Select(x => x.e).ToList();
         }
 
+        /// <summary>Adds to a row what the move makes and what that does: projectiles it spawns, articles it sets off,
+        /// and things the fighter holds that hit along with it.</summary>
         static void AddProjectiles(FighterBook b, MoveEntry e)
         {
             var arts = b.Moves.Articles.OrderBy(a => a.Slot).ToList();
@@ -542,6 +554,8 @@ namespace SkinManager.Core
 
         // not moves: getting hit, ledges, items, taunts, entries, final smashes (they have their own screens or aren't attacks)
         const string Skip = "^(Final|Appeal|Entry|Win|Lose|Item|Ladder|Swim|Cliff|Down|Damage|Capture|Thrown|Glide|Rebirth|Escape|Guard|Swing|Wait|Turn|Run|Walk|Dash$|Jump|Fall|Pass|Squat|Stand|Slip|Ottotto|Heavy|Light|AirCatch|Catch(Wait|Cut|Pull)|Throw[FBHL].*Item|Shoulder|WessDance|SwordSlash|Furafura|Stop|Rebound)";
+        /// <summary>A plain name for a move outside the usual list, from its animation name ("LandingAirF" → "Forward
+        /// air landing").</summary>
         static string OtherName(string a)
         {
             var land = Regex.Match(a, "^LandingAir(N|F|B|Hi|Lw)$");
@@ -639,6 +653,8 @@ namespace SkinManager.Core
             ("Peach", 2, -1, null),
         };
 
+        /// <summary>The article a move's "generate article" number means for this fighter (see Numbering); by default
+        /// the one in that place. Null rather than the wrong one when it isn't there.</summary>
         static Article Numbered(FighterBook b, int number)
         {
             var arts = b.Moves.Articles.OrderBy(a => a.Slot).ToList();
@@ -716,6 +732,8 @@ namespace SkinManager.Core
         // a note's move: "SpecialS" covers every piece of side B (start, end...); "SpecialLw$" only that exact piece
         static bool NoteFits(string move, string part) => move.EndsWith("$") ? string.Equals(part, move.TrimEnd('$'), StringComparison.OrdinalIgnoreCase) : part.StartsWith(move);
 
+        /// <summary>Adds the projectiles the game's code launches during a special (see Launched) to that special's
+        /// rows.</summary>
         static void AddLaunched(FighterBook b, MoveEntry e)
         {
             string Plain(string pt) => pt.Replace("Air", "");
@@ -845,6 +863,8 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Olimar's smashes and aerials: puts a red Pikmin's hitboxes on the move, where the Pikmin is, from
+        /// when it's sent, with a note giving each colour's damage.</summary>
         static void PikminAttacks(FighterBook b)
         {
             var m = b.Moves;
@@ -940,6 +960,8 @@ namespace SkinManager.Core
         // where a flight goes (a ground and an air version that fly differently, like Sheik's needles, stay two rows)
         static string Path(Flight f) => f == null || f.Path.Count == 0 ? "" : $"@{f.Life}:{f.Path[f.Path.Count - 1].X:0}:{f.Path[f.Path.Count - 1].Y:0}";
 
+        /// <summary>Joins rows that are exactly alike (a ground and an air version, a move's angles) into one, keeping
+        /// the ground version's animation for drawing.</summary>
         static void Merge(FighterBook b)
         {
             var result = new List<MoveEntry>();
@@ -947,7 +969,7 @@ namespace SkinManager.Core
             {
                 var twin = result.FirstOrDefault(r => r.Group == e.Group && Signature(r.Data) == Signature(e.Data) && Same(r.Name, e.Name));
                 if (twin == null) { result.Add(e); continue; }
-                twin.Name = Combine(twin.Name, e.Name);
+                twin.Name = Combine(twin.Name);
                 // the row is drawn with the ground version's animation when there is one (Snake's side B shown on the
                 // ground, not floating in its air animation)
                 bool Air(MoveEntry x) => x.Parts.Any(p => p.IndexOf("Air", StringComparison.OrdinalIgnoreCase) >= 0);
@@ -966,15 +988,14 @@ namespace SkinManager.Core
         // "Forward tilt (up)" + "Forward tilt" → same move; "Up B" + "Up B (air)" → same move
         static string Base(string n) => Regex.Replace(n, @"\s*\((up|down|air)\)", "").Trim();
         static bool Same(string a, string b) => Base(a) == Base(b);
-        static string Combine(string a, string b)
+        /// <summary>The name for joined rows: "(all angles)" for forward tilt and smash, "(ground &amp; air)"
+        /// otherwise.</summary>
+        static string Combine(string a)
         {
             var bas = Base(a);
-            if (bas.StartsWith("Forward tilt") || bas.StartsWith("Forward smash")) return bas + " (all angles)";
-            var rest = bas.Contains(" ") && (bas.StartsWith("Up B") || bas.StartsWith("Down B") || bas.StartsWith("Side B") || bas.StartsWith("Neutral B")) ? bas : bas;
-            return rest + " (ground & air)";
+            return bas + (bas.StartsWith("Forward tilt") || bas.StartsWith("Forward smash") ? " (all angles)" : " (ground & air)");
         }
 
-        /// <summary>"SpecialAirHiStart" → "Up B (air) start".</summary>
         /// <summary>The name of a standard move one of whose animations this is (null if none).</summary>
         public static string StandardName(string anim)
         {
@@ -1007,6 +1028,7 @@ namespace SkinManager.Core
                 }
         }
 
+        /// <summary>"SpecialAirHiStart" → "Up B (air) start".</summary>
         public static string SpecialName(string anim)
         {
             var rest = anim.Substring("Special".Length);

@@ -11,6 +11,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Launch &amp; combos view: where the picked move sends the opponent and which follow-ups true combo,
+    /// at what percents.</summary>
     class ComboView : Control
     {
         FighterBook _me, _them; MoveEntry _move; string _status;
@@ -25,10 +27,11 @@ namespace SkinManager.App
         int _scroll;   // chart rows scrolled past
 
         static ComboBox Box(int w) => new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = w, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text };
+        /// <summary>A drop-down entry: the words shown and the value behind them.</summary>
         sealed class Item { public string Text; public object Value; public override string ToString() => Text; }
 
-        public int Percent => _pct.Value;
-
+        /// <summary>Adds the opponent, percent, DI and hitbox pickers and wires them up (clicking a green bar jumps to
+        /// its percent).</summary>
         public ComboView()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -50,7 +53,8 @@ namespace SkinManager.App
             Arrange();
         }
 
-        int _rowsTop = 52;
+        /// <summary>Places the pickers (one row, or two when narrow) and splits the rest into the diagram, numbers and
+        /// chart.</summary>
         void Arrange()
         {
             int w = Width;
@@ -65,7 +69,6 @@ namespace SkinManager.App
             else { _di.Location = new Point(_pctLabel.Left + 46, 16); _hit.Location = new Point(_di.Right + 12, 16); }
             foreach (Control c in Controls) if (c is Label l && l.Tag is string t) { var tg = t == "l1" ? (Control)_target : t == "l2" ? _pct : t == "l3" ? _di : _hit; l.Location = new Point(tg.Left + 2, tg.Top - 16); }
             int top = two ? 98 : 52;
-            _rowsTop = top;
             int dh = Math.Max(150, Math.Min(240, (Height - top) / 2 - 10));
             int dw = (int)(w * 0.58);
             _diagram = new Rectangle(0, top, dw, dh);
@@ -74,6 +77,7 @@ namespace SkinManager.App
             Invalidate();
         }
 
+        /// <summary>Fills the opponent picker with the fighters to choose from, with selected picked.</summary>
         public void SetCast(List<Character> cast, Character selected)
         {
             _target.BeginUpdate(); _target.Items.Clear();
@@ -100,6 +104,8 @@ namespace SkinManager.App
             Recalc(true);
         }
 
+        /// <summary>Works the launch and follow-ups out again for the current settings; ranges: also the slower
+        /// percent-by-percent chart.</summary>
         void Recalc(bool ranges)
         {
             _launch = null; _now = null; _contact = null;
@@ -138,6 +144,8 @@ namespace SkinManager.App
             DrawDiagram(g); DrawStats(g); DrawChart(g);
         }
 
+        /// <summary>Draws where the hit sends them: their path frame by frame, where they can act, when they can tech,
+        /// and the launch angle.</summary>
         void DrawDiagram(Graphics g)
         {
             var L = _launch; var body = _them.Body; var me = _me.Body;
@@ -197,6 +205,8 @@ namespace SkinManager.App
             StatsArt.Cover(g, img, new RectangleF(box.X + (box.Width - s) / 2, box.Y + 3, s, s), 5);
         }
 
+        /// <summary>Draws the hit's numbers at this percent: hit frame, knockback, angle, hitstun, and frame advantage
+        /// on hit and shield.</summary>
         void DrawStats(Graphics g)
         {
             var L = _launch; int x = _stats.X + 14, y = _stats.Y + 10;
@@ -217,6 +227,8 @@ namespace SkinManager.App
             if (_move.Data.LandingLag > 0) using (var m = new SolidBrush(Theme.Muted)) g.DrawString("aerial: landed + L-cancelled", Theme.Small, m, x, y);
         }
 
+        /// <summary>Draws each follow-up that true combos and the percents it works at (scrollable; clicking a bar
+        /// jumps to that percent).</summary>
         void DrawChart(Graphics g)
         {
             int x = _chart.X + 14, y = _chart.Y + 10, w = _chart.Width - 28;

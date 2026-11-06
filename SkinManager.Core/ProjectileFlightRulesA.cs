@@ -4,8 +4,11 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Flight rules for Mario, Luigi, Link, Toon Link, Pit, Samus and Zero Suit Samus.</summary>
     public static partial class ProjectileFlight
     {
+        /// <summary>Adds this file's fighters' projectile rules, each reading its speeds from the projectile's own
+        /// parameters on the card.</summary>
         static partial void LoadRulesA()
         {
             // ---- Mario, Luigi: fireball. wnMarioFireball: speed article param +0xC at +0x10 (radians), gravity +0x0, life

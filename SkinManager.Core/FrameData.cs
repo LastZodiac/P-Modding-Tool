@@ -8,6 +8,7 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>One hitbox (or grab box) as the move's script makes it: its bone and offset, size, damage and knockback.</summary>
     public sealed class Hitbox
     {
         public int Id, Bone;
@@ -28,6 +29,7 @@ namespace SkinManager.Core
         public string Summary => Grab ? $"grab {Size:0.#}" : $"{DamageText} {Angle}° BKB {Bkb} KBG {Kbg}" + (Wkb > 0 ? $" WKB {Wkb}" : "");
     }
 
+    /// <summary>What's going on in one real frame of a move: the animation frame shown, hitboxes out, invincibility.</summary>
     public sealed class FrameState
     {
         public int Frame;              // 1-based real frame
@@ -59,6 +61,7 @@ namespace SkinManager.Core
         public int End => Start + Life - 1;
     }
 
+    /// <summary>A projectile (or item) a move makes: when it comes out, its own frame data and, if known, its flight.</summary>
     public sealed class Projectile
     {
         public string Name;            // "Projectile (Fly)"
@@ -67,6 +70,7 @@ namespace SkinManager.Core
         public MoveData Data;          // its own frames, counted from when it appears
         public bool Unknown => Frame <= 0 && Flight == null && !Item;
         public bool Item;              // an item the move pulls out (Link's bomb): its hits are listed, it hits when thrown or set off
+        /// <summary>The move's frames the flying projectile can hit on ("12-40"), from its flight; "—" if it never hits.</summary>
         string FlightText
         {
             get
@@ -90,12 +94,13 @@ namespace SkinManager.Core
         public string ActiveText => Flight != null ? FlightText : Data.Active.Count == 0 ? "—" : (Unknown ? "its frames " : "") + string.Join(", ", Data.Active.Select(a => (a.From + Base - 1) + (Data.Lingers && a.To == Data.Active.Last().To ? "+" : a.From == a.To ? "" : "-" + (a.To + Base - 1))));
     }
 
+    /// <summary>A move's frame data: every frame's state, when it hits, when you can act again, landing lag and its projectiles.</summary>
     public sealed class MoveData
     {
         public string Name, Animation;
         public List<int> Subactions = new List<int>();
         public List<FrameState> Frames = new List<FrameState>();
-        public int Total, Iasa, AutoCancelFrom, LandingLag;
+        public int Total, Iasa, LandingLag;
         public List<(int From, int To)> Active = new List<(int, int)>();
         public List<(int From, int To)> Intangible = new List<(int, int)>();
         public List<Hitbox> Hits = new List<Hitbox>();   // every distinct hitbox, first time it comes out
@@ -117,6 +122,7 @@ namespace SkinManager.Core
         public string IntangibleText => string.Join(", ", Intangible.Select(a => a.From == a.To ? $"{a.From}" : $"{a.From}-{a.To}"));
     }
 
+    /// <summary>Runs a move's subaction scripts frame by frame to work out its frame data.</summary>
     public static class FrameData
     {
         /// <summary>Plays the given subactions one after another (a smash attack's start then its swing).

@@ -14,6 +14,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Works out the best way to DI a hit (to survive, or to get out of a combo) and at what percent it
+    /// kills.</summary>
     public static class DiCoach
     {
         public const float Side = 224, Top = 200, Bottom = -108, Edge = 68;

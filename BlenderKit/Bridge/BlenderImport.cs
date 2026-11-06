@@ -13,6 +13,7 @@ using SkinManager.Core;
 
 namespace PPlusBlenderBridge
 {
+    /// <summary>A model read back from Blender: its shapes and pictures, and the bones each point follows.</summary>
     sealed class FromBlender
     {
         public SwapMesh Mesh = new SwapMesh();
@@ -34,6 +35,8 @@ namespace PPlusBlenderBridge
             return null;
         }
 
+        /// <summary>Reads a GLB file from Blender: every shape placed where the file puts it, its picture, and its points'
+        /// bones; with skipFaces, the face/hair pieces the Bridge sent only to look at are left out.</summary>
         public static FromBlender Read(string path, bool skipFaces)
         {
             var r = new FromBlender();
@@ -243,6 +246,7 @@ namespace PPlusBlenderBridge
         }
 
         static bool Has(object o, string key) => o is Dictionary<string, object> d && d.ContainsKey(key) && d[key] != null;
+        /// <summary>A node's own placement as a 4x4 matrix: its matrix if it has one, else built from its move, turn and size.</summary>
         static double[] Local(object node)
         {
             var m = Json.Arr(node, "matrix");
@@ -259,16 +263,19 @@ namespace PPlusBlenderBridge
                 t[0], t[1], t[2], 1,
             };
         }
+        /// <summary>Multiplies two 4x4 matrices (column by column, the way GLB stores them).</summary>
         static double[] Mul(double[] a, double[] b)
         {
             var res = new double[16];
             for (int c = 0; c < 4; c++) for (int row = 0; row < 4; row++) { double v = 0; for (int k = 0; k < 4; k++) v += a[k * 4 + row] * b[c * 4 + k]; res[c * 4 + row] = v; }
             return res;
         }
+        /// <summary>Moves a point by a matrix.</summary>
         static Vector3 Point(double[] m, float[] p) => new Vector3(
             (float)(m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]),
             (float)(m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]),
             (float)(m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]));
+        /// <summary>Turns a direction (a normal) by a matrix, ignoring the move, and makes it length 1.</summary>
         static Vector3 Direction(double[] m, float[] n)
         {
             double x = m[0] * n[0] + m[4] * n[1] + m[8] * n[2], y = m[1] * n[0] + m[5] * n[1] + m[9] * n[2], z = m[2] * n[0] + m[6] * n[1] + m[10] * n[2];

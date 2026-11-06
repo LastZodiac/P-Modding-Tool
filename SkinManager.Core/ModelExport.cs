@@ -14,8 +14,11 @@ using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>Saves a costume's model as a GLB file for painting in a 3D program.</summary>
     public static unsafe class ModelExport
     {
+        /// <summary>One material's worth of triangles: positions, normals, texture coordinates and its
+        /// picture.</summary>
         sealed class Part { public string Name; public byte[] Png; public bool Cutout, SeeThrough; public List<Vector3> P = new List<Vector3>(), N = new List<Vector3>(); public List<Vector2> UV = new List<Vector2>(); }
 
         /// <summary>The costume file (.pac/.pcs) as a GLB. Throws if it has no model.</summary>
@@ -94,6 +97,8 @@ namespace SkinManager.Core
             return Write(parts);
         }
 
+        /// <summary>Packs the parts into one GLB file (JSON description plus one binary buffer), one mesh with a
+        /// primitive per part.</summary>
         static byte[] Write(List<Part> parts)
         {
             var bin = new MemoryStream();

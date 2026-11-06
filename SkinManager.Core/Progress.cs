@@ -7,6 +7,7 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>A badge: a feat earned in a single game, or a milestone over time (with a tier).</summary>
     public sealed class Badge
     {
         public string Id, Name, What;       // "flawless", "Flawless", "Won without losing a stock"
@@ -14,6 +15,7 @@ namespace SkinManager.Core
         public static readonly string[] Tiers = { "", "Bronze", "Silver", "Gold", "Platinum" };
     }
 
+    /// <summary>A personal best (biggest combo, earliest kill...) and the game it was set in.</summary>
     public sealed class Best
     {
         public string Id, Name, Unit;       // "combo", "Biggest combo", "%"
@@ -22,6 +24,8 @@ namespace SkinManager.Core
         public string Text => Unit == "time" ? $"{(int)Value / 60}:{(int)Value % 60:00}" : Unit == "%" ? $"{Value:0}%" : Unit == "" ? $"{Value:0}" : $"{Value:0} {Unit}";
     }
 
+    /// <summary>What one game added: its score and grade, the XP it gave and why, levels before and after, and any new
+    /// badges or bests.</summary>
     public sealed class GameProgress
     {
         public long GameId;
@@ -38,10 +42,12 @@ namespace SkinManager.Core
         public List<(string Name, double Value, double Usual, bool HigherBetter, string Format)> VsUsual = new List<(string, double, double, bool, string)>();
     }
 
+    /// <summary>Everything over all your games: each game's progress, your XP and each character's, badges, milestones,
+    /// bests and streaks.</summary>
     public sealed class Career
     {
         public Dictionary<long, GameProgress> Games = new Dictionary<long, GameProgress>();
-        public int Xp; public int Level => Progress.LevelOf(Xp).Level;
+        public int Xp;
         public Dictionary<int, int> CharXp = new Dictionary<int, int>();
         public List<(Badge Badge, int Count, long LastGame)> Badges = new List<(Badge, int, long)>();   // feats: how many times
         public List<(Badge Badge, int Count, int Next, string Of)> Milestones = new List<(Badge, int, int, string)>();
@@ -49,6 +55,8 @@ namespace SkinManager.Core
         public int WinStreak, BestWinStreak;
     }
 
+    /// <summary>Scores your games and works out XP, levels, badges and bests from them (see the top of the
+    /// file).</summary>
     public static class Progress
     {
         /// <summary>A level from total XP: level n needs 400 + 100n XP to get to n+1. (level, XP into it, XP it needs)</summary>

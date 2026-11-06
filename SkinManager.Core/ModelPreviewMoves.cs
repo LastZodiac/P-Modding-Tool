@@ -10,10 +10,13 @@ using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>The part of the model preview that draws moves frame by frame, with hitboxes and hurtboxes.</summary>
     public static unsafe partial class ModelPreview
     {
         public static readonly Color[] HitColors = { Color.FromArgb(240, 60, 60), Color.FromArgb(255, 140, 30), Color.FromArgb(240, 60, 200), Color.FromArgb(60, 200, 90), Color.FromArgb(70, 150, 255), Color.FromArgb(255, 230, 60), Color.FromArgb(150, 90, 255), Color.FromArgb(40, 220, 220) };
 
+        /// <summary>Everything worked out for one frame before it's drawn: the posed model's triangles, hitboxes, hurtboxes,
+        /// projectile trails and whether the fighter is intangible or invincible.</summary>
         sealed class Shot { public List<(Vector3 a, Vector3 b, Vector3 c, Vector2 ta, Vector2 tb, Vector2 tc, Tex tex, bool xlu)> Tris; public List<(Vector3 p, float r, Color c)> Hits = new List<(Vector3, float, Color)>(); public List<(Vector3 a, Vector3 b, float r)> Hurt = new List<(Vector3, Vector3, float)>(); public int Body; public float Shift; public List<Hitbox> HitOf = new List<Hitbox>(); public HashSet<int> Flying = new HashSet<int>(); public List<List<Vector3>> Trails = new List<List<Vector3>>(); public List<Vector3> Marks = new List<Vector3>(); public Dictionary<int, Vector3> Beams = new Dictionary<int, Vector3>(); public bool After; }
 
         /// <summary>Where things are in a move's pictures: a point (x, y) in game units (x forward from where the fighter
@@ -27,12 +30,12 @@ namespace SkinManager.Core
             public PointF ToGame(float px, float py) => new PointF(px / Scale + MinX, MaxY - py / Scale);
         }
 
-        /// <summary>One picture per frame of a move. motionFile: the fighter's Fit&lt;Name&gt;MotionEtc.pac; costume: Fit&lt;Name&gt;00.pac.</summary>
         /// <summary>For checking the whole cast (not used by the app): when set, RenderMove only works out what it would draw
         /// and notes per frame how many of the move's own hitboxes there are, how many got a place, and how many of its
         /// projectiles' hitboxes were drawn. No pictures are made.</summary>
         public static List<(int Frame, int Own, int OwnDrawn, int Thrown)> AuditFrames;
 
+        /// <summary>One picture per frame of a move. motionFile: the fighter's Fit&lt;Name&gt;MotionEtc.pac; costume: Fit&lt;Name&gt;00.pac.</summary>
         public static List<Bitmap> RenderMove(byte[] costume, byte[] motionFile, Moveset moves, MoveData move, int width = 360, int height = 300, bool hurtboxes = true, Action<int, int> progress = null, Func<bool> cancelled = null, MoveCamera camera = null)
         {
             var shots = new List<Shot>();

@@ -1,5 +1,5 @@
-// "My Mods": every skin you've added, with an on/off switch, filters and the GameBanana files
-// you've downloaded but not installed yet.
+// "My Mods": every skin, stage, song and texture pack you've added, with an on/off switch, filters, and the
+// GameBanana files you've downloaded but not installed yet.
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -12,6 +12,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>What My Mods needs from the main window: the mods list, turning mods on and off, deleting, adding and
+    /// updating. My Mods never changes the card itself.</summary>
     interface IModHost
     {
         Library Lib { get; }
@@ -41,13 +43,18 @@ namespace SkinManager.App
         void Delete(TexturePack p);
         bool OnCleanCard { get; }                // the clean card (no mods) is in place
         void BackToModded();
-        StageSpot WhereInGame(InstalledStage s);
+        StageSpot WhereInGame(InstalledStage s);   // where it is on the stage select (null until read, or not there)
         void StageVersions();                    // which version of a stage you get by just picking it (stage swaps)
-        void AddOwnMusic(List<string> files = null);   // your own MP3/WAV songs  // where it is on the stage select (null until read, or not there)
+        void StageVersionsFor(InstalledStage s); // the same, opened at a stage mod's stage to put it on other versions
+        void AddOwnMusic(List<string> files = null);   // your own MP3/WAV songs
     }
 
+    /// <summary>The My Mods page: your skins, stages, music and texture packs as cards, with tabs, filters, sorting and
+    /// the space meter.</summary>
     class LibraryPanel : GlassPanel
     {
+        /// <summary>The filter buttons above the cards: all, on, off, favorites, downloaded but not added, and mods
+        /// fighting over the same slot or stage.</summary>
         enum Tab { All, On, Off, Favorites, Downloaded, Conflicts }
 
         readonly IModHost _host;
@@ -83,6 +90,8 @@ namespace SkinManager.App
 
         readonly ToolTip _tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
 
+        /// <summary>Builds the page: kind buttons (Skins, Stages, Music, Textures), search, filters, sort, the turn all
+        /// on/off buttons, the tabs, the space meter and the cards.</summary>
         public LibraryPanel(IModHost host)
         {
             _host = host;
@@ -151,7 +160,6 @@ namespace SkinManager.App
             HandleCreated += (s, e) => settle.Start();
         }
 
-        /// <summary>New numbers for the space meter and the cost on each card.</summary>
         /// <summary>Says how many mods were put on the card by hand (not through the app); click to see them.</summary>
         public void ShowHand(HandScan scan)
         {
@@ -164,8 +172,11 @@ namespace SkinManager.App
             _hand.BringToFront();
         }
 
+        /// <summary>New numbers for the space meter and the cost on each card.</summary>
         public void ShowSpace(SpaceReport r) { _meter.Report = r; _meter.Invalidate(); if (Visible) Refresh(); }
 
+        /// <summary>The extra space a mod takes on the card, for its card's second line; only shown when there's less
+        /// than 200 MB left.</summary>
         string CostText(string id)
         {
             var r = _host.Space;
@@ -181,6 +192,7 @@ namespace SkinManager.App
 
         bool Has(string text, string q) => (text ?? "").IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0;
 
+        /// <summary>True when a skin fits the character picked and the search.</summary>
         bool Matches(InstalledSkin s)
         {
             if (Who != null && Who.SlotListId != s.SlotListId) return false;
@@ -188,6 +200,8 @@ namespace SkinManager.App
             return q == "" || Has(s.Name, q) || Has(s.Author, q) || Has(s.Character.Name, q);
         }
 
+        /// <summary>True when a download is the kind of mod shown (skins, stages or music) and fits the character
+        /// picked and the search.</summary>
         bool Matches(DownloadInfo d)
         {
             string cat = d.Category ?? "";
@@ -206,6 +220,7 @@ namespace SkinManager.App
 
         List<InstalledStage> AllStages => (_host.Lib?.Stages ?? new List<InstalledStage>()).Where(x => x.IsSong == _musicMode).ToList();
 
+        /// <summary>True when a stage mod or song fits the stage picked and the search.</summary>
         bool Matches(InstalledStage s)
         {
             string q = _search.Text.Trim();
@@ -240,6 +255,7 @@ namespace SkinManager.App
 
         static IEnumerable<InstalledStage> OnePerMod(IEnumerable<InstalledStage> list) => list.GroupBy(x => x.Group ?? x.Id).Select(g => g.First());
 
+        /// <summary>The stage mods or songs to show for the search, filters and tab, one per mod.</summary>
         List<InstalledStage> VisibleStages()
         {
             var all = OnePerMod(AllStages.Where(Matches));
@@ -254,6 +270,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Makes the card for a stage mod or song: what it replaces, where it is on the stage select, and its
+        /// switch, delete, update and favorite buttons.</summary>
         Control StageCard(InstalledStage s)
         {
             var card = new LibCard
@@ -282,6 +300,8 @@ namespace SkinManager.App
             card.SwitchClicked += () => _host.SetOn(Members(s), !_host.IsOn(s));
             card.DeleteClicked += () => _host.Delete(s);
             if (_host.SourceOf(s) != null) { card.MoreText = "Add more from this download"; card.MoreClicked += () => _host.AddMore(s); }
+            // a stage mod: put it on other versions of its stage (Hold L, an alt from its list, every time of day...)
+            if (!s.IsSong && !s.IsSwap) { card.SideText = "Other versions…"; card.SideClicked += () => _host.StageVersionsFor(s); }
             Updatable(card, s.GameBananaModId, s.GameBananaFileId, s.PageUrl, s.Name);
             card.Favorite = IsFav(s);
             card.FavoriteClicked += () => { _host.Favs?.Toggle(new Favorite { Key = Favorites.KeyOf(s.GameBananaModId, s.Id), Name = s.Name, Author = s.Author, ThumbUrl = s.ThumbUrl, ModId = s.GameBananaModId, Kind = s.IsSong ? "music" : "stage", Category = s.Target.Label }); Refresh(); };
@@ -294,6 +314,7 @@ namespace SkinManager.App
 
         bool InConflict(InstalledSkin s) => Skins.Count(x => x.SlotListId == s.SlotListId && x.SlotIndex == s.SlotIndex) > 1;
 
+        /// <summary>The skins to show for the search, filters and tab.</summary>
         IEnumerable<InstalledSkin> Visible_Skins()
         {
             var all = Skins.Where(Matches);
@@ -308,6 +329,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Turns on every mod shown, but only one per costume slot or stage file: the one already on, else the
+        /// newest.</summary>
         void TurnAllOn()
         {
             if (_textureMode) { foreach (var p in VisibleTextures().Where(x => !x.Enabled).ToList()) _host.SetOn(p, true); return; }
@@ -322,6 +345,8 @@ namespace SkinManager.App
             _host.SetOn(pick, true);
         }
 
+        /// <summary>Builds the page again for the kind and tab picked: the tab counts and every card, keeping the
+        /// scroll position. Only a search or filter change skips reading the downloads folder again.</summary>
         public new void Refresh()
         {
             _ownMusic.Visible = _musicMode;
@@ -418,6 +443,7 @@ namespace SkinManager.App
 
         List<TexturePack> AllTextures => _host.Textures?.All ?? new List<TexturePack>();
 
+        /// <summary>The texture packs to show for the search, tab and sort.</summary>
         List<TexturePack> VisibleTextures()
         {
             string q = _search.Text.Trim();
@@ -432,6 +458,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Shows the texture pack cards (they only have the All, On and Off tabs).</summary>
         void ShowTextures()
         {
             var all = AllTextures;
@@ -453,6 +480,8 @@ namespace SkinManager.App
             _empty.Visible = false; _grid.Visible = true;
         }
 
+        /// <summary>Makes the card for a texture pack: its size, where it's kept, and its switch and delete
+        /// buttons.</summary>
         Control TextureCard(TexturePack p)
         {
             var card = new LibCard
@@ -509,6 +538,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Shows a message instead of the cards, with a button to the Mod Store (or back to your mods when the
+        /// clean card is in).</summary>
         void ShowEmpty(string text, bool button = true)
         {
             bool clean = button && _host.OnCleanCard && !_textureMode;
@@ -525,6 +556,8 @@ namespace SkinManager.App
         // the filter buttons are made once and only their text and look change (making them again on every refresh left
         // pieces of the old ones drawn over the new ones)
         readonly Dictionary<Tab, Button> _tabButtons = new Dictionary<Tab, Button>();
+        /// <summary>Shows the tabs that have counts (made once, only their text and look change), the picked one
+        /// highlighted.</summary>
         void BuildTabs(Dictionary<Tab, int> counts)
         {
             _tabs.SuspendLayout();
@@ -563,6 +596,8 @@ namespace SkinManager.App
             card.MoreClicked += () => _host.UpdateMod(mod, file, page, name);
         }
 
+        /// <summary>Makes the card for a skin: its fighter and costume slot, and its switch, delete, update, "add more"
+        /// and favorite buttons.</summary>
         Control SkinCard(InstalledSkin s)
         {
             var card = new LibCard
@@ -586,6 +621,8 @@ namespace SkinManager.App
             return card;
         }
 
+        /// <summary>Makes the card for a download not added yet: Install (or "Add more" when some costumes were added),
+        /// and delete the file.</summary>
         Control DownloadCard(DownloadInfo d)
         {
             var card = new LibCard
@@ -607,6 +644,8 @@ namespace SkinManager.App
             return card;
         }
 
+        /// <summary>A skin's picture: its GameBanana picture, else its own select-screen portrait, else P+'s picture
+        /// for its slot (those two load in the background).</summary>
         Image PictureFor(InstalledSkin s, LibCard card)
         {
             if (!string.IsNullOrEmpty(s.ThumbUrl)) { LoadUrl(s.ThumbUrl, card); return null; }
@@ -656,6 +695,8 @@ namespace SkinManager.App
             catch { return null; }
         }
 
+        /// <summary>Puts a GameBanana picture on a card once it's downloaded (kept for the next time the cards are
+        /// made).</summary>
         async void LoadUrl(string url, LibCard card)
         {
             if (string.IsNullOrEmpty(url)) return;
@@ -672,13 +713,13 @@ namespace SkinManager.App
         }
     }
 
-    /// <summary>A card in My Mods: picture, name, an on/off switch and a delete button.</summary>
     /// <summary>The room for mods on the SD card: what mods use, what's kept free, what's left.</summary>
     class SpaceMeter : Control
     {
         public SpaceReport Report;
         readonly ToolTip _tip = new ToolTip();
 
+        /// <summary>A fixed-size bar, drawn by hand.</summary>
         public SpaceMeter()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
@@ -720,18 +761,21 @@ namespace SkinManager.App
         }
     }
 
+    /// <summary>A card in My Mods: picture, name, an on/off switch and a delete button.</summary>
     class LibCard : Control
     {
         public Image Picture;
-        public string Title, Line1, Line2, Line3, Tag1, ActionText, MoreText;
+        public string Title, Line1, Line2, Line3, Tag1, ActionText, MoreText, SideText;   // SideText: a link on the right of the More row
         public Color Tag1Color = Theme.Accent;
         public bool On, ShowSwitch, Music, Favorite, CanFavorite = true;
-        public event Action SwitchClicked, DeleteClicked, ActionClicked, MoreClicked, FavoriteClicked;
-        bool _hover, _starHover, _moreHover;
+        public event Action SwitchClicked, DeleteClicked, ActionClicked, MoreClicked, FavoriteClicked, SideClicked;
+        bool _hover, _starHover, _moreHover, _sideHover;
+        Rectangle _side;
         Rectangle _switch, _delete, _action, _more, _star;
 
         public void ClearMore() => MoreClicked = null;
 
+        /// <summary>A fixed-size card, drawn by hand.</summary>
         public LibCard()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
@@ -745,7 +789,9 @@ namespace SkinManager.App
             if (star != _starHover) { _starHover = star; Invalidate(); }
             bool more = MoreText != null && _more.Contains(e.Location);
             if (more != _moreHover) { _moreHover = more; Invalidate(); }
-            bool hot = star || _switch.Contains(e.Location) || _delete.Contains(e.Location) || _action.Contains(e.Location) || (MoreText != null && _more.Contains(e.Location));
+            bool side = SideText != null && _side.Contains(e.Location);
+            if (side != _sideHover) { _sideHover = side; Invalidate(); }
+            bool hot = star || side || _switch.Contains(e.Location) || _delete.Contains(e.Location) || _action.Contains(e.Location) || (MoreText != null && _more.Contains(e.Location));
             Cursor = hot ? Cursors.Hand : Cursors.Default;
             base.OnMouseMove(e);
         }
@@ -756,6 +802,7 @@ namespace SkinManager.App
             if (ShowSwitch && _switch.Contains(e.Location)) SwitchClicked?.Invoke();
             else if (_delete.Contains(e.Location)) DeleteClicked?.Invoke();
             else if (!ShowSwitch && _action.Contains(e.Location)) ActionClicked?.Invoke();
+            else if (SideText != null && _side.Contains(e.Location)) SideClicked?.Invoke();
             else if (MoreText != null && _more.Contains(e.Location)) MoreClicked?.Invoke();
             base.OnMouseClick(e);
         }
@@ -798,9 +845,20 @@ namespace SkinManager.App
                 TextRenderer.DrawText(g, Line3, Theme.Small, new Rectangle(8, y + 76, Width - 16, 18), lit ? Theme.Text : Theme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
                 y += 18;
             }
+            int sideW = 0;
+            if (SideText != null)
+            {
+                // always shown (it's how a stage mod goes on other versions), on the right of the row
+                using (var u = new Font(Theme.Small, _sideHover ? FontStyle.Underline : FontStyle.Regular))
+                {
+                    sideW = TextRenderer.MeasureText(SideText, u).Width + 4;
+                    _side = new Rectangle(Width - 8 - sideW, y + 78, sideW, 18);
+                    TextRenderer.DrawText(g, SideText, u, _side, Theme.Accent, TextFormatFlags.Right | TextFormatFlags.EndEllipsis);
+                }
+            }
             if (MoreText != null)
             {
-                _more = new Rectangle(8, y + 78, Width - 16, 18);
+                _more = new Rectangle(8, y + 78, Width - 16 - (sideW > 0 ? sideW + 8 : 0), 18);
                 bool always = MoreText.StartsWith("Update");   // something to do: always shown
                 if (always || _hover)
                     using (var u = new Font(Theme.Small, _moreHover ? FontStyle.Underline : FontStyle.Regular))

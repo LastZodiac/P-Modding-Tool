@@ -10,18 +10,21 @@ using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>The part of model swapping that rigs a new model to the fighter's body bones (thigh, shin, arm...).</summary>
     public static partial class ModelSwap
     {
-        public static void SetStandard(bool on) => SkeletonRig.StandardOnly = on;
         static readonly string[] SoftParts = { "skirt", "hair", "cape", "cloth", "mant", "robe", "scarf", "ribbon", "tail", "ear", "coat", "have", "throw", "trans", "rot", "top", "mouth", "jaw", "eye", "brow", "lip", "tongue", "maekake" };
 
         /// <summary>A bone for a separate thing (a held item, a crown or eye patch model): its name ends in "M" (ClubM, CrownBM).</summary>
         static bool Attachment(string n) => n.Length > 1 && n[n.Length - 1] == 'M';
 
+        /// <summary>The fighter's body as line segments from each body bone's joint to the next; points follow the nearest ones.</summary>
         sealed class SkeletonRig
         {
             readonly List<(string Name, Vector3 A, Vector3 B)> _segs = new List<(string, Vector3, Vector3)>();
 
+            /// <summary>A rig from the costume's body bones, or null when it has too few to go by (then the older nearest-point
+            /// rigging is used).</summary>
             public static SkeletonRig Make(MDL0Node model, List<RefPoint> refs)
             {
                 var body = Body(model, refs);
@@ -86,12 +89,14 @@ namespace SkinManager.Core
                 return list;
             }
 
+            /// <summary>How far along the segment a to b the point nearest p is (0 at a, 1 at b).</summary>
             public static float Along(Vector3 p, Vector3 a, Vector3 b)
             {
                 float dx = b._x - a._x, dy = b._y - a._y, dz = b._z - a._z, l = dx * dx + dy * dy + dz * dz;
                 return l < 1e-9f ? 0 : Math.Max(0, Math.Min(1, ((p._x - a._x) * dx + (p._y - a._y) * dy + (p._z - a._z) * dz) / l));
             }
 
+            /// <summary>The distance from p to the nearest point on the segment a to b.</summary>
             public static float SegDist(Vector3 p, Vector3 a, Vector3 b)
             {
                 float dx = b._x - a._x, dy = b._y - a._y, dz = b._z - a._z, l = dx * dx + dy * dy + dz * dz;

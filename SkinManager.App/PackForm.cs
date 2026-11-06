@@ -13,6 +13,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The window for adding several costumes from one download: tick costumes, pick a costume slot for each,
+    /// and get back the checked plans to install.</summary>
     class PackForm : Form
     {
         readonly Installer _installer;
@@ -21,12 +23,13 @@ namespace SkinManager.App
         public List<SkinPlan> Plans { get; private set; } = new List<SkinPlan>();
         public PackageCostume StepByStep { get; private set; }   // "set this one up step by step" was clicked
 
+        /// <summary>One costume's row: its tick box, slot list, model and slot pictures, and which slots it fits.</summary>
         sealed class Row
         {
             public PackageCostume Costume;
             public CheckBox Tick;
             public ComboBox Slot;
-            public PictureBox Model, Csp, SlotPic;
+            public PictureBox Model, SlotPic;
             public Label Status;
             public Dictionary<CostumeSlot, CheckResult> Fits;   // null while checking
             public InstalledSkin Already;
@@ -42,6 +45,7 @@ namespace SkinManager.App
         List<InstalledSkin> _fromHere;   // skins already added from this download
         Action _layoutFoot = () => { };
 
+        /// <summary>An entry in a row's slot list (no slot: the "Choose a costume slot..." line).</summary>
         class SlotItem
         {
             public CostumeSlot Slot; public string Text;
@@ -58,6 +62,8 @@ namespace SkinManager.App
             return k.SlotListId == c.Character.SlotListId;
         }
 
+        /// <summary>Builds a row per costume in the download, reading the card's slots and CSPs; replacing: the old version's
+        /// costumes when this is an update (the same ones are ticked and put back in their slots).</summary>
         public PackForm(Installer installer, Library lib, SkinPackage pkg, List<InstalledSkin> replacing = null)
         {
             _installer = installer; _lib = lib; _pkg = pkg; _replacing = replacing ?? new List<InstalledSkin>();
@@ -124,6 +130,8 @@ namespace SkinManager.App
             UpdateSummary();
         }
 
+        /// <summary>Makes a costume's row: tick box, model picture, name, status, slot list, the slot's CSP and the
+        /// "step by step" link.</summary>
         Control BuildRow(Row r, bool tick)
         {
             var c = r.Costume;
@@ -149,6 +157,7 @@ namespace SkinManager.App
             return panel;
         }
 
+        /// <summary>Draws each costume's model in its row, one at a time in the background.</summary>
         async void RenderModels()
         {
             foreach (var r in _rows)
@@ -163,6 +172,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Checks, costume by costume, which slots each fits (same gameplay bones), spots ones already in My Mods,
+        /// unticks any that fit nowhere, and picks slots as results come in.</summary>
         async void CheckFits()
         {
             foreach (var r in _rows)
@@ -245,6 +256,7 @@ namespace SkinManager.App
         static int Key(Row r, CostumeSlot s) => r.Costume.Character.SlotListId * 1000 + s.Index;
         static bool Fits(Row r, CostumeSlot s) => r.Fits != null && r.Fits.TryGetValue(s, out var f) && f.Passed;
 
+        /// <summary>Fills a row's slot list (once) with the slots its costume fits.</summary>
         void FillSlots(Row r)
         {
             if (r.Slot.Items.Count > 0) return;
@@ -254,12 +266,14 @@ namespace SkinManager.App
             r.Slot.SelectedIndex = 0;
         }
 
+        /// <summary>Picks a slot in a row's list and shows that slot's CSP.</summary>
         void Select(Row r, CostumeSlot s)
         {
             foreach (SlotItem i in r.Slot.Items) if (i.Slot == s) { r.Slot.SelectedItem = i; break; }
             ShowSlotPic(r);
         }
 
+        /// <summary>Shows the CSP of the slot a row is set to (none when no slot is picked).</summary>
         void ShowSlotPic(Row r)
         {
             var s = (r.Slot.SelectedItem as SlotItem)?.Slot;
@@ -291,6 +305,8 @@ namespace SkinManager.App
 
         List<Row> Chosen() => _rows.Where(r => r.Tick.Checked && (r.Slot.SelectedItem as SlotItem)?.Slot != null).ToList();
 
+        /// <summary>Updates the line at the bottom and the Install button: blocked while checking, when two costumes share a
+        /// slot, or a ticked one has no slot.</summary>
         void UpdateSummary()
         {
             var chosen = Chosen();
@@ -307,6 +323,8 @@ namespace SkinManager.App
             _layoutFoot();
         }
 
+        /// <summary>Runs the safety checks on each chosen costume (making a CSP and stock icon from the model when the download
+        /// has none) and closes with the plans that passed; the caller installs them.</summary>
         async Task Install()
         {
             var chosen = Chosen();

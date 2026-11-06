@@ -1,5 +1,5 @@
-// "Find skins online": search GameBanana's Brawl costumes, see what's inside a download, and
-// install it in one click (it goes through the same steps and safety checks as "Add a skin").
+// "Mod Store" (find mods online): search GameBanana's Brawl skins, stages and music, see what's inside a download,
+// and install it in one click (it goes through the same steps and safety checks as adding a file yourself).
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -15,6 +15,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The store page: GameBanana's Brawl skins, stages and music (and your favorites), with a details panel
+    /// and one-click install.</summary>
     class BrowsePanel : GlassPanel
     {
         public event Action<string, SkinSource> InstallRequested;   // downloaded file, where it came from
@@ -70,6 +72,8 @@ namespace SkinManager.App
         readonly Label _dlText = new Label { AutoSize = false, AutoEllipsis = true, ForeColor = Theme.Text, Font = Theme.Small, BackColor = Color.Transparent, UseMnemonic = false };
         readonly ProgressBar _dlBar = new ProgressBar { Maximum = 1000, Height = 10 };
         readonly Button _dlCancel = Theme.Secondary("Cancel");
+        /// <summary>Shows the download strip at the bottom of the page with a line of text and how far along it is
+        /// (0..1000).</summary>
         void DownloadShow(string text, int permille)
         {
             _dlStrip.Visible = true; _dlText.Text = text; _dlBar.Value = Math.Max(0, Math.Min(1000, permille));
@@ -78,6 +82,8 @@ namespace SkinManager.App
         bool _loadedOnce;
         readonly SemaphoreSlim _pictureSlots = new SemaphoreSlim(4);
 
+        /// <summary>Builds the page: the Skins / Stages / Music / Favorites buttons, search and filters, the results,
+        /// the pager, the download strip and the details panel.</summary>
         public BrowsePanel(Func<Library> lib, string dataFolder)
         {
             _lib = lib; _dataFolder = dataFolder;
@@ -165,6 +171,7 @@ namespace SkinManager.App
             return new Label { Text = text, Font = font, ForeColor = color, BackColor = Color.Transparent, AutoSize = false, Size = new Size(width, size.Height + 4), UseMnemonic = false };
         }
 
+        /// <summary>A wrapping label with a clickable part (the whole text, or just linkPart).</summary>
         static LinkLabel Link(string text, Color color, int width, Action click, string linkPart = null)
         {
             var size = TextRenderer.MeasureText(text, Theme.Small, new Size(width, 0), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
@@ -176,11 +183,13 @@ namespace SkinManager.App
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+        /// <summary>Puts grey hint text in an empty search box.</summary>
         static void SetCue(TextBox box, string text)
         {
             box.HandleCreated += (s, e) => { try { SendMessage(box.Handle, 0x1501, (IntPtr)1, text); } catch { } };
         }
 
+        /// <summary>Lines up Previous, the page text and Next.</summary>
         void LayoutPager()
         {
             _prev.Location = new Point(0, (_pager.Height - _prev.Height) / 2);
@@ -193,6 +202,8 @@ namespace SkinManager.App
 
         public void ShownFirstTime() { if (!_loadedOnce) NewSearch(); }
 
+        /// <summary>Marks which results you have again after something was added or turned off, and refreshes the
+        /// details shown.</summary>
         public void RefreshInstalled()
         {
             foreach (Control c in _results.Controls) if (c is ModCard card) { card.Installed = IsInstalled(card.Mod.Id); card.Invalidate(); }
@@ -201,6 +212,8 @@ namespace SkinManager.App
 
         bool IsInstalled(long modId) => (_lib()?.Skins.Any(s => s.GameBananaModId == modId) ?? false) || (_lib()?.Stages.Any(s => s.GameBananaModId == modId) ?? false);
 
+        /// <summary>Switches between skins, stages and music, showing that kind's filters (and searching again once the
+        /// page has loaded).</summary>
         void SetMode(bool stages, bool load = true, bool music = false)
         {
             _stageMode = stages; _musicMode = music;
@@ -212,13 +225,13 @@ namespace SkinManager.App
             if (load && _loadedOnce) NewSearch();
         }
 
-        public void ShowStages() { SetMode(true, load: false); NewSearch(); }
-
         Character Wanted => _stageMode || _musicMode ? null : _who.SelectedItem as Character;
 
         void NewSearch() { _page = 1; if (_favMode) { _favMode = false; Theme.Toggle(_favButton, false); _collection.Visible = false; } Load(); }
 
         bool _fillingCollections;
+        /// <summary>Lists your collections in the Favorites drop-down, keeping the one picked if it still
+        /// exists.</summary>
         void FillCollections()
         {
             _fillingCollections = true;
@@ -260,6 +273,8 @@ namespace SkinManager.App
             menu.Show(card, at);
         }
 
+        /// <summary>Gets the current page of results from GameBanana for the kind, filters, search and sort picked.
+        /// Answers to an older search are dropped.</summary>
         async void Load()
         {
             _loadedOnce = true;
@@ -359,6 +374,8 @@ namespace SkinManager.App
 
         string KindNow => _musicMode ? "music" : _stageMode ? "stage" : "skin";
 
+        /// <summary>Makes the card for one result: click shows its details, right-click puts it in a collection, the
+        /// star favorites it.</summary>
         ModCard Card(GbMod m, int gen, bool showCategory)
         {
             var card = new ModCard { Mod = m, Installed = IsInstalled(m.Id), ShowCategory = showCategory, Margin = new Padding(0, 0, 12, 12), Favorite = Favs?.Has("gb:" + m.Id) == true };
@@ -400,6 +417,7 @@ namespace SkinManager.App
             _results.ResumeLayout();
         }
 
+        /// <summary>Replaces the results with a message (in red, with "Try again", when something failed).</summary>
         void ShowMessage(string text, bool canRetry)
         {
             foreach (Control old in _results.Controls) old.Dispose();
@@ -412,6 +430,8 @@ namespace SkinManager.App
             _message.Visible = true;
         }
 
+        /// <summary>Downloads a picture (4 at a time, kept in the cache) and hands it over, unless its card is gone or
+        /// a newer search started.</summary>
         async void LoadPicture(string url, int gen, Action<Image> set, Control owner)
         {
             if (string.IsNullOrEmpty(url)) return;
@@ -441,6 +461,7 @@ namespace SkinManager.App
             _details.Controls.Add(t); _details.Controls.Add(t2);
         }
 
+        /// <summary>Empties the details panel.</summary>
         void ClearDetails()
         {
             _details.SuspendLayout();
@@ -451,6 +472,8 @@ namespace SkinManager.App
 
         int _detailsGen;
 
+        /// <summary>Loads a mod's GameBanana page and shows it in the details panel (keepScroll: refresh it without the
+        /// "Loading..." in between).</summary>
         async void ShowDetails(long modId, bool keepScroll = false)
         {
             int gen = ++_detailsGen;
@@ -479,6 +502,8 @@ namespace SkinManager.App
             BuildDetails(d);
         }
 
+        /// <summary>Fills the details panel: pictures, name and numbers, where you have it on now, each download with
+        /// whether it fits, and the mod's description.</summary>
         void BuildDetails(GbDetails d)
         {
             ClearDetails();
@@ -650,6 +675,9 @@ namespace SkinManager.App
 
         static int VerdictOrder(GbVerdictKind k) => k == GbVerdictKind.Good ? 0 : k == GbVerdictKind.Maybe ? 1 : k == GbVerdictKind.OtherCharacter ? 2 : 3;
 
+        /// <summary>One download in the details panel: its size, what the app thinks of it (made for this fighter,
+        /// another one, P+ or not...), and an Install button that downloads it and hands it to the usual add
+        /// steps.</summary>
         Control FileRow(GbDetails d, GbFile f, GbVerdict v, int w)
         {
             var box = new Panel { Width = w, BackColor = Theme.Back, Padding = new Padding(10) };
@@ -733,6 +761,7 @@ namespace SkinManager.App
 
         static string SizeText(long b) => b >= 1024 * 1024 ? $"{b / (1024.0 * 1024):0.0} MB" : $"{Math.Max(1, b / 1024)} KB";
 
+        /// <summary>Opens a web link in the browser (only http and https links).</summary>
         static void OpenUrl(string url)
         {
             if (string.IsNullOrEmpty(url) || !(url.StartsWith("https://") || url.StartsWith("http://"))) return;
@@ -750,6 +779,7 @@ namespace SkinManager.App
         bool _hover, _starHover, _starDown;
         Rectangle _star;
 
+        /// <summary>A fixed-size card, drawn by hand.</summary>
         public ModCard()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);

@@ -12,6 +12,8 @@ using SkinManager.Core;
 
 namespace PPlusBlenderBridge
 {
+    /// <summary>The note the Bridge leaves in a folder it sends to Blender (which fighter, file and costume slot it was),
+    /// so the way back knows where the costume goes.</summary>
     [DataContract]
     sealed class KitInfo
     {
@@ -22,10 +24,12 @@ namespace PPlusBlenderBridge
         [DataMember] public string Label;       // what was sent ("Peach costume 11")
         [DataMember] public List<int> Hidden = new List<int>();   // bones of what the fighter normally hides
 
+        /// <summary>Writes the note into the folder.</summary>
         public void Save(string folder)
         {
             using (var s = File.Create(Path.Combine(folder, FileName))) new DataContractJsonSerializer(typeof(KitInfo)).WriteObject(s, this);
         }
+        /// <summary>Reads the note from a folder; null if the folder wasn't made by the Bridge.</summary>
         public static KitInfo Load(string folder)
         {
             string f = Path.Combine(folder, FileName);
@@ -34,6 +38,7 @@ namespace PPlusBlenderBridge
         }
     }
 
+    /// <summary>Sends costumes to Blender and brings Blender's models back as costume files.</summary>
     static class BridgeWork
     {
         public static string KitFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "P+ Blender Kit");
@@ -75,15 +80,11 @@ namespace PPlusBlenderBridge
         /// <summary>How big the costume may unpack to: no bigger than the costume it was made from, which is known to work
         /// in that slot. (Working out the room left next to the fighter's moves isn't exact: a Peach costume 9 KB under
         /// that estimate but 9 KB over the one it replaced crashed the game.)</summary>
-        static long Budget(Character c, KitInfo info, byte[] original, Func<string, byte[]> cardFile)
+        static long Budget(byte[] original)
         {
             return CostumeMemory.Unpacked(original);
         }
 
-        /// <summary>Checks the model's lists (bones, shapes, materials, shaders...) all point inside the model, without
-        /// reading them (a broken one can't be read safely). Null when fine, else what's wrong.</summary>
-        /// <summary>Takes out the pictures no material of any model in the costume points at. Pictures that are frames of
-        /// one that's used (PeachTexEyeLid.01 next to a used PeachTexEyeLid.00: the game swaps them in for blinking) stay.</summary>
         /// <summary>The picture names the fighter's other files point at (its own file and every Etc file: the parasol,
         /// Toad, effects...), or null when they can't be read (no SD card).</summary>
         static HashSet<string> PicturesUsedElsewhere(Character c, Func<string, byte[]> cardFile)
@@ -113,6 +114,8 @@ namespace PPlusBlenderBridge
             return read > 0 ? names : null;
         }
 
+        /// <summary>Copies back into the new costume any pictures it lost that the fighter's other models use (the game crashes
+        /// loading them otherwise). Bytes is null when nothing was missing or the result didn't check out.</summary>
         static CostumeMemory.Shrunk PutBackPicturesUsedElsewhere(byte[] pac, byte[] original, HashSet<string> usedElsewhere)
         {
             var r = new CostumeMemory.Shrunk { Before = CostumeMemory.Unpacked(pac) };
@@ -166,6 +169,8 @@ namespace PPlusBlenderBridge
             }
         }
 
+        /// <summary>Takes out the pictures no material of any model in the costume points at. Pictures that are frames of
+        /// one that's used (PeachTexEyeLid.01 next to a used PeachTexEyeLid.00: the game swaps them in for blinking) stay.</summary>
         static CostumeMemory.Shrunk DropUnusedPictures(byte[] pac, HashSet<string> usedElsewhere)
         {
             var r = new CostumeMemory.Shrunk { Before = CostumeMemory.Unpacked(pac) };
@@ -256,6 +261,8 @@ namespace PPlusBlenderBridge
             }
         }
 
+        /// <summary>Checks the model's lists (bones, shapes, materials, shaders...) all point inside the model, without
+        /// reading them (a broken one can't be read safely). Null when fine, else what's wrong.</summary>
         public static string CheckModel(byte[] costume)
         {
             lock (BrawlGate.Lock)
@@ -362,6 +369,8 @@ namespace PPlusBlenderBridge
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(blender, $"--python {Q(start)} -- {Q(glb)} {Q(bridge)}") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(blender) });
         }
 
+        /// <summary>What bringing a model back made: the costume file, where it was saved, notes on what was done, and
+        /// before/after pictures to compare.</summary>
         public sealed class Back
         {
             public byte[] Costume; public string SavedTo, Character; public int FileNumber;
@@ -413,7 +422,7 @@ namespace PPlusBlenderBridge
             if (ownHead) keepFaces = false;
             bool Keep(MDL0ObjectNode obj) => !RiggedExport.ShownByDefault(obj, hiddenNames) ? !(ownHead && RiggedExport.HeadShare(obj, head) >= 0.5f)
                 : keepFaces && RiggedExport.HeadShare(obj, head) >= 0.8f;
-            var built = ModelSwap.BuildKeeping(from.Mesh, target, Path.GetFileNameWithoutExtension(glb), WeightsAt, Keep, from.PictureName);
+            var built = ModelSwap.BuildKeeping(from.Mesh, target, WeightsAt, Keep, from.PictureName);
             // every mix of bones is a matrix the game makes for the fighter: never more than the costume had (more crashed
             // the game as the match started: "fighter instance create", then a write to an empty pointer)
             int mixesBefore = MixCount(target);
@@ -422,7 +431,7 @@ namespace PPlusBlenderBridge
                 int now = MixCount(built.Costume);
                 if (now <= mixesBefore) break;
                 if (tries == 3) throw new InvalidOperationException($"The costume came out with {now} bone mixes where it had {mixesBefore}: the game can't build that. Please send the Blender file to Last Zodiac.");
-                built = ModelSwap.BuildKeeping(from.Mesh, target, Path.GetFileNameWithoutExtension(glb), WeightsAt, Keep, from.PictureName, null, Math.Max(8, built.MixBudget - (now - mixesBefore) - 2));
+                built = ModelSwap.BuildKeeping(from.Mesh, target, WeightsAt, Keep, from.PictureName, null, Math.Max(8, built.MixBudget - (now - mixesBefore) - 2));
             }
             r.Costume = built.Costume;
             // pictures no shape uses any more (the old body's, leftovers the costume already carried) are taken out
@@ -439,7 +448,7 @@ namespace PPlusBlenderBridge
             r.Notes.AddRange(built.Notes);
             r.Notes.Add($"{built.Triangles:N0} triangles from Blender ({from.Shapes.Count} shapes), {built.Pictures} pictures; {built.Mixes} new bone mixes; {MixCount(built.Costume)} in all (the costume had {mixesBefore}).");
             // it has to fit in the game's memory (the Mod Manager checks this too): the same budget, the same shrinking
-            long size = CostumeMemory.Unpacked(r.Costume), budget = Budget(c, info, target, cardFile);
+            long size = CostumeMemory.Unpacked(r.Costume), budget = Budget(target);
             if (budget > 0 && size > budget)
             {
                 var shrunk = CostumeMemory.Shrink(r.Costume, budget);

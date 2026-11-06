@@ -15,7 +15,9 @@ namespace SkinManager.App
     /// <summary>A list of records: a name, a small line under it, wins–losses, the win rate as a bar. Rows can be clicked.</summary>
     class RecordTable : Control
     {
-        public sealed class Row { public string Name, Note; public Record Record; public object Tag; public bool Header; public double? Chance; public Image Icon; public bool Wide; }
+        /// <summary>One line of the table (or a heading, when Header is set); Tag is what a click on it is
+        /// about.</summary>
+        public sealed class Row { public string Name, Note; public Record Record; public object Tag; public bool Header; public Image Icon; public bool Wide; }
         public List<Row> Rows = new List<Row>();
         public event Action<Row> RowClicked;
         public string Empty = "Nothing here yet.";
@@ -23,6 +25,7 @@ namespace SkinManager.App
         int _hover = -1;
         public object Selected;
 
+        /// <summary>Sets up hover, the hand cursor on clickable rows, and clicks picking a row.</summary>
         public RecordTable()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
@@ -61,14 +64,6 @@ namespace SkinManager.App
             for (int i = 0; i < Rows.Count; i++)
             {
                 var r = Rows[i]; int y = i * H;
-                if (r.Chance != null)
-                {
-                    // the big number: your chance to win
-                    using (var c = new SolidBrush(RateColor(r.Chance.Value))) g.DrawString($"{r.Chance.Value * 100:0}%", Theme.Bold(22f), c, 12, y + 2);
-                    using (var t = new SolidBrush(Theme.Text)) g.DrawString(r.Name, Theme.BodyBold, t, 110, y + 5);
-                    if (r.Note != null) using (var m = new SolidBrush(Theme.Muted)) g.DrawString(r.Note, Theme.Small, m, 110, y + 24);
-                    continue;
-                }
                 if (r.Header) { using (var b = new SolidBrush(Theme.Accent)) g.DrawString(r.Name.ToUpperInvariant(), Theme.Small, b, 14, y + 30); continue; }
                 if (i == _hover && RowClicked != null || Selected != null && Equals(Selected, r.Tag)) using (var b = new SolidBrush(Theme.PanelHover)) g.FillRectangle(b, 0, y, w, H - 2);
                 using (var line = new Pen(Theme.Line)) g.DrawLine(line, 10, y + H - 1, w - 10, y + H - 1);
@@ -104,14 +99,13 @@ namespace SkinManager.App
     /// optionally a row of recent results (green wins, red losses).</summary>
     class TileView : Control
     {
-        public Image Back, Side; public string Top, Big, Small; public Color BigColor = Theme.Text; public List<bool> Streak;
+        public Image Side; public new string Top; public string Big, Small; public Color BigColor = Theme.Text;
         public TileView() { SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true); BackColor = Color.Transparent; }
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             var box = new RectangleF(0, 0, Width - 1, Height - 1);
             using (var bg = new SolidBrush(Color.FromArgb(225, Theme.Panel))) using (var path = StatsArt.Round(box, 8)) g.FillPath(bg, path);
-            if (Back != null) { StatsArt.Cover(g, Back, box, 8); using (var path = StatsArt.Round(box, 8)) { g.SetClip(path); StatsArt.Shade(g, box, 235, 90, LinearGradientMode.Horizontal); g.ResetClip(); } }
             if (Side != null)
             {
                 var sb = new RectangleF(Width - Height * 0.8f - 2, 2, Height * 0.8f, Height - 4);
@@ -122,12 +116,7 @@ namespace SkinManager.App
             var fmt = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
             using (var m = new SolidBrush(Color.FromArgb(220, Theme.Muted))) g.DrawString(Top ?? "", Theme.Small, m, new RectangleF(12, 8, textW, 18), fmt);
             using (var c = new SolidBrush(BigColor)) g.DrawString(Big ?? "", Theme.Bold(15f), c, new RectangleF(11, 26, textW, 30), fmt);
-            if (Streak != null && Streak.Count > 0)
-            {
-                float x = 13, size = Math.Min(10, (textW - 4) / Streak.Count - 2);
-                foreach (var won in Streak) { using (var b = new SolidBrush(won ? Theme.Good : Theme.Bad)) g.FillRectangle(b, x, Height - 22, size, size); x += size + 2; }
-            }
-            else using (var t = new SolidBrush(Theme.Text)) g.DrawString(Small ?? "", Theme.Small, t, new RectangleF(12, Height - 26, textW, 18), fmt);
+            using (var t = new SolidBrush(Theme.Text)) g.DrawString(Small ?? "", Theme.Small, t, new RectangleF(12, Height - 26, textW, 18), fmt);
         }
     }
 
@@ -154,6 +143,8 @@ namespace SkinManager.App
         }
     }
 
+    /// <summary>The Stat Tracker page: reads your match history and replays, and shows them across its views (Overview,
+    /// Progress, Matches...).</summary>
     class StatsPanel : GlassPanel
     {
         readonly Func<BrawlOnlineInstall> _install;
@@ -185,10 +176,13 @@ namespace SkinManager.App
         readonly CharacterProgressView _charProgress = new CharacterProgressView();
 
         static ComboBox Combo(int w) => new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = w, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text };
+        /// <summary>A drop-down entry: the words shown and the value behind them.</summary>
         sealed class Item { public string Text; public object Value; public override string ToString() => Text; }
 
         static readonly string[] Views = { "Overview", "Progress", "Characters", "Matches", "Matchups", "Stages", "Opponents", "Win chance" };
 
+        /// <summary>Builds the page's header, filter, view buttons and views, and reads your games the first time it's
+        /// shown.</summary>
         public StatsPanel(Func<BrawlOnlineInstall> install, Func<Installer> installer)
         {
             _install = install; _installer = installer;
@@ -224,6 +218,7 @@ namespace SkinManager.App
             if (view != null && Views.Contains(view)) _tab = view;
         }
 
+        /// <summary>Lays out the header, view buttons and whichever views are showing for the page's size.</summary>
         void Arrange()
         {
             int w = Math.Max(700, ClientSize.Width - 44);
@@ -260,17 +255,23 @@ namespace SkinManager.App
         public event Action<long> NewGame;
         public StatsData Data => _data;
 
-        long? _newGame;
         /// <summary>A new game's report is ready: Matches shows it (and says so on its tab).</summary>
         public void MarkNew(long gameId)
         {
-            _newGame = gameId; _matchCard.Game = gameId; _matches.Selected = gameId; _matchCard.ToTop();
+            _matchCard.Game = gameId; _matches.Selected = gameId; _matchCard.ToTop();
             foreach (Control b in _tabs.Controls) if (b.Text.StartsWith("Matches")) b.Text = "Matches •";
             ShowAll();
         }
 
         /// <summary>Reads the history again (and any new replays), after a game ends: the page needn't be open.</summary>
         public void CheckNewGame() { _ = Load(true); }
+
+        /// <summary>The stage names read from the card (null until the first read): shared with the opponent card, so the
+        /// card isn't opened again for them after every game.</summary>
+        public Dictionary<int, string> StageNames => _stageNames;
+
+        /// <summary>When the newest game read so far started (MinValue: none read yet).</summary>
+        public DateTime NewestSeen => _lastGameStart;
 
         /// <summary>Reads (or reads again) everything; one at a time (a second call while reading reads once more after).</summary>
         Task Load(bool quiet)
@@ -280,6 +281,8 @@ namespace SkinManager.App
             return _loading;
         }
 
+        /// <summary>Reads the stage names, match history, pictures and replays, and announces a game that's newly
+        /// finished; reads again if asked to meanwhile.</summary>
         async Task LoadOnce(bool quiet)
         {
             do
@@ -382,7 +385,8 @@ namespace SkinManager.App
             await Task.Run(() =>
             {
                 int done = 0;
-                System.Threading.Tasks.Parallel.ForEach(games, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Math.Min(4, Environment.ProcessorCount / 2)) }, x =>
+                // several at once, but one at a time while the game runs (it needs the computer more)
+                System.Threading.Tasks.Parallel.ForEach(games, new ParallelOptions { MaxDegreeOfParallelism = GameWindow.Running ? 1 : Math.Max(1, Math.Min(4, Environment.ProcessorCount / 2)) }, x =>
                 {
                     try
                     {
@@ -450,9 +454,15 @@ namespace SkinManager.App
                             var w = WatchOut.For(smash.Replay, smash.Me, smash.Them, Book, name);
                             if (w?.Entry != null && w.Book?.Costume != null)
                             {
-                                var pics = ModelPreview.RenderMove(w.Book.Costume, w.Book.Motion, w.Book.Moves, w.Entry.Data, 168, 120, false);
-                                int at = Math.Max(0, Math.Min(pics.Count - 1, (w.Punish?.HitFrame ?? w.Entry.Data.Startup) - 1));
-                                for (int i = 0; i < pics.Count; i++) if (i == at) w.Picture = pics[i]; else pics[i].Dispose();
+                                // the move from a little before it hits to a little after, played on a loop on the card
+                                var pics = ModelPreview.RenderMove(w.Book.Costume, w.Book.Motion, w.Book.Moves, w.Entry.Data, ReportCard.PictureWidth, ReportCard.PictureHeight, false);
+                                if (pics.Count > 0)
+                                {
+                                    int at = Math.Max(0, Math.Min(pics.Count - 1, (w.Punish?.HitFrame ?? w.Entry.Data.Startup) - 1));
+                                    int from = Math.Max(0, at - 10), to = Math.Min(pics.Count - 1, at + 16);
+                                    w.Frames = pics.Skip(from).Take(to - from + 1).ToList(); w.HitIndex = at - from;
+                                    foreach (var p in pics.Take(from).Concat(pics.Skip(to + 1))) p.Dispose();
+                                }
                             }
                             c.Watch = w;
                         }
@@ -486,6 +496,7 @@ namespace SkinManager.App
 
         void RefreshViews() { foreach (Control c in _body.Controls) if (c is ScrollView || c is CharacterChart) c.Invalidate(); }
 
+        /// <summary>Shows a replay file in Explorer (or says it's gone).</summary>
         void ShowReplayFile(string file)
         {
             var path = Locate(file);
@@ -508,6 +519,7 @@ namespace SkinManager.App
             catch (Exception e) { Program.Log("watching a replay", e); Dialog.Show(this, "Brawl Online couldn't be opened: " + Friendly.Explain(e), "Watch this game", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 
+        /// <summary>How long ago a time was, in words ("3 h ago", "yesterday").</summary>
         static string Ago(DateTime utc)
         {
             var d = DateTime.UtcNow - utc;
@@ -518,6 +530,8 @@ namespace SkinManager.App
         Image Portrait(int? c) => _art?.Portrait(c);
         Image StagePic(int? s) => _art?.Stage(s);
 
+        /// <summary>Fills the header card: your name and code, overall record, how long you've played, and your most
+        /// played character.</summary>
         void Profile()
         {
             if (_h == null) return;
@@ -531,9 +545,12 @@ namespace SkinManager.App
             _profile.Side = Portrait(main); _profile.Invalidate();
         }
 
+        /// <summary>Shows the chosen view with the current filter (all, ranked or unranked games), filling its table or
+        /// picture.</summary>
         void ShowAll()
         {
             if (_h == null) return;
+            Program.Doing = "showing the Stat Tracker";
             var games = _h.Singles(_ranked).ToList();
             _data.History = _h; _data.Games = games;
             _data.Head = Head; _data.Portrait = Portrait; _data.Stage = StagePic; _data.MoveName = MoveName; _data.Coach = id => Coach(id);
@@ -571,8 +588,10 @@ namespace SkinManager.App
                 case "Win chance": WinChance(); break;
             }
             Arrange();
+            Program.Doing = null;
         }
 
+        /// <summary>The small line under a row: when it was last played, and the last 10 games' record.</summary>
         static string Note(IEnumerable<(GameRecord Game, GamePlayer Me, GamePlayer Them)> games)
         {
             var l = games.OrderByDescending(g => g.Game.Start).ToList();
@@ -584,6 +603,7 @@ namespace SkinManager.App
         // ----- matchups -----
 
         int? _mine;
+        /// <summary>Fills the Matchups view: your record against each character, optionally as one of yours.</summary>
         void Matchups(List<(GameRecord Game, GamePlayer Me, GamePlayer Them)> games)
         {
             var pick = Combo(220);
@@ -602,6 +622,7 @@ namespace SkinManager.App
             _table.RowClicked += MatchupClicked;
         }
 
+        /// <summary>Shows your best characters and stages against the clicked character on the side.</summary>
         void MatchupClicked(RecordTable.Row row)
         {
             int theirs = (int)row.Tag;
@@ -632,6 +653,8 @@ namespace SkinManager.App
             _table.RowClicked += OpponentClicked;
         }
 
+        /// <summary>Shows the rivalry with the clicked opponent on the side: records, streak, their habits, characters
+        /// and stages.</summary>
         void OpponentClicked(RecordTable.Row row)
         {
             string id = (string)row.Tag;
@@ -666,6 +689,8 @@ namespace SkinManager.App
         // ----- win chance -----
 
         int? _wcMine, _wcTheirs, _wcStage; string _wcOpp;
+        /// <summary>Fills the Win chance view: pick both characters, an opponent and a stage to see your chance and
+        /// what it's based on.</summary>
         void WinChance()
         {
             void Pick(string label, int x, IEnumerable<Item> items, object current, Action<object> set)

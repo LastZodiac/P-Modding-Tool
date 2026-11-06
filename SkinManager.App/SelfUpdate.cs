@@ -12,6 +12,8 @@ using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>Puts in a newer build of the app when it starts, cleans up after the last update, and makes the app's
+    /// shortcuts.</summary>
     static class SelfUpdate
     {
         static string AppFolder => AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
@@ -93,11 +95,13 @@ namespace SkinManager.App
             return false;
         }
 
+        /// <summary>Empties a drop folder once its build is in (or turned out to be this same version).</summary>
         static void Clear(string drop)
         {
             try { foreach (var f in Directory.GetFiles(drop, "*", SearchOption.AllDirectories)) File.Delete(f); } catch { }
         }
 
+        /// <summary>True when two files are byte-for-byte the same (the caller checks the sizes match first).</summary>
         static bool Same(string a, string b)
         {
             using (var sa = File.OpenRead(a)) using (var sb = File.OpenRead(b))

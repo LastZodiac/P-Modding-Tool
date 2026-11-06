@@ -10,6 +10,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Keeps track of the normal, big and clean cards: which one is in place, making them, and switching
+    /// between them.</summary>
     public sealed class Cards
     {
         public const string Normal = "normal", Big = "big", Clean = "clean";   // clean: P+ exactly as it comes, no mods (for "Launch unmodded")
@@ -18,6 +20,8 @@ namespace SkinManager.Core
         readonly BrawlOnlineInstall _install;
         readonly string _data;
 
+        /// <summary>Reads which card was last in place, but goes by which card file isn't parked if the two
+        /// disagree.</summary>
         public Cards(BrawlOnlineInstall install, string dataFolder)
         {
             _install = install; _data = dataFolder;
@@ -79,6 +83,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Copies a folder and everything in it (overwriting files already there).</summary>
         static void CopyFolder(string from, string to)
         {
             Directory.CreateDirectory(to);
@@ -101,6 +106,7 @@ namespace SkinManager.Core
             Save();
         }
 
+        /// <summary>Deletes the big card and its mods list. The normal card must be in place.</summary>
         public void DeleteBig()
         {
             if (Active == Big) throw new InvalidOperationException("Switch to the normal card first.");
@@ -228,6 +234,7 @@ namespace SkinManager.Core
             catch { try { if (File.Exists(work)) File.Delete(work); } catch { } throw; }
         }
 
+        /// <summary>Deletes the clean card and its (empty) mods list. Another card must be in place.</summary>
         public void DeleteClean()
         {
             if (Active == Clean) throw new InvalidOperationException("Switch to another card first.");
@@ -240,6 +247,7 @@ namespace SkinManager.Core
         public void UseOriginals(Func<string, byte[]> original) => _currentOriginal = original;
         byte[] CurrentOriginal(string path) => _currentOriginal?.Invoke(path);
 
+        /// <summary>Every file under a folder on a card, at any depth.</summary>
         static IEnumerable<string> AllFiles(Fat32Image c, string path)
         {
             foreach (var e in c.ListFolder(path))

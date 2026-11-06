@@ -6,7 +6,6 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
-using BrawlLib.Imaging;
 using BrawlLib.Internal.Drawing;
 using BrawlLib.Internal.IO;
 using BrawlLib.SSBB.ResourceNodes;
@@ -14,8 +13,10 @@ using BrawlLib.Wii.Textures;
 
 namespace SkinManager.Core
 {
+    /// <summary>The three pictures a costume slot has: the character select portrait, the in-match portrait and the stock icon.</summary>
     public enum PictureKind { SelectPortrait, BattlePortrait, StockIcon }
 
+    /// <summary>Reads and replaces the portrait and stock icon pictures inside the game's .brres files.</summary>
     public static class Cosmetics
     {
         public static Size SizeOf(PictureKind k) =>
@@ -137,6 +138,7 @@ namespace SkinManager.Core
     {
         public string Path { get; }
         static readonly string Dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "PPlusModdingTool");
+        /// <summary>Makes a new temp file name with this extension, writing the bytes to it if given.</summary>
         public TempFile(string ext, byte[] contents = null)
         {
             Directory.CreateDirectory(Dir);

@@ -9,6 +9,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>One stock lost to a hit: who and what hit you, at what percent, and the DI that would have helped
+    /// most.</summary>
     public sealed class DeathTip
     {
         public int Killer;             // their character
@@ -40,7 +42,8 @@ namespace SkinManager.Core
         public string Move;             // "Forward smash"
         public int Times; public float Damage; public int Stocks;   // how often it hit you, how much it did, stocks it took
         public PunishReport Punish;     // it on your shield (null: not worked out)
-        public System.Drawing.Bitmap Picture;   // the move as it hits, with its hitboxes (null: not drawn)
+        public List<System.Drawing.Bitmap> Frames;   // the move around the moment it hits, with its hitboxes (null: not drawn)
+        public int HitIndex;                          // which of Frames is the hit (shown a little longer)
         public MoveEntry Entry; public FighterBook Book;
 
         /// <summary>What to do about it, in a sentence.</summary>
@@ -55,6 +58,24 @@ namespace SkinManager.Core
                 return best == null ? $"It's {p.Advantage} on shield, but none of your out-of-shield options are fast enough."
                     : $"It's {p.Advantage} on shield: punish it with {best.Name.ToLowerInvariant()}" + (best.Jump > 0 ? " out of a jump" : " out of shield") + (best.Spare > 0 ? $" ({best.Spare} frame{(best.Spare == 1 ? "" : "s")} to spare)." : " (just in time).");
             }
+        }
+
+        /// <summary>The frame data row of a move the replay names by its subaction: the row that runs it, else the row
+        /// it was merged into (an air version shown with its ground one), else the row with its name.</summary>
+        public static MoveEntry EntryFor(FighterBook b, int subaction, string name)
+        {
+            var hit = b.Entries.FirstOrDefault(e => e.Data.Subactions.Contains(subaction));
+            if (hit != null) return hit;
+            string anim = subaction >= 0 && subaction < b.Moves.Subactions.Count ? b.Moves.Subactions[subaction].Animation : null;
+            if (!string.IsNullOrEmpty(anim))
+            {
+                hit = b.Entries.FirstOrDefault(e => e.Parts.Contains(anim, StringComparer.OrdinalIgnoreCase) || e.Covers.Contains(anim, StringComparer.OrdinalIgnoreCase));
+                if (hit != null) return hit;
+            }
+            if (string.IsNullOrEmpty(name)) return null;
+            string Base(string n) => System.Text.RegularExpressions.Regex.Replace(n, @"\s*\((ground & air|air|up|down|all angles)\)", "").Trim();
+            return b.Entries.FirstOrDefault(e => string.Equals(Base(e.Name), name, StringComparison.OrdinalIgnoreCase))
+                ?? b.Entries.FirstOrDefault(e => Base(e.Name).StartsWith(name + " ", StringComparison.OrdinalIgnoreCase) && e.Data.Hits.Count > 0);
         }
 
         /// <summary>The move of theirs that did the most damage to you (stocks it took count most).</summary>
@@ -72,7 +93,7 @@ namespace SkinManager.Core
             try
             {
                 var b = book(ch); var mine = book(d.Characters[me]);
-                var entry = b?.Entries.FirstOrDefault(e => e.Data.Subactions.Contains(top.Move));
+                var entry = b == null ? null : EntryFor(b, top.Move, w.Move);
                 if (entry != null)
                 {
                     w.Entry = entry; w.Book = b;
@@ -85,6 +106,7 @@ namespace SkinManager.Core
         }
     }
 
+    /// <summary>Works out, from a game's replay, the DI that would have saved each stock you lost to a hit.</summary>
     public static class DeathCoach
     {
         /// <summary>The stocks a player lost to hits, with the DI that would have helped most.</summary>
@@ -152,6 +174,8 @@ namespace SkinManager.Core
         }
     }
 
+    /// <summary>The short notes about how a game went (zero-to-deaths, clutch stocks, L-cancels...) and the combo
+    /// idea.</summary>
     public static class FunFacts
     {
         /// <summary>A couple of things worth knowing about how a game went (the most notable first).</summary>

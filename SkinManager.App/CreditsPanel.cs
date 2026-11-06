@@ -7,10 +7,13 @@ using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>The Credits page: who made the app and the projects it's built on, with links.</summary>
     class CreditsPanel : GlassPanel
     {
         public const string Creator = "Last Zodiac";
 
+        /// <summary>Lays out the page: the app's name and version, one entry per project it uses, and the License texts
+        /// button.</summary>
         public CreditsPanel()
         {
             Dock = DockStyle.Fill; Padding = new Padding(28, 18, 16, 8); AutoScroll = true;
@@ -61,6 +64,7 @@ namespace SkinManager.App
             Controls.AddRange(new Control[] { title, made, built, lic });
         }
 
+        /// <summary>Opens a web page or folder the way Windows normally would; does nothing if that fails.</summary>
         static void Open(string what)
         {
             try { Process.Start(new ProcessStartInfo(what) { UseShellExecute = true }); } catch { }

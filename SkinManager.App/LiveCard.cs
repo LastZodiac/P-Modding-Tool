@@ -11,28 +11,31 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The opponent card shown over the game: a slim bar during the fight, a small card while loading, or the
+    /// whole card when clicked open.</summary>
     class LiveCard : OverlayForm
     {
         public LiveState State;
         public MatchHistory History;
         public StatsArt Art;
-        public bool Dismissed;
         public Func<string, List<(string Habit, string Tip)>> Scout;   // a player's habits from your games against them
         public bool Pill;              // during the fight: a slim bar
         public Rectangle? Game;        // where the game is on screen
-        public bool Left;              // in the top-left corner (normally top right: Brawl Online's chat is on the left)
+        public new bool Left;          // in the top-left corner (normally top right: Brawl Online's chat is on the left)
         public string CoachLine;       // between games: the coach's main note on the last one
 
         public bool Preview;           // Settings' preview: made-up numbers
         public bool Expanded;          // the whole card (normally just the top and one line: it shouldn't cover the game)
         public event Action<bool> ExpandedChanged;
         readonly Timer _anim = new Timer { Interval = 30 };
+        /// <summary>Clicking the card opens or closes it (the slim bar during the fight ignores clicks).</summary>
         public LiveCard()
         {
             Size = new Size(430, 250);
             _anim.Tick += (s, e) => { if (!Flashing && !Animating) _anim.Stop(); Invalidate(); };
             Cursor = Cursors.Hand;
-            MouseClick += (s, e) => { if (Pill) return; Expanded = !Expanded; _openedAt = DateTime.Now; Refresh2(); ExpandedChanged?.Invoke(Expanded); };
+            MouseClick += (s, e) => { if (Pill) return; if (WasDragged) { WasDragged = false; return; } Expanded = !Expanded; _openedAt = DateTime.Now; Refresh2(); ExpandedChanged?.Invoke(Expanded); };
+            Draggable = true;   // drag it anywhere over the game (the slim bar during the fight goes there too)
         }
         DateTime _openedAt;
         bool Animating => (DateTime.Now - _openedAt).TotalSeconds < 0.3;
@@ -42,22 +45,27 @@ namespace SkinManager.App
 
         bool Flashing => State != null && State.LastKo != default && (DateTime.Now - State.LastKo).TotalSeconds < 3;
 
+        /// <summary>Moves the card to its top corner of the game (or of the screen if the game window isn't
+        /// known).</summary>
         public void Place()
         {
             // a top corner of the game (the damage is along the bottom); during the fight the slim bar sits a little lower
             // on the right, under the timer
             var area = Game ?? Screen.PrimaryScreen.WorkingArea;
+            if (Spot != null) { var at = AtSpot(area, Spot.Value); if (Location != at) Location = at; return; }   // where you dragged it
             int x = Left ? area.X + 14 : area.Right - Width - 14;
             int y = area.Y + 14 + (Pill && !Left ? (int)(area.Height * 0.12) : 0);
             if (Location != new Point(x, y)) Location = new Point(x, y);
         }
+
+        protected override Rectangle DragArea => Game ?? Screen.PrimaryScreen.WorkingArea;
 
         static Color RateColor(double r) => RecordTable.RateColor(r);
 
         /// <summary>The slim bar during the fight: their head, name, set score, matchup and your chance.</summary>
         void PaintPill(Graphics g)
         {
-            var s = State; var h = History;
+            var s = State;
             using (var border = new Pen(Color.FromArgb(160, OverlayLook.Accent), 1.5f)) g.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
             float x = 8;
             var head = Art?.Head(s?.TheirChar);
@@ -151,8 +159,8 @@ namespace SkinManager.App
             }
             else if (!Expanded)
             {
-                int want = 72 + Compact().Take(2).Sum(l => l.Text.StartsWith("Coach: ") ? 36 : 20) + 20;
-                if (Size != new Size(340, want)) Size = new Size(340, want);
+                // kept small: it sits over the game (the coach's notes are on the card after each game)
+                if (Size != new Size(CompactWidth, CompactHeight)) Size = new Size(CompactWidth, CompactHeight);
             }
             else
             {
@@ -166,17 +174,17 @@ namespace SkinManager.App
             Invalidate();
         }
 
-        /// <summary>The lines the small card keeps: how you do against them, and between games the coach or your best pick.</summary>
-        List<(string Text, Color Color)> Compact()
+        const int CompactWidth = 290, CompactHeight = 80;
+
+        /// <summary>The one line the small card keeps: how you do against them (between games: your best pick).</summary>
+        (string Text, Color Color) CompactLine()
         {
-            var keep = new List<(string Text, Color Color)>();
-            if (_lines.Count > 0) keep.Add(_lines[0]);
-            var coach = _lines.Where(l => l.Text.StartsWith("Coach: ") || l.Text.StartsWith("   ") && l.Color == OverlayLook.Accent).Select(l => l.Text.Trim()).ToList();
-            if (coach.Count > 0) { keep.Add((string.Join(" ", coach), OverlayLook.Accent)); return keep; }
-            foreach (var l in _lines.Skip(1))
-                if (l.Text.StartsWith("Best picks") || s_matchup(l.Text)) { keep.Add((l.Text, l.Color)); break; }
-            return keep;
+            var picks = _lines.FirstOrDefault(l => l.Text.StartsWith("Best picks"));
+            if (picks.Text != null) return picks;
+            return _lines.Count > 0 ? _lines[0] : ("", Theme.Muted);
         }
+        /// <summary>Breaks a long line into lines of at most max letters; the follow-on lines start with three
+        /// spaces.</summary>
         static List<string> Wrap(string t, int max)
         {
             var parts = new List<string>(); var line = "";
@@ -188,9 +196,10 @@ namespace SkinManager.App
             if (line.Length > 0) parts.Add(line);
             return parts;
         }
-        bool s_matchup(string t) => State?.MyChar != null && t.StartsWith(Fighters.Name(State.MyChar.Value) + " vs ");
 
         bool _clickable;
+        /// <summary>Rebuilds the window when switching between the slim bar and the card, so clicks pass through or
+        /// not.</summary>
         void RecreateIfNeeded()
         {
             // the window style (clicks or not) follows the slim bar / card switch
@@ -198,33 +207,23 @@ namespace SkinManager.App
             else _clickable = !Pill;
         }
 
+        /// <summary>The small (closed) card: their head and name, the game and set score, your chance, and one line.</summary>
         void PaintCompact(Graphics g)
         {
             var s = State; var h = History;
-            using (var border = new Pen(OverlayLook.Accent, 2)) g.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
-            var top = new RectangleF(2, 2, Width - 5, 66);
-            if (Art?.Stage(s.Stage) != null) { StatsArt.Cover(g, Art.Stage(s.Stage), top, 0); StatsArt.Shade(g, top, 235, 120, LinearGradientMode.Horizontal); }
-            float left = 12;
+            using (var border = new Pen(OverlayLook.Accent, 1.5f)) g.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
+            var top = new RectangleF(2, 2, Width - 5, 50);
+            if (Art?.Stage(s.Stage) != null) { StatsArt.Cover(g, Art.Stage(s.Stage), top, 0); StatsArt.Shade(g, top, 235, 140, LinearGradientMode.Horizontal); }
+            float left = 10;
             var head = Art?.Head(s.TheirChar);
-            if (head != null) { var hb = new RectangleF(10, 9, 42, 50); using (var bg = new SolidBrush(Color.FromArgb(60, 255, 255, 255))) using (var path = StatsArt.Round(hb, 6)) g.FillPath(bg, path); StatsArt.Cover(g, head, hb, 6, false, 0.5f, 0f); left = 60; }
+            if (head != null) { var hb = new RectangleF(7, 6, 34, 40); using (var bg = new SolidBrush(Color.FromArgb(60, 255, 255, 255))) using (var path = StatsArt.Round(hb, 5)) g.FillPath(bg, path); StatsArt.Cover(g, head, hb, 5, false, 0.5f, 0f); left = 48; }
             string mode = s.Mode == "ranked" ? "Ranked" : s.Mode == "unranked" ? "Unranked" : s.Mode == "direct" ? "Direct" : s.Mode == "room" ? "Room" : s.Mode;
-            Text(g, "vs " + (s.OpponentName ?? "…"), Theme.BodyBold, Theme.Text, new RectangleF(left, 10, Width - left - 78, 22));
-            Text(g, $"{mode} · game {s.Game}" + (s.MyWins + s.TheirWins > 0 ? $" · set {s.MyWins}–{s.TheirWins}" : ""), Theme.Small, Theme.Muted, new RectangleF(left, 32, Width - left - 78, 18));
-            if (s.Stage != null && h != null) Text(g, h.StageName(s.Stage.Value), Theme.Small, Theme.Text, new RectangleF(left, 48, Width - left - 78, 18));
-            if (_proj != null)
-            {
-                Text(g, $"{_proj.Chance * 100:0}%", Theme.Bold(17f), RateColor(_proj.Chance), new RectangleF(Width - 80, 8, 72, 30), true);
-                Text(g, "to win", Theme.Small, Theme.Muted, new RectangleF(Width - 80, 40, 72, 18), true);
-            }
-            float y = 72;
-            if ((h == null && !Preview) || _proj == null) Text(g, h == null && Program.HistoryProblem != null ? Program.HistoryProblem : "Reading your match history…", Theme.Small, Theme.Muted, new RectangleF(12, y, Width - 24, 18));
-            else foreach (var (t, c) in Compact().Take(2))
-            {
-                bool two = t.StartsWith("Coach: ");
-                using (var b = new SolidBrush(c)) g.DrawString(t, Theme.Small, b, new RectangleF(12, y, Width - 24, two ? 34 : 18), two ? new StringFormat { Trimming = StringTrimming.EllipsisWord } : new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
-                y += two ? 36 : 20;
-            }
-            Text(g, "▾ more", Theme.Small, OverlayLook.Accent, new RectangleF(Width - 64, Height - 20, 56, 16));
+            Text(g, "vs " + (s.OpponentName ?? "…"), Theme.BodyBold, Theme.Text, new RectangleF(left, 6, Width - left - 64, 20));
+            Text(g, $"{mode} · game {s.Game}" + (s.MyWins + s.TheirWins > 0 ? $" · set {s.MyWins}–{s.TheirWins}" : ""), Theme.Small, Theme.Muted, new RectangleF(left, 27, Width - left - 64, 18));
+            if (_proj != null) Text(g, $"{_proj.Chance * 100:0}%", Theme.Bold(14f), RateColor(_proj.Chance), new RectangleF(Width - 64, 10, 58, 26), true);
+            if ((h == null && !Preview) || _proj == null) Text(g, h == null && Program.HistoryProblem != null ? Program.HistoryProblem : "Reading your match history…", Theme.Small, Theme.Muted, new RectangleF(10, 56, Width - 20, 18));
+            else { var (t, c) = CompactLine(); Text(g, t, Theme.Small, c, new RectangleF(10, 56, Width - 34, 18)); }
+            Text(g, "▾", Theme.Small, OverlayLook.Accent, new RectangleF(Width - 22, 56, 16, 18));
         }
 
         protected override void PaintContent(PaintEventArgs e)

@@ -6,6 +6,8 @@ using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>A clickable costume slot card that can show as picked, greyed out, or with a coloured note under its
+    /// name.</summary>
     class SlotTile : Control
     {
         public Image Picture;
@@ -16,6 +18,7 @@ namespace SkinManager.App
         public bool Dimmed;               // can't be chosen
         bool _hover;
 
+        /// <summary>Sets up a double-buffered, see-through card with a hand cursor at its usual size.</summary>
         public SlotTile()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);

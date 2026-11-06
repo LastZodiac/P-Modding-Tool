@@ -7,10 +7,12 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>The rules themselves, fighter by fighter.</summary>
     public static partial class ProjectileFlight
     {
         static float Deg(float rad) => rad * 180f / (float)Math.PI;
 
+        /// <summary>Adds every rule in this file, then the rest (LoadRulesA, in ProjectileFlightRulesA.cs).</summary>
         static partial void LoadRules()
         {
             // ---- Fox, Falco, Wolf: blaster shots. sora_melee wn<Fighter>BlasterBullet activate: straight, no gravity; speed =

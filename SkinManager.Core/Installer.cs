@@ -1,5 +1,6 @@
-// Puts skins on the card and takes them off again. Every change is made on a copy of the card,
-// checked by reading it back, and only then swapped in (the previous card is kept as a backup).
+// Puts skins and stages on the card and takes them off again. A save normally writes only what changes, after a
+// journal of what was there (so a failure puts the card back exactly); otherwise it works on a copy of the card that is
+// swapped in. Either way every file is read back to check it, and the card from before is kept for "Undo last save".
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -9,6 +10,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>A skin ready to go on the card: its files for one costume slot, its pictures, and the safety checks it
+    /// passed or failed.</summary>
     public sealed class SkinPlan
     {
         public string Name;
@@ -23,6 +26,7 @@ namespace SkinManager.Core
         public bool CanInstall => Checks.All(c => c.Passed);
     }
 
+    /// <summary>A stage, song or stage swap ready to go on the card, with its safety checks.</summary>
     public sealed class StagePlan
     {
         public string Name;
@@ -37,12 +41,15 @@ namespace SkinManager.Core
         public Dictionary<string, byte[]> SelectPictures = new Dictionary<string, byte[]>();   // "preview", "icon", "name" (PNG) for the stage select
         public StageCheck.Fit Fit;                 // fixed stages: how far its looks are from P+'s floors
         public List<string> LooksSwapped = new List<string>();   // fixed stages: its models replaced by P+'s
+        public StageCheck.Alignment Aligned;       // the map's scenery was moved onto P+'s floors (what was done), or null
         public StageCheck.LooksResult Looks;       // looks-only: the map's scenery on P+'s own stage file
         public byte[] LooksMap;                    // looks-only: the map itself (kept, to do it again on a newer P+)
         public List<CheckResult> Checks = new List<CheckResult>();
         public bool CanInstall => Checks.All(c => c.Passed);
     }
 
+    /// <summary>Puts mods on the card and takes them off, checks them against P+ (and P+ updates), and keeps the mods
+    /// list in step.</summary>
     public sealed class Installer
     {
         /// <summary>Largest select-screen portrait file P+ ships (MenSelchrFaceB360.brres).</summary>
@@ -107,6 +114,8 @@ namespace SkinManager.Core
             return disc;
         }
 
+        /// <summary>A costume's skeleton, read once and remembered by key (null when the costume couldn't be
+        /// had).</summary>
         SkinCheck.Skeleton SkeletonOf(string key, Func<byte[]> bytes)
         {
             if (_skeletons.TryGetValue(key, out var s)) return s;
@@ -114,6 +123,8 @@ namespace SkinManager.Core
             return _skeletons[key] = b == null ? null : SkinCheck.ReadSkeleton(b);
         }
 
+        /// <summary>The bones a character's hurtboxes hang on (from its moveset file), read once; null if it can't be
+        /// read.</summary>
         int[] HurtboxBones(Fat32Image card, Character c)
         {
             if (!_hurtboxes.TryGetValue(c.SlotListId, out var hb))
@@ -216,6 +227,8 @@ namespace SkinManager.Core
         /// <summary>A skin's main costume file as it came (kept beside the copy when the copy was made smaller).</summary>
         static string OriginalCopy(string copy) => copy + ".original";
 
+        /// <summary>A skin's slot, its main costume file, and the app's saved copy of that file (null for whatever
+        /// isn't there).</summary>
         (CostumeSlot Slot, InstalledFile File, string Copy) MainCopy(Fat32Image card, InstalledSkin s)
         {
             var c = s.Character;
@@ -232,6 +245,8 @@ namespace SkinManager.Core
         public List<InstalledSkin> TooBig(Fat32Image card) => NeedsRefit(card).Where(x => x.Value).Select(x => x.Key).ToList();
         public List<InstalledSkin> ShrunkForNothing(Fat32Image card) => NeedsRefit(card).Where(x => !x.Value).Select(x => x.Key).ToList();
 
+        /// <summary>Skins that are on whose costume needs fitting again: true when too big for the game's memory, false
+        /// when made smaller for nothing.</summary>
         List<KeyValuePair<InstalledSkin, bool>> NeedsRefit(Fat32Image card)
         {
             var result = new List<KeyValuePair<InstalledSkin, bool>>();
@@ -253,6 +268,7 @@ namespace SkinManager.Core
             return result;
         }
 
+        /// <summary>The first 8 bytes of a file (enough to tell how big a costume unpacks to).</summary>
         static byte[] Head(string file)
         {
             var head = new byte[8];
@@ -299,6 +315,8 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Gets a costume from a download ready for a slot: reads its files, makes it fit the game's memory if
+        /// needed, and runs the safety checks.</summary>
         public SkinPlan Plan(Fat32Image card, SkinPackage pkg, PackageCostume costume, CostumeSlot slot, Dictionary<PictureKind, string> pictureFiles)
         {
             var c = costume.Character;
@@ -409,10 +427,54 @@ namespace SkinManager.Core
             return list;
         }
 
+        /// <summary>What's wrong with a looks install an older version made (null: nothing known): a palette picture of
+        /// P+'s made plain (the game crashes loading the stage), or the map's scenery put in a part of P+'s file the stage
+        /// program draws as far-off background (its ground shows far off the floor).</summary>
+        static string Fault(byte[] bytes, byte[] original, ICollection<string> program)
+        {
+            if (StageCheck.BrokenPictures(bytes, original)) return "one of P+'s pictures it hides had been changed in a way that can crash the game when the stage loads";
+            if (StageCheck.LooksMisplaced(bytes, original, program)) return "its scenery is now drawn where P+ draws its own ground, so it lines up with the floor you stand on";
+            return null;
+        }
+
+        static readonly Dictionary<string, int> FaultsSeen = new Dictionary<string, int>();   // NeedsRemaking: 0 fine, 1 misplaced, 2 can crash
+
+        /// <summary>Stage mods that are on and were made by an older version with a known fault (Fault): putting them back
+        /// (StageReapply) makes them again. crash: one of them can crash the game.</summary>
+        public List<InstalledStage> NeedsRemaking(Fat32Image card, out bool crash)
+        {
+            crash = false;
+            var list = new List<InstalledStage>();
+            foreach (var s in _lib.Stages.Where(x => x.Enabled && x.Kind == null && x.LooksOnly && !x.IsSwap).ToList())
+                try
+                {
+                    string p = Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath));
+                    var original = _lib.OriginalFile(s.CardPath);
+                    if (!File.Exists(p) || original == null || LooksSource(s) == null) continue;
+                    // the answer for this copy against this P+ file is kept (reading both takes a second or two, and this runs
+                    // every time My Mods is refreshed)
+                    string key = s.Sha256 + "|" + Library.Sha256(original);
+                    int found;
+                    lock (FaultsSeen)
+                        if (!FaultsSeen.TryGetValue(key, out found)) found = -1;
+                    if (found < 0)
+                    {
+                        var bytes = File.ReadAllBytes(p);
+                        found = StageCheck.BrokenPictures(bytes, original) ? 2 : StageCheck.LooksMisplaced(bytes, original, _stageIndex.ProgramNames(card, s.CardPath)) ? 1 : 0;
+                        lock (FaultsSeen) FaultsSeen[key] = found;
+                    }
+                    if (found > 0) list.Add(s);
+                    if (found == 2) crash = true;
+                }
+                catch { }
+            return list;
+        }
+
         /// <summary>What a stage mod looks like, to put on another version of its stage: the map it came as (a looks
         /// install) or the file saved for it, and its stage select pictures.</summary>
         public (byte[] Map, Dictionary<string, byte[]> Pictures) ModLooks(InstalledStage s) => (LooksSource(s) ?? StageCopy(s), SelectPicturesOf(s));
 
+        /// <summary>The map a looks-only stage mod came as (kept to do it again on a newer P+), or null.</summary>
         byte[] LooksSource(InstalledStage s)
         {
             string f = Path.Combine(_lib.StageFolder(s.Id), "looks-map.pac");
@@ -427,6 +489,9 @@ namespace SkinManager.Core
             if (s.IsSwap) return SwapForNow(card, s, out why);
             var bytes = StageCopy(s);
             if (s.Kind != null) return bytes;   // songs: no gameplay
+            // what's on the card is P+'s file unless it's this mod as last written: read before the mod's saved copy
+            // (and so its fingerprint) changes below, or the old copy would be taken for P+'s
+            RefreshOriginal(card, s.CardPath);
             // too big for the stage memory its stage program leaves (the game freezes loading it): looks put on P+'s stage by
             // an older version kept all of P+'s pictures (those nothing shows any more are made tiny, which is usually plenty);
             // else the biggest pictures are made smaller (StageCheck.FitMemory)
@@ -437,7 +502,6 @@ namespace SkinManager.Core
                 bool hiddenOnly = slim != null && StageCheck.MemorySize(slim) <= room;
                 if (!hiddenOnly)
                 {
-                    RefreshOriginal(card, s.CardPath);
                     try { slim = StageCheck.FitMemory(slim ?? bytes, _lib.OriginalFile(s.CardPath), room).Bytes; } catch { slim = null; }
                 }
                 if (slim == null || StageCheck.MemorySize(slim) > room)
@@ -453,25 +517,31 @@ namespace SkinManager.Core
                         : $"{s.Name} was too big for the stage memory {s.Target.Label} leaves it (it would freeze the game), so its biggest pictures were made smaller.");
                 bytes = slim;
             }
-            RefreshOriginal(card, s.CardPath);
             var original = _lib.OriginalFile(s.CardPath);
             if (original == null) { why = $"P+ no longer has {s.Target.Label}"; return null; }
             var theirs = _stageIndex.Of(card, _lib, s.CardPath);
             var program = _stageIndex.ProgramNames(card, s.CardPath);
-            if (StageCheck.Compare(StageCheck.Gameplay(bytes), theirs, "", program).Passed) return bytes;
+            // made by an older version with a known fault (see NeedsRemaking): made again from the map it came as
+            string fault = s.LooksOnly && LooksSource(s) != null ? Fault(bytes, original, program) : null;
+            if (fault == null && StageCheck.Compare(StageCheck.Gameplay(bytes), theirs, "", program).Passed) return bytes;
             if (s.LooksOnly)
             {
                 // its looks on P+'s stage: made again on P+'s current file
                 var src = LooksSource(s);
-                var redone = src == null ? new StageCheck.LooksResult() : StageCheck.SwapLooks(src, original, program);
+                StageCheck.Alignment al = null; byte[] pplus = original;
+                var redone = src == null ? new StageCheck.LooksResult() : StageCheck.SwapLooks(LinedUp(src, original, program, true, out al, out pplus), pplus, program, al?.KeepPPlus);
                 if (redone.Bytes != null && StageCheck.MemorySize(redone.Bytes) > room)
                     try { redone.Bytes = StageCheck.FitMemory(redone.Bytes, original, room).Bytes; } catch { redone.Bytes = null; }
                 if (redone.Bytes != null && StageCheck.MemorySize(redone.Bytes) <= room && StageCheck.Compare(StageCheck.Gameplay(redone.Bytes), theirs, "", program).Passed)
                 {
                     File.WriteAllBytes(Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath)), redone.Bytes);
                     s.Sha256 = Library.Sha256(redone.Bytes);
+                    if (fault != null && !Notes.Any(n => n.StartsWith(s.Name + " was made again")))
+                        Notes.Add($"{s.Name} was made again: {fault}.");
                     return redone.Bytes;
                 }
+                // couldn't make it again: left as it was
+                if (fault != null && StageCheck.Compare(StageCheck.Gameplay(bytes), theirs, "", program).Passed) return bytes;
             }
             var made = StageCheck.MakeMatch(bytes, original, out string problem, out _, program);
             if (made != null && StageCheck.Compare(StageCheck.Gameplay(made), theirs, "", program).Passed)
@@ -486,6 +556,9 @@ namespace SkinManager.Core
             return null;
         }
 
+        /// <summary>Makes a set of changes to the card in one save: skins and stages turned on, off, added, removed or
+        /// put back. Every file is read back to check it; if anything fails the card is put back as it was. Then the
+        /// mods list is saved and the undo point kept.</summary>
         public void Apply(Change change, Action<string, int> progress)
         {
             Notes.Clear(); UndoNote = null;
@@ -683,6 +756,7 @@ namespace SkinManager.Core
             progress?.Invoke("Done", 100);
         }
 
+        /// <summary>A few words about a save for the undo list ("2 turned on, 1 turned off").</summary>
         static string Describe(Change c)
         {
             var parts = new List<string>();
@@ -693,6 +767,8 @@ namespace SkinManager.Core
             return parts.Count == 0 ? "changes" : string.Join(", ", parts);
         }
 
+        /// <summary>Puts a planned skin's files and pictures on the card (keeping what was there to put back later) and
+        /// returns its record.</summary>
         InstalledSkin Install(Fat32Image card, SkinPlan plan, Dictionary<string, byte[]> expected)
         {
             var c = plan.Character;
@@ -717,6 +793,8 @@ namespace SkinManager.Core
             return record;
         }
 
+        /// <summary>Puts one menu picture of a skin into its file on the card (keeping P+'s first), refusing one that
+        /// makes the file too big for the game.</summary>
         InstalledPicture PutPicture(Fat32Image card, Character c, int slot, PictureKind kind, Bitmap picture, Dictionary<string, byte[]> expected, bool saveOriginal)
         {
             string file, texture;
@@ -745,6 +823,8 @@ namespace SkinManager.Core
             return new InstalledPicture { Kind = kind, CardPath = file, TextureName = texture, PixelHash = hash };
         }
 
+        /// <summary>Takes a skin off the card: P+'s files back, and its pictures swapped back for P+'s (or P+'s whole
+        /// file when nothing else of ours is in it).</summary>
         void Restore(Fat32Image card, InstalledSkin skin, Dictionary<string, byte[]> expected)
         {
             foreach (var f in skin.Files)
@@ -801,6 +881,8 @@ namespace SkinManager.Core
             return result;
         }
 
+        /// <summary>Puts a skin back after a P+ update wrote over it: P+'s new files become the originals, and the skin
+        /// is turned off if it no longer fits.</summary>
         void Reapply(Fat32Image card, InstalledSkin skin, Dictionary<string, byte[]> expected)
         {
             string folder = _lib.SkinFolder(skin.Id);
@@ -898,6 +980,93 @@ namespace SkinManager.Core
             return bytes;
         }
 
+        /// <summary>The map with its scenery moved onto P+'s floors, when its own floors show the whole map sits higher,
+        /// lower, bigger or smaller than P+'s and moving it lines them up clearly better (StageCheck.LineUp, MoveLooks).
+        /// al: what was done, or null when the map is used as it is.</summary>
+        static byte[] LinedUp(byte[] map, byte[] original, ICollection<string> program, out StageCheck.Alignment al) =>
+            LinedUp(map, original, program, false, out al, out _);
+
+        /// <summary>The map with its scenery fitted onto P+'s floors: moved as a whole when that's all it takes (LineUp),
+        /// then piece by piece (FitPieces: each floor's scenery onto P+'s floor, the main floor stretched to P+'s width,
+        /// floors P+ doesn't have hidden). pplusArt: where the looks go on P+'s file, P+'s own pieces can stay for floors
+        /// the map draws nothing for; pplus is then P+'s file to use (with only those pieces left of its own scenery).</summary>
+        static byte[] LinedUp(byte[] map, byte[] original, ICollection<string> program, bool pplusArt, out StageCheck.Alignment al, out byte[] pplus)
+        {
+            al = null; pplus = original;
+            byte[] cur = map;
+            try
+            {
+                var found = StageCheck.LineUp(map, original);
+                if (found.Worth)
+                {
+                    var moved = StageCheck.MoveLooks(map, found, program, out string problem, pplusArt);
+                    if (moved == null) LineUpTrace(problem); else { al = found; cur = moved; }
+                }
+                else
+                {
+                    // the main floor alone: the whole map goes with it, the platforms are fitted after (FitPieces)
+                    var main = StageCheck.MainLineUp(map, original, program, pplusArt);
+                    if (main.Moves)
+                    {
+                        var moved = StageCheck.MoveLooks(map, main, program, out string problem, pplusArt);
+                        if (moved == null) LineUpTrace(problem); else { al = main; cur = moved; }
+                    }
+                }
+            }
+            catch (Exception e) { LineUpTrace(e.Message); }
+            try
+            {
+                // fitted piece by piece: the result (null: left as it is), how far off that leaves it, and what still shows
+                // wrong (P+'s own look kept for a floor, the main floor's scenery hidden)
+                (StageCheck.Alignment fit, float off, int wrong) Try(byte[] m, StageCheck.Alignment g)
+                {
+                    // (each try on its own: one that fails counts as "not measured" (-1), it doesn't undo the other)
+                    StageCheck.Alignment f; string problem; float before;
+                    try { f = StageCheck.FitPieces(m, original, program, pplusArt, g, out problem, out before, g != null && g.Moves ? map : null); }
+                    catch (Exception e) { LineUpTrace("piece by piece: " + e.Message); return (null, -1, 0); }
+                    if (f == null)
+                    {
+                        if (problem != null) LineUpTrace(problem);
+                        return (null, before, 0);
+                    }
+                    // better, or as good and something that would show wrong was taken care of (a floor's scenery hidden where
+                    // there's nothing to stand on or P+ draws its own, P+'s own look kept where the map draws nothing)
+                    // (measured the same way before and after: its scenery against P+'s floors, P+'s own parts counted as drawn)
+                    if (f.After < f.Base - 0.5f || (f.After <= f.Base + 0.05f && f.PBare == 0 && (f.Hidden > 0 || f.HiddenOwn > 0 || f.MainHidden || f.FromPPlus > 0)))
+                        return (f, f.After, f.FromPPlus + (f.MainHidden ? 1 : 0));
+                    LineUpTrace($"piece by piece: {f.After:0.0} isn't better than {f.Base:0.0}");
+                    return (null, f.Base, 0);
+                }
+                var got = Try(cur, al);
+                if (al != null && !al.Worth)
+                {
+                    // the main floor's move can't be worse than leaving the map where it is (fitted piece by piece too), measured the same way
+                    var still = Try(map, null);
+                    LineUpTrace($"main floor move {got.off:0.0} ({got.wrong} wrong) / where it is {still.off:0.0} ({still.wrong} wrong)");
+                    // (kept unless clearly worse: lined up by its main floor, the whole map keeps its proportions, where
+                    // fitting it as it is would stretch its main floor;
+                    // a move nothing was fitted after has to be clearly better by itself)
+                    bool moveBetter = got.off >= 0 && (still.off < 0
+                        || (got.fit == null ? got.off < still.off - 0.5f
+                                            : !(got.off > still.off + 0.5f || (got.off > still.off - 0.5f && got.wrong > still.wrong))));
+                    if (!moveBetter)
+                    {
+                        LineUpTrace($"moving by the main floor: {got.off:0.0} ({got.wrong} wrong, {got.fit?.Words()}) isn't better than {still.off:0.0} ({still.wrong} wrong, {still.fit?.Words()}) where it is");
+                        al = null; cur = map; got = still;
+                    }
+                }
+                if (got.fit != null)
+                {
+                    al = got.fit; cur = got.fit.Map;
+                    if (got.fit.PPlus != null) pplus = got.fit.PPlus;
+                }
+            }
+            catch (Exception e) { LineUpTrace(e.Message); }
+            return cur;
+        }
+
+        static void LineUpTrace(string why) { if (Environment.GetEnvironmentVariable("SKINMANAGER_TRACE") != null) Console.WriteLine("line up: " + why); }
+
         static string Words(IList<string> parts) =>
             parts.Count <= 1 ? string.Join("", parts) : string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[parts.Count - 1];
 
@@ -920,8 +1089,9 @@ namespace SkinManager.Core
             string problem;
             byte[] reskin = File.ReadAllBytes(stageFile);
             var program = _stageIndex.ProgramNames(card, target.CardPath);
+            reskin = LinedUp(reskin, originalBytes, program, out plan.Aligned);
             made = StageCheck.MakeMatch(reskin, originalBytes, out problem, out plan.LooksSwapped, program);
-            if (made != null) plan.Fit = StageCheck.HowFarOff(reskin, originalBytes);
+            if (made != null) plan.Fit = plan.Aligned?.Fit ?? StageCheck.HowFarOff(reskin, originalBytes);
             if (made == null)
             {
                 plan.Checks.Add(new CheckResult { Passed = false, Title = "Couldn't make it play like P+'s " + target.Label, Detail = problem });
@@ -957,7 +1127,8 @@ namespace SkinManager.Core
             byte[] map = File.ReadAllBytes(stageFile);
             plan.LooksMap = map;
             var program = _stageIndex.ProgramNames(card, target.CardPath);
-            var looks = StageCheck.SwapLooks(map, originalBytes, program);
+            var lined = LinedUp(map, originalBytes, program, true, out plan.Aligned, out var pplus);
+            var looks = StageCheck.SwapLooks(lined, pplus, program, plan.Aligned?.KeepPPlus);
             plan.Looks = looks;
             if (looks.Bytes == null)
             {
@@ -965,7 +1136,7 @@ namespace SkinManager.Core
                 return plan;
             }
             plan.Bytes = FitStageMemory(card, target, looks.Bytes, plan);
-            plan.Fit = StageCheck.HowFarOff(map, originalBytes);
+            plan.Fit = plan.Aligned?.Fit ?? StageCheck.HowFarOff(map, originalBytes);
             plan.Checks.Add(SkinCheck.Size(target.FileName, plan.Bytes.Length, StageCheck.MaxStageBytes));
             var compare = StageCheck.Compare(StageCheck.Gameplay(plan.Bytes), StageCheck.Gameplay(originalBytes), "P+'s " + target.Label, program);
             if (compare.Passed) compare.Title = "Plays exactly like P+'s " + target.Label + " (it is P+'s stage underneath)";
@@ -1060,6 +1231,8 @@ namespace SkinManager.Core
             return plan;
         }
 
+        /// <summary>Which stage file of a download this is (its path inside the download), so the same one is known
+        /// again.</summary>
         public static string StageKey(SkinPackage pkg, string stageFile)
         {
             string rel = stageFile.StartsWith(pkg.Folder, StringComparison.OrdinalIgnoreCase) ? stageFile.Substring(pkg.Folder.Length) : Path.GetFileName(stageFile);
@@ -1069,6 +1242,7 @@ namespace SkinManager.Core
         StageIndex _stageIndexField;
         public StageIndex _stageIndex => _stageIndexField ?? (_stageIndexField = new StageIndex(_lib.Folder));
 
+        /// <summary>Takes a stage mod off the card: P+'s file back (or none, if P+ had none there).</summary>
         void RestoreStage(Fat32Image card, InstalledStage s, Dictionary<string, byte[]> expected)
         {
             var orig = _lib.OriginalFile(s.CardPath);
@@ -1076,11 +1250,15 @@ namespace SkinManager.Core
             else { card.WriteFile(s.CardPath, orig); expected[s.CardPath] = orig; }
         }
 
-        void PutStage(Fat32Image card, InstalledStage s, byte[] bytes, Dictionary<string, byte[]> expected)
+        /// <summary>Puts a stage mod's file on the card, first keeping what's there as P+'s (it may have changed while
+        /// the mod was off). wasSha: the mod's fingerprint before StageForNow redid its copy (made smaller or fixed
+        /// again), since the card still has that older copy, which isn't P+'s.</summary>
+        void PutStage(Fat32Image card, InstalledStage s, byte[] bytes, Dictionary<string, byte[]> expected, string wasSha)
         {
             byte[] now = card.Exists(s.CardPath) ? card.ReadFile(s.CardPath) : null;
-            // what's there now is P+'s (it may have been updated while ours was off)
-            if (!_lib.HasOriginalFile(s.CardPath) || now == null || Library.Sha256(now) != s.Sha256) _lib.SaveOriginalFile(s.CardPath, now, replace: true);
+            string nowSha = now == null ? null : Library.Sha256(now);
+            // what's there now is P+'s (it may have been updated while ours was off), unless it's this mod as it was
+            if (!_lib.HasOriginalFile(s.CardPath) || (nowSha != s.Sha256 && nowSha != wasSha)) _lib.SaveOriginalFile(s.CardPath, now, replace: true);
             card.WriteFile(s.CardPath, bytes);
             expected[s.CardPath] = bytes;
         }
@@ -1105,6 +1283,7 @@ namespace SkinManager.Core
             return result;
         }
 
+        /// <summary>The app's saved copy of a stage mod's file (throws if it's gone).</summary>
         byte[] StageCopy(InstalledStage s)
         {
             string p = Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath));
@@ -1112,6 +1291,8 @@ namespace SkinManager.Core
             return File.ReadAllBytes(p);
         }
 
+        /// <summary>The stage part of Apply: turns stage mods off, removes, puts back, turns on and adds them, then
+        /// redoes the song lists and stage select pictures.</summary>
         void ApplyStages(Fat32Image card, Change change, List<InstalledStage> stages, List<KeyValuePair<string, StagePlan>> copies, Dictionary<string, byte[]> expected, Action<string, int> progress)
         {
             InstalledStage Mine(InstalledStage s) => stages.FirstOrDefault(k => k.Id == s.Id);
@@ -1132,6 +1313,7 @@ namespace SkinManager.Core
             {
                 var s = Mine(asked); if (s == null || s.Disabled) continue;
                 progress?.Invoke($"Putting {s.Name} back", 60);
+                string was = s.Sha256;
                 var bytes = StageForNow(card, s, out string why);
                 if (bytes == null)
                 {
@@ -1139,17 +1321,18 @@ namespace SkinManager.Core
                     Notes.Add($"{s.Name} was turned off: {why}.");
                     continue;
                 }
-                PutStage(card, s, bytes, expected);
+                PutStage(card, s, bytes, expected, was);
             }
             foreach (var asked in change.StageEnable)
             {
                 var s = Mine(asked); if (s == null || s.Enabled) continue;
                 progress?.Invoke($"Turning on {s.Name}", 60);
+                string was = s.Sha256;
                 var bytes = StageForNow(card, s, out string why);
                 if (bytes == null) { Notes.Add($"{s.Name} stayed off: {why}."); continue; }
                 foreach (var other in stages.Where(o => o.Enabled && o.Id != s.Id && string.Equals(o.CardPath, s.CardPath, StringComparison.OrdinalIgnoreCase)).ToList())
                 { RestoreStage(card, other, expected); other.Disabled = true; }
-                PutStage(card, s, bytes, expected);
+                PutStage(card, s, bytes, expected, was);
                 s.Disabled = false;
             }
             foreach (var plan in change.StageInstall)
@@ -1360,6 +1543,8 @@ namespace SkinManager.Core
             skin.Pictures = redone;
         }
 
+        /// <summary>Keeps the app's own copy of a new skin's files and pictures (to put it back after a P+
+        /// update).</summary>
         void SaveSkinCopy(string id, SkinPlan plan)
         {
             string folder = _lib.SkinFolder(id);
@@ -1369,6 +1554,8 @@ namespace SkinManager.Core
             foreach (var kv in plan.Pictures) kv.Value.Save(Path.Combine(folder, kv.Key + ".png"), ImageFormat.Png);
         }
 
+        /// <summary>A hash of a picture's pixels, to tell whether what the game shows is still the skin's
+        /// picture.</summary>
         public static string PixelHash(Bitmap b)
         {
             if (b == null) return null;
@@ -1377,6 +1564,7 @@ namespace SkinManager.Core
             return Library.Sha256(bytes.ToArray());
         }
 
+        /// <summary>Copies a big file (the card) in large chunks, reporting progress up to 90%.</summary>
         static void CopyWithProgress(string from, string to, Action<int> progress)
         {
             using (var src = new FileStream(from, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))

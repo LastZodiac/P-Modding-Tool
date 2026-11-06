@@ -14,6 +14,7 @@ using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>One file on the card that differs from P+'s own and wasn't put there by this app.</summary>
     public sealed class HandMod
     {
         public string Path;
@@ -25,6 +26,7 @@ namespace SkinManager.Core
         public long Bytes;
     }
 
+    /// <summary>The result of one look through the card for hand-installed mods, for one P+ version.</summary>
     public sealed class HandScan
     {
         public string Version;
@@ -34,11 +36,15 @@ namespace SkinManager.Core
         public HandMod Costume(Character c, int slotIndex) => Mods.FirstOrDefault(m => m.Kind == "Costume" && m.Character?.SlotListId == c.SlotListId && m.SlotIndex == slotIndex);
     }
 
+    /// <summary>Finds mods put on the card by hand, by comparing every P+ file with Brawl Online's list of P+'s own
+    /// files.</summary>
     public static class HandMods
     {
         /// <summary>The latest look at the card in use (null until the first one is done).</summary>
         public static HandScan Last;
 
+        /// <summary>A file's hash as last worked out, kept with its size and place on the card to tell if it
+        /// changed.</summary>
         [DataContract] sealed class Known { [DataMember] public string Path, Sha; [DataMember] public long Size; [DataMember] public uint Cluster; }
 
         /// <summary>Looks through the card. libraries: the app's own mods lists (their files aren't hand-installed).</summary>
@@ -106,6 +112,8 @@ namespace SkinManager.Core
 
         static int Order(string kind) => Array.IndexOf(new[] { "Gameplay", "Costume", "Stage", "Music", "Menus & pictures", "Other" }, kind);
 
+        /// <summary>Sorts out what a changed or added file is (costume, stage, music, menus, gameplay) and gives it a
+        /// readable label.</summary>
         static HandMod Describe(string path, long bytes, bool added, Dictionary<string, Character> fighters, Fat32Image card, Dictionary<int, List<CostumeSlot>> slotCache)
         {
             var m = new HandMod { Path = path, Added = added, Bytes = bytes };

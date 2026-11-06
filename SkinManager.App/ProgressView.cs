@@ -9,6 +9,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>Draws the Progress view: levels, grades, character mastery tiles (clickable), badges and personal
+    /// bests.</summary>
     class ProgressView : ScrollView
     {
         public StatsData Data;

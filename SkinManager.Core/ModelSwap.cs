@@ -27,6 +27,8 @@ using BrawlLib.Wii.Textures;
 
 namespace SkinManager.Core
 {
+    /// <summary>One material's worth of the new model: its picture and its triangles (three corners each, with normals
+    /// and texture points).</summary>
     public sealed class SwapPart
     {
         public string Material;
@@ -37,12 +39,15 @@ namespace SkinManager.Core
         public int Triangles => P.Count / 3;
     }
 
+    /// <summary>A model being swapped in: its parts, and notes for you about what was done to it (simplified, a picture
+    /// that couldn't be read...).</summary>
     public sealed class SwapMesh
     {
         public List<SwapPart> Parts = new List<SwapPart>();
         public int Triangles => Parts.Sum(p => p.Triangles);
         public List<string> Notes = new List<string>();
 
+        /// <summary>A separate copy, so fitting or building it never changes the caller's model.</summary>
         public SwapMesh Copy()
         {
             var m = new SwapMesh { Notes = new List<string>(Notes) };
@@ -51,6 +56,7 @@ namespace SkinManager.Core
             return m;
         }
 
+        /// <summary>The smallest box around every point of the model.</summary>
         public (Vector3 Min, Vector3 Max) Box()
         {
             var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
@@ -72,11 +78,12 @@ namespace SkinManager.Core
         public float Size = 1f;  // 1 = the P+ costume's height
     }
 
+    /// <summary>Puts another model on a P+ character's own skeleton: load, fit, simplify, rig and build (see the top of
+    /// the file).</summary>
     public static partial class ModelSwap
     {
         /// <summary>Rig by P+'s skeleton (true) or by the nearest points of P+'s own costume (false, the first way).</summary>
         public static bool UseSkeleton = true;
-        public const int DefaultBudget = 8000;   // triangles; P+'s own costumes are about 3,000 to 10,000
         static readonly FieldInfo TrianglesField = typeof(PrimitiveManager).GetField("_triangles", BindingFlags.NonPublic | BindingFlags.Instance);
         static readonly string[] PictureTypes = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff" };
 
@@ -94,6 +101,8 @@ namespace SkinManager.Core
 
         static float F(string s) => float.Parse(s, NumberStyles.Float, CultureInfo.InvariantCulture);
 
+        /// <summary>Reads an .obj: its points, texture points and normals, one part per material, with each material's
+        /// picture from its .mtl file.</summary>
         static SwapMesh LoadObj(string path)
         {
             var mesh = new SwapMesh();
@@ -152,6 +161,7 @@ namespace SkinManager.Core
             return mesh;
         }
 
+        /// <summary>Material name -&gt; picture file, from an .obj's .mtl file (its map_Kd lines).</summary>
         static Dictionary<string, string> ReadMtl(string path)
         {
             var r = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -192,6 +202,8 @@ namespace SkinManager.Core
             return null;
         }
 
+        /// <summary>Reads a .dae through BrawlLib's importer, one part per material, with the points placed as the
+        /// model stands.</summary>
         static unsafe SwapMesh LoadDae(string path)
         {
             var mesh = new SwapMesh();
@@ -276,6 +288,7 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Gives corners that came without a normal their triangle's own facing.</summary>
         static void FillMissingNormals(SwapPart p)
         {
             for (int i = 0; i + 2 < p.P.Count; i += 3)
@@ -342,6 +355,8 @@ namespace SkinManager.Core
             return best;
         }
 
+        /// <summary>Merges the points in each grid cell of this size into one (their average) and drops triangles that
+        /// shrink to a line or a point.</summary>
         static SwapMesh Cluster(SwapMesh source, float cell, Vector3 origin)
         {
             var sum = new Dictionary<long, (double x, double y, double z, int n)>();
@@ -394,6 +409,7 @@ namespace SkinManager.Core
             return (min, max);
         }
 
+        /// <summary>The P+ costume's points, read from its file as it stands by default.</summary>
         static List<RefPoint> ReferencePoints(byte[] costume)
         {
             lock (BrawlGate.Lock)
@@ -407,6 +423,8 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Every point of the model's shown meshes, where it stands, with the bones it follows and how
+        /// much.</summary>
         static List<RefPoint> ReferencePoints(MDL0Node model)
         {
             var list = new List<RefPoint>();
@@ -437,10 +455,13 @@ namespace SkinManager.Core
             public List<string> Notes = new List<string>();
         }
 
-        /// <summary>The P+ costume file with the new model in place of its own (skeleton untouched).</summary>
+        /// <summary>Writes how far a build has got to the console, when SKINMANAGER_TRACE is set.</summary>
         static void Trace(string what) { if (Environment.GetEnvironmentVariable("SKINMANAGER_TRACE") != null) Console.WriteLine(DateTime.Now.ToString("HH:mm:ss.fff ") + "swap: " + what); }
 
-        public static Result Build(SwapMesh mesh, byte[] costume, string name, Func<Vector3, bool> keepWithBody = null, Func<Vector3, List<(string Bone, float W)>> weights = null)
+        /// <summary>The P+ costume file with the new model in place of its own (skeleton untouched). Each point follows
+        /// the bones of weights if given, else the skeleton or the nearest P+ points; keepWithBody marks points that
+        /// only follow the middle of the body.</summary>
+        public static Result Build(SwapMesh mesh, byte[] costume, Func<Vector3, bool> keepWithBody = null, Func<Vector3, List<(string Bone, float W)>> weights = null)
         {
             mesh = mesh.Copy();   // its pictures are re-saved below: the caller's model stays as it was
             var result = new Result { Notes = new List<string>(mesh.Notes) };
@@ -594,6 +615,8 @@ namespace SkinManager.Core
             readonly Dictionary<long, List<RefPoint>> _cells = new Dictionary<long, List<RefPoint>>();
             readonly float _cell;
             readonly List<RefPoint> _all;
+            /// <summary>Sorts the P+ points into cells (a fortieth of the costume's width or height, whichever is
+            /// bigger).</summary>
             public PointGrid(List<RefPoint> points)
             {
                 _all = points;
@@ -609,6 +632,7 @@ namespace SkinManager.Core
             long Key(int x, int y, int z) => ((long)(x & 0x1FFFFF)) | ((long)(y & 0x1FFFFF) << 21) | ((long)(z & 0x1FFFFF) << 42);
             long Key(Vector3 v) => Key((int)Math.Floor(v._x / _cell), (int)Math.Floor(v._y / _cell), (int)Math.Floor(v._z / _cell));
 
+            /// <summary>The count P+ points nearest to v, looking in ever wider shells of cells around it.</summary>
             List<RefPoint> Nearest(Vector3 v, int count)
             {
                 int cx = (int)Math.Floor(v._x / _cell), cy = (int)Math.Floor(v._y / _cell), cz = (int)Math.Floor(v._z / _cell);
@@ -686,6 +710,7 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Reads a picture into memory, so the file isn't kept open.</summary>
         static Bitmap LoadPicture(string path)
         {
             using (var fs = File.OpenRead(path)) using (var img = Image.FromStream(fs)) return new Bitmap(img);
@@ -693,6 +718,8 @@ namespace SkinManager.Core
 
         static int Pow2(int v) { int p = 8; while (p < v && p < 512) p *= 2; return p; }
 
+        /// <summary>True when a picture has see-through pixels (checks every fourth pixel each way), so it's saved in a
+        /// format that keeps them.</summary>
         static bool HasAlpha(Bitmap b)
         {
             for (int y = 0; y < b.Height; y += 4) for (int x = 0; x < b.Width; x += 4) if (b.GetPixel(x, y).A < 250) return true;
@@ -701,6 +728,8 @@ namespace SkinManager.Core
 
         static string Num(float f) => f.ToString("0.######", CultureInfo.InvariantCulture);
 
+        /// <summary>Writes the model as a plain .dae (one mesh and material per part, with its picture) for BrawlLib's
+        /// importer to read back.</summary>
         static void WriteDae(SwapMesh mesh, Dictionary<string, string> pictures, string path)
         {
             var sb = new StringBuilder();

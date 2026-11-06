@@ -19,10 +19,14 @@ using SkinManager.Core;
 
 namespace PPlusBlenderBridge
 {
+    /// <summary>Writes a costume out as a rigged .glb (skeleton, shapes, pictures and bone weights) for Blender to
+    /// open.</summary>
     static unsafe class RiggedExport
     {
         public const string FacePrefix = "PPlusFace_", PartPrefix = "PPlus_";
 
+        /// <summary>One shape on its way to the .glb: its points, normals and UVs, the up-to-4 bones (J) and weights
+        /// (W) of each point, its triangles and its picture as a PNG.</summary>
         sealed class Shape
         {
             public string Name, Material, TexName; public byte[] Png; public bool Cutout, SeeThrough;
@@ -251,6 +255,7 @@ namespace PPlusBlenderBridge
             for (int c = 0; c < 4; c++) for (int row = 0; row < 4; row++) { double v = 0; for (int k = 0; k < 4; k++) v += a[k * 4 + row] * b[c * 4 + k]; r[c * 4 + row] = v; }
             return r;
         }
+        /// <summary>Inverts a 4x4 matrix (gives back the identity if it can't be inverted).</summary>
         static double[] Inverse(double[] m)
         {
             var inv = new double[16];
@@ -279,6 +284,8 @@ namespace PPlusBlenderBridge
         static string F(double v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
         static string Q(string s) => "\"" + (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
+        /// <summary>Packs the bones, shapes and pictures into one .glb file: each bone placed relative to its parent,
+        /// and the skin's inverse bind matrices from the bones' default pose.</summary>
         static byte[] Write(List<Shape> shapes, string[] boneNames, int[] parents, double[][] world)
         {
             var bin = new MemoryStream(); var w = new BinaryWriter(bin);

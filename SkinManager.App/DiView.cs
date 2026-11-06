@@ -11,6 +11,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Frame Data page's DI tab: the move playing, your fighter dragged onto it, and how to DI and SDI the
+    /// hit that lands there.</summary>
     class DiView : Control
     {
         FighterBook _me; Body _them; Character _themChar; MoveEntry _move; string _status;
@@ -29,8 +31,11 @@ namespace SkinManager.App
         bool _air, _behind;
         Dictionary<string, (int? None, int? Survive, int? Wrong)> _kills = new Dictionary<string, (int?, int?, int?)>();
 
+        /// <summary>A fighter in the "You play" list.</summary>
         sealed class Item { public string Text; public object Value; public override string ToString() => Text; }
 
+        /// <summary>Adds the "You play" and percent controls, starts the timer that plays the move at half speed, and
+        /// lets you drag your fighter around the picture.</summary>
         public DiView()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -62,6 +67,8 @@ namespace SkinManager.App
             Arrange();
         }
 
+        /// <summary>Places the controls and splits the space into the move picture, the flight map, the three sticks
+        /// and the notes.</summary>
         void Arrange()
         {
             int w = Width;
@@ -79,6 +86,7 @@ namespace SkinManager.App
             Invalidate();
         }
 
+        /// <summary>Fills the "You play" list with the fighters and picks yours.</summary>
         public void SetCast(List<Character> cast, Character selected)
         {
             _target.BeginUpdate(); _target.Items.Clear();
@@ -94,6 +102,8 @@ namespace SkinManager.App
         /// <summary>Stops showing the move's pictures (they're about to be let go of).</summary>
         public void Forget() { _pics = null; _cam = null; Invalidate(); }
 
+        /// <summary>Shows a move (its pictures and where its hitboxes are) against the fighter you play. A different
+        /// move starts again from frame 1 with you on its first hitbox.</summary>
         public void Show(FighterBook me, MoveEntry move, List<Bitmap> pics, ModelPreview.MoveCamera cam, Body them, Character themChar)
         {
             bool newMove = _move != move || _me != me || !ReferenceEquals(_cam, cam);
@@ -132,6 +142,8 @@ namespace SkinManager.App
             return Math.Max(0, Dist(x, cy, mid) - BodyRadius);
         }
 
+        /// <summary>Moves you to where the pointer is (it holds your head), kept in the picture and snapped onto the
+        /// ground when close.</summary>
         void Place(Point screen)
         {
             // the pointer holds your head: the body's middle is below it
@@ -143,6 +155,8 @@ namespace SkinManager.App
             _dot = p; Recalc();
         }
 
+        /// <summary>Finds the first hitbox that touches your body where you stand, and whether you're in the air or
+        /// behind the attacker.</summary>
         void Recalc()
         {
             _hit = null;
@@ -163,6 +177,8 @@ namespace SkinManager.App
 
         static float Dist(float x, float y, PointF p) => (float)Math.Sqrt((x - p.X) * (x - p.X) + (y - p.Y) * (y - p.Y));
 
+        /// <summary>The percent the hit kills at with no DI, with survival DI and with combo-escape DI (worked out once
+        /// per hit and kept).</summary>
         (int? None, int? Survive, int? Wrong) Kills(Hitbox h)
         {
             string key = h.Id + "|" + h.Damage + "|" + h.Angle + "|" + h.Bkb + "|" + h.Kbg + "|" + h.Wkb + "|" + _air + "|" + _themChar?.Name;
@@ -250,6 +266,7 @@ namespace SkinManager.App
         /// <summary>A launch angle (forward = away from the attacker) as an angle on screen (the attacker faces right).</summary>
         float Screen(float a) => _behind ? 180 - a : a;
 
+        /// <summary>Draws an arrow from a point at an angle (0 = right, counted anticlockwise).</summary>
         static void Arrow(Graphics g, PointF from, float angle, float len, Color c, float width)
         {
             double rad = angle * Math.PI / 180;
@@ -258,6 +275,7 @@ namespace SkinManager.App
         }
 
         static Dictionary<string, int> _ids;
+        /// <summary>The fighter's head picture for the dot you drag (null if the pictures aren't loaded).</summary>
         static Image HeadOf(Character c)
         {
             if (c == null) return null;
@@ -269,6 +287,8 @@ namespace SkinManager.App
 
         static readonly Color SurviveColor = Color.FromArgb(92, 201, 120), EscapeColor = Color.FromArgb(96, 182, 255), SdiColor = Color.FromArgb(255, 176, 46);
 
+        /// <summary>Draws the three sticks: hold to survive, hold to get out of combos, and how to SDI (tap away, tap
+        /// in, or hold down).</summary>
         void DrawSticks(Graphics g, Hitbox hit, float kb, float launch, float? survive, float? escape)
         {
             int x = _sticks.X + 12, w = (_sticks.Width - 24 - 24) / 3;
@@ -293,6 +313,8 @@ namespace SkinManager.App
             Stick(g, new Rectangle(x, y, w, rowH), sdi, SdiColor, "SDI (in the freeze)", line, small, true);
         }
 
+        /// <summary>Draws one control stick in its gate pointing the way to hold (with rings when it's tapped), with a
+        /// title and a line of advice.</summary>
         void Stick(Graphics g, Rectangle r, float? dir, Color c, string title, string line, string small, bool taps)
         {
             using (var bg = new SolidBrush(Color.FromArgb(30, c))) using (var p = StatsArt.Round(r, 8)) g.FillPath(bg, p);

@@ -38,6 +38,8 @@ namespace SkinManager.Core
         public double AvgKill => KillPercents.Count == 0 ? double.NaN : KillPercents.Average();
         public double AvgDeath => DeathPercents.Count == 0 ? double.NaN : DeathPercents.Average();
 
+        /// <summary>Works out one game's stats from its replay, seen from your side; null if it isn't a 1-on-1 or the
+        /// players can't be matched.</summary>
         public static GameSmash Of(GameRecord g, GamePlayer me, GamePlayer them, ReplayData d)
         {
             if (d == null || d.Characters.Count != 2) return null;
@@ -102,8 +104,6 @@ namespace SkinManager.Core
         public int Games, Wins, Openings, TheirOpenings, Kills, Deaths;
         public float Dealt, Taken;
         public double KillPercentSum, DeathPercentSum; public int KillCount, DeathCount;
-
-        public double WinRate => Games == 0 ? double.NaN : (double)Wins / Games;
         public double OpeningsPerKill => Kills == 0 ? double.NaN : (double)Openings / Kills;
         public double DamagePerOpening => Openings == 0 ? double.NaN : Dealt / Openings;
         public double NeutralWin => Openings + TheirOpenings == 0 ? double.NaN : (double)Openings / (Openings + TheirOpenings);
@@ -111,6 +111,7 @@ namespace SkinManager.Core
         public double AvgDeath => DeathCount == 0 ? double.NaN : DeathPercentSum / DeathCount;
         public double KillsPerGame => Games == 0 ? double.NaN : (double)Kills / Games;
 
+        /// <summary>Adds up the stats of many games.</summary>
         public static SmashSummary Of(IEnumerable<GameSmash> games)
         {
             var s = new SmashSummary();

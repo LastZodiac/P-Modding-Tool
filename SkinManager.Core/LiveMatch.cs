@@ -9,8 +9,10 @@ using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>Where you are in a Brawl Online match, from searching for an opponent to the set being over.</summary>
     public enum MatchPhase { None, Searching, Found, Loading, Playing, GameOver, SetOver }
 
+    /// <summary>Everything known about the match going on right now, as read from Brawl Online's log.</summary>
     public sealed class LiveState
     {
         public MatchPhase Phase;
@@ -32,13 +34,14 @@ namespace SkinManager.Core
         public LiveState Copy() { var c = (LiveState)MemberwiseClone(); c.LegalStages = new List<int>(LegalStages); c.Kos = new List<(int, bool)>(Kos); return c; }
     }
 
+    /// <summary>Reads new lines from Brawl Online's game log as they're written and keeps the live match state and its
+    /// event list up to date.</summary>
     public sealed class LiveMatch
     {
         static readonly Regex MatchId = new Regex(@"\[Matchmaking\] Match ID: mode\.([a-z]+)-");
         static readonly Regex Peer = new Regex(@"\[Matchmaking\] P(\d) (.+) \(([^()]+#\d+)\): internet");
         static readonly Regex Session = new Regex(@"gprb: session as (host|joiner) on P(\d)");
         static readonly Regex Setup = new Regex(@"gprb lobby: game (\d+) setup(?: from the host)?: stage 0x([0-9a-fA-F]+)(?:.*?P1 0x([0-9a-fA-F]+)/\d+, P2 0x([0-9a-fA-F]+)/)?");
-        static readonly Regex Ended = new Regex(@"gprb: session ended at game frame");
         static readonly Regex Fighter = new Regex(@"#ftManager entry : EntryId\[[0-9a-fA-F]+\] ChrKind\[(\d+):[^\]]*\] Color\[\d+\] SlotNo\[(\d+)\]");
         static readonly Regex Winner = new Regex(@"gprb lobby: game (\d+) winner (\d+)");
         static readonly Regex LockIn = new Regex(@"gprb lobby: local lock-in ready for game (\d+) \(char 0x([0-9a-fA-F]+)/");

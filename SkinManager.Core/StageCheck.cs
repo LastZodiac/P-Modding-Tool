@@ -16,6 +16,8 @@ using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>Stage files: fingerprints of what affects the match, so a reskin can be checked against P+'s stage
+    /// before it goes on the card.</summary>
     public static partial class StageCheck
     {
         /// <summary>The largest stage file P+ ships (Castle Siege's alt). Bigger files may not fit in the game's memory.</summary>
@@ -209,7 +211,6 @@ namespace SkinManager.Core
             }
         }
 
-        /// <summary>The collision as geometry: every surface's two ends, kind and material, per object.</summary>
         /// <summary>The collision as geometry (shape, kinds, ledges, drop-through...), or with materials = true
         /// each surface's material (grass, metal, ice...: footstep sounds and effects, and how slippery it is).</summary>
         static string CollisionText(CollisionNode col, bool materials)
@@ -226,6 +227,7 @@ namespace SkinManager.Core
             return sb.ToString();
         }
 
+        /// <summary>Parts that only change the looks (effects and the like), left out of the fingerprint.</summary>
         static bool IsLooksOnly(ResourceNode n)
         {
             if (n.Name != null && n.Name.StartsWith("ef_", StringComparison.OrdinalIgnoreCase)) return true;   // effects
@@ -238,6 +240,8 @@ namespace SkinManager.Core
             return false;
         }
 
+        /// <summary>A model that only holds position markers (blast zones, spawn points...): bones and no drawing, and
+        /// named like one.</summary>
         static bool IsPositionModel(MDL0Node m)
         {
             // position markers are bones only: a model with anything to draw is scenery, whatever its name
@@ -246,8 +250,7 @@ namespace SkinManager.Core
             return n.Contains("position") || n.EndsWith("_pos") || n.StartsWith("poketrainer");
         }
 
-        static string Clean(string path) => System.Text.RegularExpressions.Regex.Replace(path, @"^/[^/]*", "");   // the file's own name doesn't matter
-
+        /// <summary>A part's bytes exactly as they are in the file.</summary>
         static byte[] Raw(ResourceNode n)
         {
             var src = n.WorkingUncompressed;
@@ -259,6 +262,8 @@ namespace SkinManager.Core
         static string V(BrawlLib.Internal.Vector3 v) =>
             string.Format(CultureInfo.InvariantCulture, "{0:0.000},{1:0.000},{2:0.000};", v._x, v._y, v._z);
 
+        /// <summary>The bones as text for the fingerprint: name, parent, shown or hidden, and scale/rotation/position,
+        /// sorted by name.</summary>
         static string BoneText(IEnumerable<MDL0BoneNode> bones)
         {
             var sb = new StringBuilder();
@@ -294,10 +299,6 @@ namespace SkinManager.Core
             return what;
         }
 
-        public static bool FloorsDiffer(Dictionary<string, string> mine, Dictionary<string, string> original) =>
-            original.Keys.Union(mine.Keys).Where(k => k.StartsWith("collision")).Any(k => !mine.TryGetValue(k, out var a) || !original.TryGetValue(k, out var b) || a != b);
-
-        /// <summary>Compares a stage file with the one it would replace. Passed = plays exactly the same.</summary>
         /// <summary>Raise this whenever Gameplay() changes what it reads or how: saved fingerprints of an older version are
         /// made again (v5: moving platforms include every animation of their model, like StgVillageFuyuuAshiba_Half).</summary>
         public const int FingerprintVersion = 8;   // v7: every model in detail ("model ..."), for the parts stage programs use   // v6: "outline" (the floors' shape) added
@@ -310,6 +311,8 @@ namespace SkinManager.Core
                 .Where(program.Contains).Distinct().ToList();
         }
 
+        /// <summary>An animation's length and whether it loops, for the fingerprint (read by name, since the kinds of
+        /// animation differ).</summary>
         static string FrameInfo(ResourceNode an)
         {
             var t = an.GetType();
@@ -317,6 +320,7 @@ namespace SkinManager.Core
             return (fc != null ? fc.GetValue(an, null)?.ToString() : "") + " " + (lp != null ? lp.GetValue(an, null)?.ToString() : "");
         }
 
+        /// <summary>Compares a stage file with the one it would replace. Passed = plays exactly the same.</summary>
         public static CheckResult Compare(Dictionary<string, string> mine, Dictionary<string, string> original, string originalName, ICollection<string> program = null)
         {
             var what = Differences(mine, original, program);
@@ -329,12 +333,12 @@ namespace SkinManager.Core
             };
         }
 
+        /// <summary>How far a reskin's collision is from P+'s, in game units.</summary>
         public sealed class Fit
         {
             public float Floors;   // furthest the reskin's walkable tops are from P+'s
             public float Rest;     // furthest its sides and underside are
             public float Width;    // P+'s stage width, for scale
-            public bool Exact => Floors < 0.5f && Rest < 0.5f;
         }
 
         /// <summary>How far off a reskin's looks would be on P+'s stage. A stage's own collision is built to match
@@ -343,6 +347,7 @@ namespace SkinManager.Core
         /// Secret's or Corneria's) is compared where its parts start, as the preview shows it.</summary>
         public static Fit HowFarOff(byte[] reskin, byte[] original) => FitOf(Standing(reskin), Standing(original));
 
+        /// <summary>The surfaces fighters stand on at the start, read from a stage file.</summary>
         static List<(float x1, float y1, float x2, float y2, bool floor)> Standing(byte[] stage)
         {
             using (var tmp = new TempFile(".pac", stage))
@@ -352,6 +357,8 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>The furthest any point of one stage's surfaces is from the other's, both ways round, floors and the
+        /// rest apart. Nothing to compare: as far off as can be.</summary>
         static Fit FitOf(List<(float x1, float y1, float x2, float y2, bool floor)> a, List<(float x1, float y1, float x2, float y2, bool floor)> b)
         {
             var fit = new Fit();
@@ -406,6 +413,7 @@ namespace SkinManager.Core
         }
         static readonly List<string> _cleanup = new List<string>();
 
+        /// <summary>How far a point is from a line segment.</summary>
         static float Distance(float px, float py, float x1, float y1, float x2, float y2)
         {
             float dx = x2 - x1, dy = y2 - y1, l = dx * dx + dy * dy;
@@ -414,9 +422,7 @@ namespace SkinManager.Core
             return (float)Math.Sqrt(qx * qx + qy * qy);
         }
 
-        /// <summary>A stage file's floors and walls (its collision), as drawn on the previews.</summary>
-        public static List<(float x1, float y1, float x2, float y2, bool floor)> SurfacesOf(byte[] stage) { try { return Standing(stage); } catch { return new List<(float, float, float, float, bool)>(); } }
-
+        /// <summary>The fixed surfaces in a stage file.</summary>
         static List<(float x1, float y1, float x2, float y2, bool floor)> Surfaces(byte[] stage)
         {
             using (var tmp = new TempFile(".pac", stage))
@@ -459,11 +465,6 @@ namespace SkinManager.Core
             return list;
         }
 
-        /// <summary>Makes a reskin play exactly like P+'s stage: P+'s gameplay parts (collision, settings,
-        /// blast zones and spawns, moving platforms) are put into the reskin; its looks stay. Returns the new
-        /// file, or null with the reason when the reskin is missing a part it would need.</summary>
-        public static byte[] MakeMatch(byte[] reskin, byte[] original, out string problem, ICollection<string> program = null) => MakeMatch(reskin, original, out problem, out _, program);
-
         /// <param name="looks">parts of the reskin's looks that had to be swapped for P+'s (a moving platform's model)</param>
         public static byte[] MakeMatch(byte[] reskin, byte[] original, out string problem, out List<string> looks, ICollection<string> program = null)
         {
@@ -485,6 +486,8 @@ namespace SkinManager.Core
             {
                 lock (BrawlGate.Lock)
                 {
+                    // picture folders a stage made earlier left behind (also one that stopped half way): nothing reads them now
+                    foreach (var d in _cleanup.ToList()) { try { Directory.Delete(d, true); } catch { } _cleanup.Remove(d); }
                     using (var a = NodeFactory.FromFile(null, tA.Path))
                     using (var b = NodeFactory.FromFile(null, tB.Path))
                     {
@@ -617,8 +620,9 @@ namespace SkinManager.Core
                         if (missing.Count > 0) { problem = "P+ has rebuilt parts of this stage since the map was made (like its moving platforms), and the map doesn't have the pieces P+'s version needs (" + string.Join(", ", missing.Take(3)) + ")."; return null; }
                         a.Export(outFile.Path);
                     }
+                    // inside the lock: another stage being made at the same time may still be reading its pictures' folder
+                    foreach (var d in _cleanup.ToList()) { try { Directory.Delete(d, true); } catch { } _cleanup.Remove(d); }
                 }
-                foreach (var d in _cleanup.ToList()) { try { Directory.Delete(d, true); } catch { } _cleanup.Remove(d); }
                 return File.ReadAllBytes(outFile.Path);
             }
         }

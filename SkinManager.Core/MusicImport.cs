@@ -14,6 +14,8 @@ using BrawlLib.Wii.Audio;
 
 namespace SkinManager.Core
 {
+    /// <summary>A song loaded from an MP3 or WAV: its sound as plain samples, plus the title and artist if the file had
+    /// them.</summary>
     public sealed class AudioClip
     {
         public string Path, Title, Artist;
@@ -23,6 +25,7 @@ namespace SkinManager.Core
         public TimeSpan Duration => TimeSpan.FromSeconds(Rate == 0 ? 0 : (double)Frames / Rate);
     }
 
+    /// <summary>The choices made in the song window for how the song is turned into a BRSTM.</summary>
     public sealed class MusicOptions
     {
         public int Rate = 32000;            // 32000 (P+'s own songs) or 44100 (better, bigger)
@@ -34,6 +37,7 @@ namespace SkinManager.Core
         public bool Trim = true;            // cut quiet bits at the start and end
     }
 
+    /// <summary>Loads MP3 and WAV files and makes them into BRSTM songs (or a short WAV preview).</summary>
     public static class MusicImport
     {
         public static readonly string[] Extensions = { ".mp3", ".wav" };
@@ -58,6 +62,7 @@ namespace SkinManager.Core
             return n.Length > 0 ? n : "My song";
         }
 
+        /// <summary>Decodes a whole MP3 into samples, with its title and artist from the ID3 tag.</summary>
         static AudioClip LoadMp3(string path)
         {
             var clip = new AudioClip();
@@ -111,6 +116,8 @@ namespace SkinManager.Core
             catch { }
         }
 
+        /// <summary>Reads a WAV file's samples (8, 16, 24 or 32-bit, or 32-bit float) without any other
+        /// library.</summary>
         static AudioClip LoadWav(string path)
         {
             var b = File.ReadAllBytes(path);
@@ -159,7 +166,6 @@ namespace SkinManager.Core
                 while (end > start && Math.Abs(l[end - 1]) < quiet && Math.Abs(r[end - 1]) < quiet) end--;
             }
             if (end - start < clip.Rate) throw new InvalidDataException("This song is too short (less than a second of sound).");
-            int loopFrom = (int)(o.LoopStartSeconds * clip.Rate);   // in the original's frames
             // resample
             var L = Resample(l, start, end, clip.Rate, o.Rate);
             var R = Resample(r, start, end, clip.Rate, o.Rate);
@@ -279,6 +285,7 @@ namespace SkinManager.Core
             return Wav(part, o.Rate);
         }
 
+        /// <summary>Wraps 16-bit stereo samples in a WAV file, for the preview.</summary>
         static byte[] Wav(short[] stereo, int rate)
         {
             using (var ms = new MemoryStream())
@@ -293,6 +300,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Passes BrawlLib's encoding progress on as a 0..1 fraction.</summary>
         sealed class Tracker : IProgressTracker
         {
             readonly Action<float> _to;
@@ -321,6 +329,8 @@ namespace SkinManager.Core
             public int LoopStartSample { get; set; }
             public int LoopEndSample { get; set; }
             public int SamplePosition { get; set; }
+            /// <summary>Copies the next numSamples frames into BrawlLib's buffer and moves on; returns how many were
+            /// copied.</summary>
             public int ReadSamples(VoidPtr destAddr, int numSamples)
             {
                 int n = Math.Max(0, Math.Min(numSamples, Samples - SamplePosition));

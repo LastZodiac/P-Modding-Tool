@@ -6,6 +6,7 @@ using System.IO;
 
 namespace SkinManager.Core
 {
+    /// <summary>Changes to the card image as a whole (for now: making it bigger).</summary>
     public static class CardTools
     {
         /// <summary>Copies a FAT32 card image into a bigger one at <paramref name="to"/>. Sizes must be multiples of 512 KB.</summary>

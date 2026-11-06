@@ -7,10 +7,10 @@ using System.IO;
 using System.Linq;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
-using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>One mod in a shared setup: its name, kind, where it goes, and the GameBanana page and file to get it from.</summary>
     [DataContract]
     public sealed class SharedMod
     {
@@ -23,6 +23,7 @@ namespace SkinManager.Core
         public bool Fetchable => ModId > 0 && FileId > 0;
     }
 
+    /// <summary>A profile's mods as a small .ppsetup file to send a friend, who opens it to fetch the same mods.</summary>
     [DataContract]
     public sealed class SharedSetup
     {
@@ -59,6 +60,7 @@ namespace SkinManager.Core
 
         static string SafeName(InstalledSkin k) { try { return k.Character.Name; } catch { return "a fighter"; } }
 
+        /// <summary>Writes the setup as a .ppsetup file (JSON).</summary>
         public void Save(string path)
         {
             using (var ms = new MemoryStream())

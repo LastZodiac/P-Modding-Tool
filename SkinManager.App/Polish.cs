@@ -18,16 +18,14 @@ namespace SkinManager.App
         public int Radius = 8;
         Color _fill = Theme.Panel;
 
+        /// <summary>Draws itself (no Windows look) on a see-through background, flat with no border, with a hand
+        /// cursor.</summary>
         public SmoothButton()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
             FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; Cursor = Cursors.Hand;
             base.BackColor = Color.Transparent;
         }
-
-        /// <summary>The button's color: whatever code sets as BackColor is kept as the fill, and the control itself
-        /// stays see-through so its rounded corners show what's behind it.</summary>
-        public Color Fill => _fill;
         bool _settingColor;
         protected override void OnBackColorChanged(EventArgs e)
         {
@@ -114,6 +112,7 @@ namespace SkinManager.App
         readonly Timer _timer = new Timer { Interval = 10 };
         float _pos; int _goal;
 
+        /// <summary>Listens in on the list's window messages, and follows it if its window is made again.</summary>
         SmoothScroll(ScrollableControl c)
         {
             _c = c;
@@ -124,6 +123,7 @@ namespace SkinManager.App
             _timer.Tick += (s, e) => Step();
         }
 
+        /// <summary>Turns on the gliding wheel for a list (Polish.Style does this for every scrolling panel).</summary>
         public static void Attach(ScrollableControl c)
         {
             if (c.IsDisposed) return;
@@ -155,6 +155,7 @@ namespace SkinManager.App
             base.WndProc(ref m);
         }
 
+        /// <summary>One frame of the glide: moves a third of the way to the goal, and stops once it's there.</summary>
         void Step()
         {
             if (_c.IsDisposed || !_c.IsHandleCreated) { _timer.Stop(); return; }
@@ -174,6 +175,8 @@ namespace SkinManager.App
     {
         readonly ComboBox _box;
         bool _hover;
+        /// <summary>Listens in on the dropdown's window messages to paint over it, and keeps it cut to its rounded
+        /// shape.</summary>
         ComboPainter(ComboBox box)
         {
             _box = box;
@@ -189,6 +192,8 @@ namespace SkinManager.App
             box.SizeChanged += (s, e) => Shape(); Shape();
         }
 
+        /// <summary>Gives a dropdown the app's colors and dark list items (once; a dropdown that draws its own items
+        /// keeps them).</summary>
         public static void Attach(ComboBox box)
         {
             if (box.Tag is ComboPainter) return;
@@ -204,6 +209,8 @@ namespace SkinManager.App
             new ComboPainter(box);
         }
 
+        /// <summary>Draws one item in a dropdown's open list: dark, with an accent bar beside the one under the
+        /// mouse.</summary>
         static void DrawItem(object sender, DrawItemEventArgs e)
         {
             var box = (ComboBox)sender;
@@ -250,23 +257,23 @@ namespace SkinManager.App
     /// <summary>The app's own message box: dark, rounded buttons, same calls as MessageBox.Show.</summary>
     static class Dialog
     {
-        public static DialogResult Show(string text) => Show(null, text, "P+ Modding Tool", MessageBoxButtons.OK, MessageBoxIcon.None);
         public static DialogResult Show(string text, string caption) => Show(null, text, caption, MessageBoxButtons.OK, MessageBoxIcon.None);
-        public static DialogResult Show(string text, string caption, MessageBoxButtons buttons) => Show(null, text, caption, buttons, MessageBoxIcon.None);
         public static DialogResult Show(string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon) => Show(null, text, caption, buttons, icon);
-        public static DialogResult Show(IWin32Window owner, string text) => Show(owner, text, "P+ Modding Tool", MessageBoxButtons.OK, MessageBoxIcon.None);
         public static DialogResult Show(IWin32Window owner, string text, string caption) => Show(owner, text, caption, MessageBoxButtons.OK, MessageBoxIcon.None);
-        public static DialogResult Show(IWin32Window owner, string text, string caption, MessageBoxButtons buttons) => Show(owner, text, caption, buttons, MessageBoxIcon.None);
         public static DialogResult Show(IWin32Window owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon, MessageBoxDefaultButton def) => Show(owner, text, caption, buttons, icon, def == MessageBoxDefaultButton.Button2 ? 1 : def == MessageBoxDefaultButton.Button3 ? 2 : 0);
 
         public static DialogResult Show(IWin32Window owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon) => Show(owner, text, caption, buttons, icon, 0);
 
+        /// <summary>Shows the app's message box, falling back to Windows' own if anything goes wrong drawing
+        /// it.</summary>
         static DialogResult Show(IWin32Window owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon, int defaultIndex)
         {
             try { return ShowOurs(owner, text, caption, buttons, icon, defaultIndex); }
             catch { return MessageBox.Show(owner, text, caption, buttons, icon); }   // never lose a message because of the look
         }
 
+        /// <summary>Builds and shows the message box: the icon as a colored badge, the text (scrolling if very long)
+        /// and the buttons in a footer, the default one highlighted.</summary>
         static DialogResult ShowOurs(IWin32Window owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon, int defaultIndex)
         {
             var choices = new List<(string, DialogResult)>();
@@ -342,6 +349,7 @@ namespace SkinManager.App
         }
     }
 
+    /// <summary>Gives every window the app's dark look without each screen having to ask (see Install).</summary>
     static class Polish
     {
         static readonly bool OnWindows = Type.GetType("Mono.Runtime") == null && Environment.OSVersion.Platform == PlatformID.Win32NT;
@@ -373,18 +381,23 @@ namespace SkinManager.App
             foreach (Control child in c.Controls) Style(child);
         }
 
+        /// <summary>Runs a step now if the control has its window, and again each time its window is made.</summary>
         static void WhenHandle(Control c, Action a)
         {
             if (c.IsHandleCreated) a();
             c.HandleCreated += (s, e) => a();
         }
 
+        /// <summary>Asks Windows to draw a control's scrollbars (or a dropdown's list) in its dark style. Does nothing
+        /// off Windows.</summary>
         static void Dark(Control c, string theme)
         {
             if (!OnWindows) return;
             try { SetWindowTheme(c.Handle, theme, null); } catch { }
         }
 
+        /// <summary>Asks Windows for a dark title bar on a window (it tries the older setting number if the newer one
+        /// isn't known).</summary>
         static void DarkTitle(Form f)
         {
             if (!OnWindows) return;
@@ -411,6 +424,8 @@ namespace SkinManager.App
         Rectangle _actionRect;
         bool _hover, _actionHover;
 
+        /// <summary>Sizes the note to its text (and its action link, if any); it closes itself after five seconds
+        /// unless the mouse is on it.</summary>
         Toast(string text, string action, Action onAction)
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw, true);
@@ -435,6 +450,7 @@ namespace SkinManager.App
             t.BringToFront(); t._timer.Start(); _current = t;
         }
 
+        /// <summary>Takes the note away and lets go of it.</summary>
         void Close()
         {
             _timer.Stop();

@@ -4,39 +4,42 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Linq;
 using System.Windows.Forms;
 using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "What punishes this?" panel in the frame-data viewer.</summary>
     class PunishView : ScrollView
     {
-        PunishReport _r; string _status; Character _meChar;
+        PunishReport _r; string _status;
         readonly ComboBox _me = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text };
         public event Action<Character> MeChanged;
+        /// <summary>A fighter in the "You play" list.</summary>
         sealed class Item { public string Text; public Character Value; public override string ToString() => Text; }
 
+        /// <summary>Adds the "You play" list; picking a fighter raises MeChanged so the options are worked out again.</summary>
         public PunishView()
         {
             var l = Theme.Label("You play", Theme.Small, Theme.Muted); l.Location = new Point(0, 2);
             _me.Location = new Point(0, 20);
             Controls.Add(l); Controls.Add(_me);
-            _me.SelectionChangeCommitted += (s, e) => { if (_me.SelectedItem is Item it) { _meChar = it.Value; MeChanged?.Invoke(it.Value); } };
+            _me.SelectionChangeCommitted += (s, e) => { if (_me.SelectedItem is Item it) MeChanged?.Invoke(it.Value); };
         }
 
+        /// <summary>Fills the "You play" list with the fighters to pick from and selects one.</summary>
         public void SetCast(List<Character> cast, Character selected)
         {
             _me.BeginUpdate(); _me.Items.Clear();
             foreach (var c in cast) _me.Items.Add(new Item { Text = c.Name, Value = c });
             _me.SelectedIndex = Math.Max(0, cast.IndexOf(selected));
             _me.EndUpdate();
-            _meChar = selected;
         }
 
         public void Status(string s) { _status = s; _r = null; ToTop(); Invalidate(); }
         public void Show(PunishReport r) { _r = r; _status = null; ToTop(); Invalidate(); }
 
+        /// <summary>Draws word-wrapped text and returns how tall it came out.</summary>
         int Para(Graphics g, string text, Font font, int y, int w, Color color)
         {
             var rect = new Rectangle(0, y, w, 400);

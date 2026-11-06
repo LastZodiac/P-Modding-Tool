@@ -12,17 +12,20 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "Line up the joints" window: drag dots onto your model's joints, and paint parts that should move only
+    /// with the body; a posed preview shows the result.</summary>
     class JointsForm : Form
     {
+        /// <summary>The drawing area, double-buffered so dragging dots doesn't flicker.</summary>
         sealed class Canvas : Panel { public Canvas() { DoubleBuffered = true; ResizeRedraw = true; } }
 
         readonly SwapMesh _placed;
         readonly List<SwapJoint> _joints;
         readonly byte[] _target, _motion;
-        readonly string _name;
         public Dictionary<string, Vector3> Marks { get; }
         public List<PaintDab> Dabs { get; }
         readonly Dictionary<string, Vector3> _auto;   // where measuring the model put each dot
+        /// <summary>What the mouse does on the model: move dots, paint, or erase paint.</summary>
         enum Tool { Dots, Paint, Erase }
         Tool _tool = Tool.Dots;
         readonly Button _toolDots = Theme.Secondary("Move dots"), _toolPaint = Theme.Secondary("Paint: stays with body"), _toolErase = Theme.Secondary("Erase paint");
@@ -42,9 +45,11 @@ namespace SkinManager.App
         int _gen;
         readonly Timer _later = new Timer { Interval = 400 };
 
-        public JointsForm(SwapMesh placed, List<SwapJoint> joints, IDictionary<string, Vector3> marks, IDictionary<string, Vector3> auto, IList<PaintDab> dabs, byte[] target, byte[] motion, string name)
+        /// <summary>Opens on your placed model with P+'s joints; marks and paint already made are shown, and auto is where
+        /// measuring the model put each dot ("Place the dots for me" and right-click go back to those).</summary>
+        public JointsForm(SwapMesh placed, List<SwapJoint> joints, IDictionary<string, Vector3> marks, IDictionary<string, Vector3> auto, IList<PaintDab> dabs, byte[] target, byte[] motion)
         {
-            _placed = placed; _joints = joints; _target = target; _motion = motion; _name = name;
+            _placed = placed; _joints = joints; _target = target; _motion = motion;
             Dabs = new List<PaintDab>(dabs ?? new List<PaintDab>());
             _auto = new Dictionary<string, Vector3>(auto ?? new Dictionary<string, Vector3>(), StringComparer.Ordinal);
             Marks = new Dictionary<string, Vector3>(marks ?? new Dictionary<string, Vector3>(), StringComparer.Ordinal);
@@ -119,6 +124,7 @@ namespace SkinManager.App
             catch (Exception e) { Program.Log("drawing the model for lining up", e); }
         }
 
+        /// <summary>Switches what the mouse does and shows that tool's button as chosen.</summary>
         void SetTool(Tool t)
         {
             _tool = t;
@@ -141,12 +147,14 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Draws one dab of paint (a round brush mark) onto the layer.</summary>
         void Dab(Graphics g, PaintDab d, Brush b)
         {
             var c = Screen(new Vector3(d.X, d.Y, 0)); float r = d.R * _scale;
             g.FillEllipse(b, c.X - r, c.Y - r, 2 * r, 2 * r);
         }
 
+        /// <summary>Paints (or erases) a dab where the mouse is, skipping dabs too close to the last one unless forced.</summary>
         void AddDab(Point p, bool force)
         {
             if (!force && Math.Abs(p.X - _lastDab.X) + Math.Abs(p.Y - _lastDab.Y) < _brush.Value * 0.3f) return;
@@ -161,6 +169,8 @@ namespace SkinManager.App
         PointF Screen(Vector3 v) => new PointF((v._x - _minX) * _scale, (_maxY - v._y) * _scale);
         Vector3 Where(SwapJoint j) => Marks.TryGetValue(j.Name, out var m) ? m : j.Pos;
 
+        /// <summary>Draws the model, the paint, P+'s skeleton in gold, the blue dots (dashed line to where each was moved
+        /// from), the brush ring and the hovered dot's name.</summary>
         void PaintCanvas(Graphics g)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -199,6 +209,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>The dot under the mouse (the nearest within 12 pixels), or null.</summary>
         string Hit(Point p)
         {
             string best = null; double bd = 12 * 12;
@@ -211,6 +222,8 @@ namespace SkinManager.App
             return best;
         }
 
+        /// <summary>Mouse press: paints in paint mode; on a dot, starts dragging it, or right-click puts it (and its mirror
+        /// twin) back where measuring placed it.</summary>
         void Down(object s, MouseEventArgs e)
         {
             if (_tool != Tool.Dots) { if (e.Button == MouseButtons.Left) { AddDab(e.Location, true); _canvas.Invalidate(); } return; }
@@ -229,6 +242,8 @@ namespace SkinManager.App
 
         static bool ModelSwapSided(string n) => n.Length > 1 && (n[0] == 'L' || n[0] == 'R') && char.IsUpper(n[1]);
 
+        /// <summary>Mouse move: paints, highlights the dot under the mouse, or drags a dot (middle dots only up and down; with
+        /// "Move left and right together", its twin moves the mirrored way).</summary>
         void Move2(object s, MouseEventArgs e)
         {
             if (_tool != Tool.Dots)
@@ -277,7 +292,7 @@ namespace SkinManager.App
                 {
                     var lined = ModelSwap.LineUp(_placed, _joints, marks);
                     var keep = ModelSwap.KeepTest(_placed, lined, dabs);
-                    var built = ModelSwap.Build(lined, _target, _name, keep, ModelSwap.SightWeights(lined, _joints, keep));
+                    var built = ModelSwap.Build(lined, _target, keep, ModelSwap.SightWeights(lined, _joints, keep));
                     return pose.Anim != null && _motion != null ? ModelPreview.RenderPosed(built.Costume, _motion, pose.Anim, pose.Frame) : ModelPreview.Render(built.Costume);
                 });
                 if (IsDisposed) { img?.Dispose(); return; }

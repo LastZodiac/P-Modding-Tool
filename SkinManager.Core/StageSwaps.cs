@@ -8,11 +8,15 @@ using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>Swaps two stage versions on a stage slot's list, and reads back which versions a swap is
+    /// about.</summary>
     public static class StageSwaps
     {
         /// <summary>The two versions, as kept in My Mods: "0000|STGSMASHVILLE|0040|STGSMASHVILLE_L_SV_SAKURA".</summary>
         public static string Describe(StageSpot a, StageSpot b) => $"{a.Button:X4}|{a.Param}|{b.Button:X4}|{b.Param}";
 
+        /// <summary>Splits a swap kept in My Mods (see Describe) into its two buttons and settings names; false if it
+        /// isn't one.</summary>
         static bool Parse(string swap, out ushort a, out string pa, out ushort b, out string pb)
         {
             a = b = 0; pa = pb = null;

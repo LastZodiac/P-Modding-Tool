@@ -4,13 +4,13 @@
 // Other new files on the page (another colour, another stage) aren't updates. Checked at most twice a day per mod.
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>Finds newer versions on GameBanana of the files the installed mods came from.</summary>
     public static class ModUpdates
     {
         /// <summary>The installed mods' GameBanana mods and files: (mod id, file id, page url).</summary>

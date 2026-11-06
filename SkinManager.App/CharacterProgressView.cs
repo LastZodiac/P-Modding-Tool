@@ -12,6 +12,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Stat Tracker's page for one character: its level, record, badges, bests, combos, moves, habits,
+    /// matchups and stages.</summary>
     class CharacterProgressView : ScrollView
     {
         public StatsData Data;
@@ -34,6 +36,7 @@ namespace SkinManager.App
             if (hot != _hot) { _hot = hot; Invalidate(); }
         }
 
+        /// <summary>Draws clickable text (or a small button) and remembers where it is so a click runs act.</summary>
         void Link(Graphics g, string text, RectangleF r, Action act, bool button = false)
         {
             bool on = r == _hot;
@@ -366,6 +369,8 @@ namespace SkinManager.App
             return (string.Join(" → ", names), hits.Count > 0 ? hits[0].Before : float.NaN);
         }
 
+        /// <summary>One line of the moves table: a move and how often it landed, killed and started a combo, and its
+        /// damage.</summary>
         sealed class MoveRow { public string Name; public int Landed, Kills, Openers; public float Damage; }
 
         /// <summary>Every move this character landed in your games: times (a multi-hit move once), damage, kills, combos it started.</summary>

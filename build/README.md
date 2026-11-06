@@ -654,6 +654,108 @@ with its evidence, and a check for it.
    the same way, and FD [PM] carries an effects bank P+'s file doesn't and works. The structure check that sent such
    maps to looks installs is removed.)
 
+6. Scenery sits higher, lower, bigger or smaller than P+'s floors (the map was made for another version: SSBU FD's deck
+   7% narrower than P+'s FD, so fighters stood past its edges): StageCheck.LineUp + MoveLooks move the map's scenery
+   onto P+'s floors before it's made to match or put on P+'s stage (see "Lining a stage's scenery up" below).
+7. Scenery that doesn't line up piece by piece (a platform elsewhere, a wider main floor, a platform P+ doesn't have,
+   a P+ floor the map draws nothing for, a stage laid out differently): StageCheck.FitPieces (StageFit.cs) fits each
+   floor's scenery onto P+'s floor, hides what has no floor under it and keeps P+'s own look where the map draws
+   nothing (see "Fitting a stage's scenery floor by floor" below). Evidence: Galaxy Colosseum on Battlefield (54 units
+   off: its moving platforms floated where P+ has fixed ones, P+'s platforms were invisible), Mario Circuit Ville on
+   Rainbow Road (76 off: Smashville's ground floating in the middle of Rainbow Road's roads, the roads invisible).
+8. Scenery bent by several bones moved to the wrong place when the whole map is moved (found in the 2026-11-04 review:
+   20-60 units off on Orpheon's Queen, Green Hill Zone Brawl's Amy/Silver/Tails, Sauria's King and Arwing). Caught by
+   MoveLooks itself now: after the move, every drawn object (bent ones placed by their bones, as the game does) must
+   sit exactly where the move puts it, or the map is used as it is.
+9. A map's art drawn on top of P+'s own part (a platform P+ keeps in P+'s look) when the floor-by-floor fit wasn't
+   used because the fit number didn't change (Sunset Shore on Pokemon Stadium 2 Abandoned: both platforms twice).
+   Installer.LinedUp now also takes the fit when it hides art where P+ draws its own or where the main ground goes.
+10. A map's model that collision rides on (but that doesn't move) taken over by SwapLooks even when the floor-by-floor
+   fit, which is what hides it where P+ draws its own, wasn't used. (Changed again in the second review, item 14:
+   SwapLooks always takes such models over now; leaving them out left Yoshi's Story 64's whole ground missing.)
+11. Sloped and curved floors (Corneria's Great Fox hull) weren't recognised as drawn: a piece's top was compared with
+   the floor's average height. Compared with the floor's height at each point now (Run.YAt).
+12. Points written back in a different number format than the objects read them with (Green Greens' apples stored with
+   6 fraction bits, read with 12: 64x too small in game). StageFit.SetPoints rewrites the points in exactly the format
+   they had; a point that doesn't fit it (or would need depth in a flat array) refuses the fit, nothing is half done.
+13. In looks installs MoveLooks refused maps whose moving parts it didn't have to keep ("would have changed a part the
+   match uses"): on P+'s file only the map's moving parts and position markers stay put (MoveKeep(looks: true)).
+14. A map's part collision rides on that doesn't move was left out of a looks install unless the fit ran, leaving
+   Yoshi's Story 64's ground missing: SwapLooks always takes it over now (only moving parts and markers are left out).
+15. Every P+ part collision rides on measured 0 wide (the model's box was read before its pose was set), so all of them
+   kept P+'s look. ModelWidth sets the pose first. Then (second review) a wide part that moves lost its look:
+   a part that moves always keeps P+'s look now (OwnLooks, SwapLooks).
+16. Animated scenery measured at its resting pose (frame 0) while the game starts it at frame 1 (Yoshi's Story settles
+   5 lower): pieces, floors and riders are read at frame 1 (StartPose).
+17. Two objects sharing one array of points, one moved and one not (or moved differently): Edits finds every point
+   wanted in two places, including objects that weren't fitted at all (bent by several bones, lines only), and refuses.
+18. Fit measured differently before and after (the "before" counted floors no scenery draws): Base and After now both
+   count the map's scenery against P+'s floors, P+'s own parts as drawn; a fit that leaves a P+ floor bare (PBare) is
+   only taken when it's clearly better.
+19. Two stages being made at once could delete each other's picture folder (MakeMatch's cleanup ran outside the lock).
+20. Floors measured on the moved map counted twice as far when their collision rides on a bone whose animation
+   MoveLooks moved along (Yoshi's Story alts, Orpheon, Green Hill Zone Brawl): taken from the map before the move now
+   (MovedRuns), and a floor counts as staying put only when the part it rides on also draws it (StaysPut).
+21. A move by the main floor that ends up worse than leaving the map where it is (fitted piece by piece both ways) is
+   dropped (Installer.LinedUp compares the two); a move nothing could be fitted after has to be clearly better alone.
+   An alt whose main floor is one of P+'s floors already (P+'s Pokemon Stadium 2 has two main floors 3 apart) isn't
+   moved by it.
+22. A part whose animations each hold it still but at different places or sizes (Corneria 64's ship: "Small" and
+   "RealBig") counted as moving, so its look was left out: each animation is checked on its own (Steady).
+23. A loose piece not given to any one floor (Delfino Plaza's sloped platform reaching over its neighbour's line) stayed
+   floating when every floor it stood on was hidden: it's hidden with them now.
+
+24. Old builds of a stage mod saved as "P+'s file" (2026-11-03): when "Make them fit" made a mod smaller (or a P+ update
+   had it fixed again), the copy still on the card was taken for P+'s, so turning the mod off put that old, too-big copy
+   back (all 5 Smashville times of day under Xenoville, FD Brawl under FD Ultimate). StageForNow reads P+'s file before
+   the copy changes and PutStage is told the copy's old fingerprint; OriginalsRepair puts P+'s real file back for
+   originals already saved wrong (taken from the other cards, checked against P+'s release list).
+25. P+'s palette pictures made plain (2026-11-04, Snowman's Land on Dream Land froze the game while loading: Dream Land's
+   program couldn't put its picture on its Scarfy model): ShrinkHidden re-encoded hidden pictures as 4x4 I4, palette ones
+   too, while the model still asks for the palette. Palette pictures (and ones sharing data) are left alone now;
+   StageCheck.BrokenPictures finds installs made before (Phendrana Husk, Entrance, Final Boxing had them too) and the
+   "Fix them" bar makes them again.
+26. A map's looks put in a part of P+'s file that's only far-off background (2026-11-04, Emerald Coast on Green Hill
+   Zone: its ground missing in game and its boardwalk huge in front of the camera, while the file drew it exactly on P+'s
+   floor; Phendrana Husk on Frigate the same). The game doesn't draw such a part in place. StageLooks.LooksPart puts the
+   looks in the part with P+'s own ground when the biggest part has nothing within the fighting area and nothing the
+   stage program names; LooksMisplaced finds installs made before.
+27. A download with stage files for several stages (2026-11-04, Radical Highway: two Green Hill Zone files and a Luigi's
+   Mansion one) went entirely on the first file's stage, and picking another file didn't change the stage shown.
+   StageVersionsForm keeps each file's own stage and ticks and installs them all; files named like P+'s (or one letter
+   off, or a known old name: STGLUIGIMANSION for P+'s STGLUIGISMANSION) are ticked for that version.
+28. Fixed (2026-11-05): a map platform also touching a smaller floor next to it was bent instead of hidden, so its art
+   stayed under P+'s own platform (Entrance (Persona 4) on Pokemon Stadium 2 Abandoned, left platform). A flat piece that
+   is still bent after the fit, lies only over floors that are hidden, mostly covers a floor paired with P+'s own
+   platform, is no wider than it, and sits inside it, is now hidden too (StageFit, after the loose-piece hiding). Taller
+   art like the TV pile next to it is left alone. Checked over the whole catalogue (210 pairs): only this one changed.
+   Watch for: a platform's art left under P+'s platform, or art next to a platform going missing.
+29. Checked and ruled out (2026-11-04): bone flags that don't match the bone's values (Emerald Coast's "main" bone says
+   "no transform" but moves and scales). P+'s own Rainbow Road has the same and draws right, so the game uses the
+   values; not a cause.
+30. OPEN (2026-11-05): Snowman's Land (P+ DL 1:1) on Dream Land still crashes after the palette fix (item 25). The game
+   stops 0.25 s after the stage loads, in its shadow system (stShadow, sora_melee 0x80933c84): it reads the width and
+   height of a shadow texture slot whose texture pointer is empty. Shadow surfaces are materials with a "shadow"
+   user-data entry; the slot keeps the texture bound to the material's first texture. Checked and ruled out, all
+   against P+'s own Dream Land: palettes; texture binding (copied the game's rules: own part first, then every Texture
+   Data, and a slot that names a palette needs a palette picture), every slot binds in both files; name lookups in
+   every group; stored name lengths; the user-data values; model file versions (all 9); model count in one part (P+
+   has up to 142); the shadow system's limits (16 and 24, the same for every stage). What differs from P+'s file and
+   the mod's own file: the map's 4 shadow surfaces use the renamed texture zMap_TShadow1 inside the part (2 shadow
+   textures instead of 1), and part [1] gained AnmTexPat and AnmVis groups, so the game builds all 51 models there
+   with extra buffers. Also ruled out since: texture-swap/visibility animations in a part (Entrance and Final Boxing
+   have them and work); the shadow texture inside a part (Battlefield's Palutena look and Entrance have that and
+   work); a second ground binding part [1] again (P+'s Dream Land program gives each ground its own part: 0 Scarfy,
+   1 main art, 2 Whispy, 3 block positions, 4 blocks, 101/102 trainers). The mod's own file can't be used whole: it
+   fails the online check (floors, spawns and stage events differ from P+'s). What's unique to this build: 51 models
+   in one part, all built with extra buffers (next biggest working part: 21). Every input the crashing code reads is
+   valid in the file, so what's left is at runtime (most likely memory); it can't be proven from the file alone.
+   Not fixed.
+31. OPEN (2026-11-05): Emerald Coast (P+ GHZ 1:1) still looks wrong in game after the far-background fix (item 26),
+   though the misplaced check now passes on the installed file. Item 26 doesn't cover it.
+32. Not a problem (2026-11-05): the Radical Highway on Green Hill Zone's Z alt is P+'s own stage (the card's file is
+   P+'s release file, unchanged). The mod's Green Hill Zone file went on the Marble Zone alt (R).
+
 ## Stage pictures (previews): what used to come out blank, and why
 Checked on all 286 stage files on the card: 281 draw now (before: 256). Still blank: Castle Siege's three files (no
 floors in the file at all) and two files that aren't stages (character roll, dual dummy).
@@ -664,3 +766,233 @@ floors in the file at all) and two files that aren't stages (character roll, dua
   Mansion alts): those triangles are skipped.
 - When there's still no picture, the stage window says "No picture of this one" instead of taking the box away (which
   made the window jump).
+
+## Code cleanup (2026-11-02, 1.3.1)
+- Unused code found by compiling everything (the app, the Blender Kit bridge and Setup) and listing every type, method,
+  property and field nothing refers to, repeated until nothing new turned up. Removed: the old stage install window
+  (StageForm, replaced by the stage versions window), the stage standing check (ModelPreview.CheckStanding/Standing),
+  costume stretch measuring, the old "nearest stage" lookups (StageIndex.Closest/ByShape/Matches), stage outline
+  markers, and about 40 smaller leftovers (unused overloads, constants, fields that were only ever written).
+- Unused parameters, usings and assignments taken out (the build's code-style analysers report none now); members that
+  hide a WinForms one (Left, Top, Text, Events) say so with `new`.
+- Every class, and every method or property longer than a couple of lines, has a comment saying what it's for; doc
+  comments that had drifted away from their member were put back above it or removed.
+- Checked: the code-only comparison (comments ignored) of before/after the comment pass is identical; frame data for the
+  whole cast is the same row for row, and move pictures are byte-identical.
+
+## Lining a stage's scenery up with P+'s floors (2026-11-03)
+- StageAlign.cs (StageCheck, partial): a map's scenery is built around its own collision, so the map's floors against
+  P+'s say where its ground will sit. LineUp() finds the move that puts them on P+'s: a shift, or a shift and a size
+  (uniform, around 0,0; a size change has to beat the shift alone by 0.25 units). Fitting: start from the widest floors,
+  then 40 rounds pairing every floor point with the nearest point on the other side (both ways) and solving for the
+  move by least squares; pairs over max(2, 3x median) apart stop counting after round 8; repeated floors count once.
+- Used only when it's worth it (Alignment.Worth): it moves something, the result is under 6 units off ("nearly lines
+  up") and at least 0.5 better. A move that only halves a big difference would leave the ground between two floors.
+- MoveLooks(): the first bone of every model that draws something and isn't a gameplay part (position markers, models
+  collision rides on, models the stage program names) gets scale *= s, translation = s*t + shift; every CHR0 key that
+  moves those bones gets the same (scale keys and tangents *= s; translation keys s*v + shift, tangents *= s), unless
+  the entry uses the model's own value. (Scenery bent by several bones goes along since 2026-11-04, see the review.) Refused when a
+  scenery root bone shares a name with a gameplay part's bone. Checked before it's returned: every gameplay fingerprint
+  identical to the map's own, apart from the moved models.
+- Installer.LinedUp runs it on the map before MakeMatch (PlanFixedStage), SwapLooks (PlanLooks) and the looks redo
+  after a P+ update (StageForNow). StagePlan.Aligned says what was done; plan.Fit is the fit after the move. The stage
+  window's verdict says "lines up once its scenery is made 7% bigger, ...".
+- Measured on every stage download in Data\Downloads against P+ v3.2.1's files (Linux build, Mono):
+  SSBU Final Destination Reworked (all 9 versions) on FD: 5.6 -> 0.1 (7% bigger; its deck now spans -86.5..85.4,
+  P+'s floor -85.6..85.6). MK Adventure GHZ's STGFINAL on FD: 32.5 -> 0.0 (28.5 up, 42.6% bigger; its CHR0 root keys
+  moved with it). Sunset Shore on FD: 8.2 -> 1.7. All of them still fingerprint identical to P+'s (Compare passes).
+  Not changed (a different layout, no single move fixes it): Galaxy Colosseum on Battlefield (54 off, P+'s platforms
+  have no scenery there), Cocktail of Dreams on Delfino Secret (52), the old Rainbow Road on P+'s Rainbow Road (65).
+  Downloads that already line up (19 files) are untouched.
+- Not covered: a map whose collision already matches P+'s but whose scenery doesn't (the MK Adventure GHZ grass block
+  case: the stage program places it). Per-part moves: see the next section.
+
+## Fitting a stage's scenery floor by floor (2026-11-03)
+The four ways a map's looks missed P+'s floors, and what StageCheck.FitPieces (StageFit.cs) does about each. It runs
+after LineUp/MoveLooks (Installer.LinedUp), on the map's scenery only; collision, blast zones, spawns and the program's
+parts are never touched, and P+'s file is checked to fingerprint the same before it's used.
+1. Whole map moved or resized: LineUp/MoveLooks as before. New: when no single move fits everything (platforms
+   elsewhere), MainLineUp moves the whole map by its main floor alone (shift, and uniform size when the two main floors
+   are within 0.6-1.67x of each other's width), and the rest is fitted floor by floor. MoveLooks now also moves scenery
+   bent by several bones: only the first bones' places change, their resting places (bind matrices) stay as they were,
+   so bent scenery goes with them (see the review below). A floor whose collision rides on a part MoveLooks leaves
+   where it is counts as moved when other scenery draws it (StaysPut, second review).
+2. Pieces in other places: the map's floors are paired with P+'s (main with main when they're alike, then each platform
+   with the one on the same side at about the same place; a layout that isn't alike pairs floors where they are). Each
+   model object's triangles are split into the separate pieces they make (so a platform built into the stage's mesh is
+   still its own piece). A piece belongs to a floor when its top lies on it (main floor: within 4 units over a quarter
+   of it; platform: within 3 units over half of it) and it reaches the line fighters stand on (z within 10 of 0), or
+   when it hangs right under a platform whose top is in the same model, or is the stage's body under the main floor.
+   Those pieces move with their floor (and are stretched sideways to P+'s width). Scenery built as one piece with
+   everything else is bent near each floor (full move next to it, fading over 6-12 units; the stage's body all the way
+   down), only at the depth of the stage itself. Animated pieces only ever move as a whole (never bent), placed where their
+   animation has them at frame 1.
+3. Main floor another width: its pieces are stretched (or narrowed) sideways to P+'s main floor.
+4. Floors missing or extra:
+   - The map draws a floor P+ doesn't have (in the fighting area): its pieces are shrunk to nothing. A moving platform
+     P+ has nothing like (no P+ moving platform where it starts): the art riding along with it (animated objects that
+     stay on it at 4 points of its animation) is shrunk too. A map floor where P+ draws its own moving part (Corneria's
+     Great Fox, an Arwing, FoD's top platform): the map's art there goes, P+'s stays.
+   - P+ has a floor the map draws nothing for (looks installs only): P+'s own pieces for that floor stay in sight
+     (SwapLooks' keepPPlus, "model/object"); the other pieces of those objects are shrunk. Objects that can't be split
+     (bent by several bones: Rainbow Road's roads) stay whole when they draw no floor the map draws.
+   - A stage laid out differently (main floors not alike): the map's ground is hidden and P+'s floors keep P+'s look,
+     with the map's background around them.
+- Floors: a floor riding a part the file doesn't have (Delfino's Secret and Rainbow Road ride "Colission") stays where
+  it is; one riding a part whose animation moves it under 6 units (Yoshi's Story settles 5 lower after frame 0) counts
+  as fixed where it mostly is; the same floor in two collision sets a unit or two apart counts once (the wider). The
+  main floor is the one covering most of x -40..40 (Brawl's Green Hill Zone has far bigger floors far out).
+- SwapLooks now takes over a map's models that collision rides on when they don't move (Yoshi's Story 64 draws its whole
+  stage in one), whether or not it was fitted floor by floor; position markers and moving parts are still left out
+  (StageCheck.MovingGameplay).
+- The stage window: "lines up once its scenery is made 8% bigger, 1 of its platforms is moved onto P+'s, 2 platforms
+  P+ doesn't have are hidden and P+'s own look is kept for 2 floors it doesn't draw, its scenery on P+'s stage". When
+  a map made for the same program could go either way, the looks install is picked when it fits clearly better (P+'s
+  own look can only stay there).
+- Measured (Linux build, P+ v3.2.1's files; "off" = furthest a P+ floor is from scenery standing on it):
+  Galaxy Colosseum on Battlefield 54.4 -> 0.0; Cocktail of Dreams on Delfino Secret 51.7 -> 0.0 (whole map 48.8 up,
+  27% bigger); Mario Circuit Ville on Rainbow Road 76.8 -> 0.0 and the old Rainbow Road on P+'s 64.7 -> 0.0 (their
+  ground hidden, Rainbow Road's 9 floors in P+'s look); Sunset Shore on FD 8.2 -> 0.0 (both platforms hidden).
+  P+'s own alts on their normal stage (35 files): every one 0.0 except Yoshi's Story 64 (24.6: its stage art can't be fitted,
+  so P+'s is kept) and Corneria Z (436, laid out quite differently; left as before). The installed looks (FD SSBU, Cocktail
+  on FoD, Xenoville, Emerald Coast, Phendrana, Lunar BF, KOF, Floats, Sator) are unchanged (already 0.0 / 0.1).
+- Not covered yet: a map platform moving with a different animation than P+'s moving platform in the same place keeps
+  its own art (both animate on their own clock); map art for a floor that rides a moving map part can't be fitted
+  to a fixed P+ floor (it's hidden instead).
+
+## Review of the floor-by-floor fit (2026-11-04)
+Every line of StageFit.cs, the StageAlign/StageLooks/Installer/StageVersionsForm changes and the BrawlLib calls they
+rely on read through again, then the whole catalogue run again (18 download/stage pairs both ways, 42 of P+'s own alts
+on their normal stage; Linux build in the cloud workspace this time, BrawlLib a4c1ee33 with the 32-bit-address patch;
+the PC's build folder had been cleared). Found and fixed:
+- MoveLooks put scenery bent by several bones 20-60 units from where it belonged (introduced 2026-11-03, shipped in the
+  20:05 build; only maps moved as a whole that have such scenery: of the ones tested, P+'s Orpheon, Green Hill Zone
+  Brawl and Sauria alts. None of the installed looks: the only one moved as a whole, SSBU FD, has no bent scenery).
+  Cause: RecalcBindState rewrote the bones' resting places, and bent points are kept relative to those. Measured by
+  moving each map by 1.2x plus (10, 5) and comparing every object's points: with the fix, Orpheon 65 solid + 3 bent,
+  Green Hill Zone Brawl 7 + 12, Sauria 62 + 2, SSBU FD 30 + 0 objects all exactly where they should be, 0 wrong
+  (before: 2, 12, 2 wrong). MoveLooks now runs that check itself on every move (regression list 8).
+- Installer.LinedUp dropped a fit that only hid art where P+ draws its own (regression list 9), and SwapLooks took over
+  ridden models without the fit (10). Sloped floors (11).
+- MainLineUp decided "P+ draws its own main floor" by the model the floor rides on, not by what that model draws, so
+  Yoshi's Story's alts (riding on Randall the cloud) were never moved as a whole. Uses the same drawing test as
+  FitPieces now (MarkOwn): Yoshi's Story SSZ 64 and Cookie now move as a whole and fit 0.0.
+- The stage window could say "lines up once left as it is": Alignment.Did, and the window only says what was done.
+- A fit that changed nothing but found that P+ draws its own floors (Mario Circuit) wasn't reported, so the window
+  fell back to the plain floor comparison (336 off, "doesn't line up well") for a stage that lines up: reported now.
+- Tried and taken back: letting the map's art win over a P+ part that keeps P+'s look when the part doesn't move by
+  its animation. The stage program can still move it (Corneria's Arwings and Great Fox aren't animated in the file),
+  and there it would leave a moving platform invisible. P+'s part always keeps its look; the map's art there goes.
+- Checked and fine: BrawlLib's object removal (SwapLooks) only removes points/normals/colours/UVs no other object uses,
+  so P+ objects kept for floors the map doesn't draw keep everything they need; the floor pairing, hiding, bending and
+  P+-art keeping on all 60 pairs; P+'s file still fingerprints identical to P+'s on every looks install (Compare).
+- Result (after): every installed look as before (0.0 / 0.1), except Sunset Shore on Stadium 2 Abandoned, which now
+  hides its own copies of the two platforms P+ draws (they were drawn twice). Downloads: Galaxy Colosseum on
+  Battlefield 54.4 -> 0.0, Cocktail on Delfino Secret 51.7 -> 0.0, Mario Circuit Ville on Rainbow Road 76.8 -> 0.0,
+  old Rainbow Road 64.7 -> 0.0, Sunset Shore on FD 8.2 -> 0.0, MK Adventure's FD 32.5 -> 0.0. P+'s alts: 0.0 except
+  Corneria 64 (8.4), Corneria Sauria (10.7), Mario Circuit's Rainbow Road (43.3) and Yoshi's Story 64 (24.6), all
+  laid out differently from the stage they were put on.
+- Known limits: a moving map platform where P+ has its own keeps its art on its own animation clock; art that rides a
+  moving map part can't be fitted to a fixed P+ floor (hidden instead); scenery bent by several bones is never moved
+  floor by floor (only with the whole map), and art bent that way where P+ draws its own isn't hidden.
+
+## Second review of the floor-by-floor fit (2026-11-04)
+A second full read of StageFit.cs, StageAlign.cs, StageLooks.cs and Installer.LinedUp, plus a separate reviewer reading
+the same code and BrawlLib's source without seeing the first review. Everything below was checked on the catalogue
+(18 download/stage pairs both ways, 42 of P+'s alts on their normal stage) and a 530-pair sweep of maps onto other
+P+ stages (no crashes or errors), on the Linux build. Fixed (regression list 12-23):
+- Point formats (12), looks-mode refusals (13), ridden-but-still parts (14), part widths (15), frame 1 (16), shared
+  points (17), the before/after measure (18), the cleanup lock (19).
+- Floors on a moved map were measured twice as far out when their collision rides on a bone whose animation moved
+  along (20). This made the first review's numbers for Yoshi's Story Toybox, Orpheon, Green Hill Zone Brawl and
+  Cocktail of Dreams on Delfino Secret wrong (some "0.0" were by accident). Measured from the map before the move now.
+- A move by the main floor alone is compared with leaving the map where it is, both fitted piece by piece (21).
+- Animations that are versions of the stage (Corneria 64's ship) no longer count as movement (22); loose sloped pieces
+  are hidden with the floors they stand on (23).
+- Checked and fine (reviewer): SetPoints' header offsets, number types and export path (BrawlLib copies the replaced
+  block as it is and fixes the offsets after); MoveLooks skipping the gameplay checks in looks mode (P+'s file is still
+  compared in full before use); no new crash paths.
+- Result: every installed look as before (0.0 / 0.1). P+'s alts on their normal stage: all 0.0 except Green Hill Zone
+  Brawl (30.1; its breakable cliffs are bent with the rest of its ground, so they can't be hidden alone) and Mario
+  Circuit's Rainbow Road (43.3), both laid out differently; Battlefield Melee 0.3. Downloads: Galaxy Colosseum on
+  Battlefield, Cocktail of Dreams on Delfino Secret, Sunset Shore on FD all 0.0. MoveLooks self-test (1.2x + (10, 5)):
+  Orpheon, Green Hill Zone Brawl, Sauria, Cookie 0 wrong. Every output's points read back exactly in their own format
+  (only Smashville's balloon, which was already that way in the map, differs).
+- Known limits (logged, not changed): pieces are placed where their animation has them at frame 1; on P+'s file the
+  map's animations for its second and later model groups go after P+'s and may not play, so those pieces show at
+  rest (usually the same place). Animations are matched to bones by name, as the game does. A point that doesn't fit
+  its stored format refuses the whole fit (the map is then moved as a whole or left as it is; seen once: Pokemon Stadium
+  2 Abandoned, which needs no move). On "made to match" installs, a P+ floor P+ draws itself is counted as drawn even
+  when the match didn't bring P+'s part in (only matters for maps that aren't installed as looks). A platform floating
+  more than 40 above P+'s highest floor is left in sight (Cocktail of Dreams' fruit on Delfino Secret).
+
+## Third review of the stage fitting, and freezes during play (2026-11-04)
+Stage fitting (StageFit.cs, StageAlign.cs, StageLooks.cs, Installer.LinedUp, StageVersionsForm) read through again by a
+reviewer that hadn't seen the earlier reviews. Confirmed: every result still goes through StageCheck.Compare before it can
+be installed (PlanFixedStage, PlanLooks, StageForNow), and every BrawlLib file the new code opens is opened under
+BrawlGate.Lock and disposed. Fixed:
+- Steady let an exception out when BrawlLib couldn't play one of a stage's animations; since SwapLooks asks it about P+'s
+  own file, one such animation made every looks install on that stage fail. It now counts as "moving".
+- Installer.LinedUp tried "moved by its main floor" and "left where it is" inside one try: if the second failed, the first
+  was kept without the comparison. Each try now fails on its own ("not measured").
+- FitPieces wrote the files with some models still posed at frame 1 (StartPose): every model is put back at rest first.
+- MakeMatch's picture folders were only cleaned up on success: now any left over are cleaned up at the start of the next.
+- Comments: MarkOwn's summary had ended up above StaysPut, a broken doc comment on Edits, a local function hiding
+  StageFit.Moves (now FloorMoves), notes on Run.Done, Touch, TriField and the point numbering of bent objects.
+- Cover (run for every piece against every floor) skips triangles outside the floor's height range or beside it before
+  the per-point height test; the answer is the same (YAt never leaves Ymin..Ymax).
+- Checked old against new on 6 pairs (Emerald Coast on GHZ, Phendrana on Frigate, Xenoville on Smashville, Cocktail on
+  FoD, SSBU FD on FD Brawl, Sunset Shore on FD, Mario Circuit Ville on Rainbow Road): the fitted map and P+'s file come
+  out byte for byte the same, and every result passes Compare. (SwapLooks' own output differs run to run, old and new
+  alike: BrawlLib writes it slightly differently each time.)
+- Logged, not changed (looks only, not proven to happen): stretching the main floor up to 2x can fold the fade at its
+  ends; objects with the same name in one P+ model share a keep key; a whole object kept for a bare P+ floor isn't
+  re-checked for shared points; the "fixed" and "looks" plans measure a ridden ground differently (StageVersionsForm
+  picks between them by that number). Repeated ApplyCHR in Runs/MovingGameplay/Steady and repeated file reads make
+  planning a stage take a few seconds; a cache per file would cut that.
+Freezes (the opponent card left over the desktop after the game and the app were closed; stutters):
+- The opponent card only went away when the game's log said the match ended, so closing the game in the middle (or
+  after the last game) left it up for good. Now everything over the game goes when the game's window has been gone for
+  two checks in a row (about 4 seconds), and the overlays are closed with the app (MainForm FormClosed).
+- While Brawl Online's Dolphin runs, the app runs at below-normal priority (GamePriority), so reading replays, the
+  after-game notes and pictures never take the computer from the game; replays are read one at a time then, not four.
+- GameWindow.Find (every 2 seconds) disposes the Process objects it gets (each held a handle until garbage collected).
+- After a game: the second look 12 seconds later only happens when the first didn't find the game; the opponent card
+  takes the stage names the Stat Tracker already read instead of opening the SD card again.
+- Watchdog.cs: notes in Data\errors.log whenever the window doesn't answer for 1.5 s or more, with what it was doing
+  (Program.Doing, set around the game-time work: following the log, the report, the Stat Tracker, drawing an overlay),
+  the memory in use and whether the game was running. Tested with SKINMANAGER_TEST_FREEZE (a 3 s freeze is noted).
+- The dolphin.log of the last session (2026-11-02, 20:42-22:14) shows the long stalls were the network (the other
+  player going silent for 7 s, the rooms server unreachable); the modded stages cost Dolphin about the same per frame
+  as P+'s own (game code 2.1-2.9 ms per frame, rollbacks 5-7.4 ms on average on every stage).
+
+## Downloads with stage files for several stages (2026-11-04)
+- Radical Highway r4 brings STGGREENHILLZONE, STGGREENHILLZONE_Z_RADICALHIGHWAY and STGLUIGIMANSION. Picking a file in step 2
+  used to keep showing the first file's stage and only installed one file. Now each file keeps its own ticks and checks
+  (StageVersionsForm.NewLook), picking a file opens its stage, and Install puts in every file that has versions ticked.
+- Opening the window ticks, for each file, the version it's named exactly like (or the normal one of the stage it's named
+  for under another name: STGLUIGIMANSION -> P+'s STGLUIGISMANSION, Stages.OldNames and a one-letter-off match), except
+  a version one of your mods is on already. Ticking a version for one file unticks it for the others.
+- Each installed mod is named after the download and its stage (and version when it isn't the normal one).
+- Radical Highway's Luigi's Mansion file is 7 units off P+'s current Luigi's Mansion floors (made for an older layout),
+  so its verdict says it doesn't line up well; its GHZ file is 0.0 off.
+
+## Snowman's Land crash, and maps drawn off the floor on Green Hill Zone and Frigate (2026-11-04)
+- Snowman's Land on Dream Land froze the game while loading. Dolphin's log: Dream Land's program (grDxGreensStage) couldn't
+  put its picture on its Scarfy model ("model Scarfy, material Scarfy, texture Scarfy"), then a null pointer. Cause:
+  ShrinkHidden made P+'s pictures nothing shows any more tiny by re-encoding them as plain 4x4 I4 pictures, including
+  palette pictures (CI8 with a PLT0): the game still loads the model and asks for the palette. ShrinkHidden now leaves
+  palette pictures (and pictures sharing their data) as they are. Installed looks with such a picture: Snowman's Land
+  (6: LeafA-C, Scarfy, WarpStar, Water), Phendrana Husk (5), Entrance (4), Final Boxing (1).
+- Emerald Coast on Green Hill Zone: in game its ground was missing and its boardwalk huge in front of the camera, while
+  the file draws it exactly on P+'s floor. Its looks had gone in P+'s biggest scenery part, Model Data [1], which on
+  Green Hill Zone holds only far-off scenery (none within the fighting area; the stage program names nothing in it) and
+  isn't drawn in place. LooksPart: when the biggest part is such far-off background, the looks go in the part with P+'s
+  own ground. Changes Green Hill Zone and Frigate Husk only of the installed looks (FD Brawl's part 1 holds bones the
+  program names, Smashville's part 0 a model it names: unchanged).
+- Installs made before: Installer.NeedsRemaking (BrokenPictures, LooksMisplaced; kept per copy and P+ file) puts a
+  "Fix them" bar up (red when one can crash the game); StageForNow makes them again from the map they came as.
+  Tested on the UI test card with the broken Snowman's Land: the bar, the fix, the new copy reads clean.
+- Not fixed yet: Entrance (Persona 4) on Stadium 2 Abandoned draws its own left platform under P+'s (the piece also
+  touches a TV pile's top, so it's bent instead of hidden). Changing how such pieces are assigned also hid the TV pile;
+  left for a proper pass over the catalogue.

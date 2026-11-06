@@ -10,6 +10,7 @@ using System.Runtime.Serialization.Json;
 
 namespace SkinManager.Core
 {
+    /// <summary>One starred mod, with its name and picture kept so the Favorites list shows without asking GameBanana.</summary>
     [DataContract]
     public sealed class Favorite
     {
@@ -24,11 +25,13 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public List<string> Lists;   // the collections it's in (your own named lists)
     }
 
+    /// <summary>Your starred mods and collections, kept in favorites.json in the app's data folder.</summary>
     public sealed class Favorites
     {
         readonly string _file;
         readonly List<Favorite> _items;
 
+        /// <summary>Loads the stars from the data folder; a missing or broken file starts an empty list.</summary>
         public Favorites(string dataFolder)
         {
             _file = Path.Combine(dataFolder, "favorites.json");
@@ -84,6 +87,7 @@ namespace SkinManager.Core
             Changed?.Invoke();
         }
 
+        /// <summary>Writes the list through a temp file so a crash part-way can't leave a half-written one.</summary>
         void Save()
         {
             try

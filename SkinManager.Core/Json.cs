@@ -7,8 +7,11 @@ using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>Reads JSON text (GameBanana's replies, Brawl Online's settings) into plain dictionaries, lists and
+    /// values.</summary>
     public static class Json
     {
+        /// <summary>Reads a whole JSON text; throws if anything but spaces follows the value.</summary>
         public static object Parse(string text)
         {
             int i = 0;
@@ -20,6 +23,7 @@ namespace SkinManager.Core
 
         static void Skip(string s, ref int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; }
 
+        /// <summary>Reads one value starting at i (object, array, string, number, true/false/null) and moves i past it.</summary>
         static object Value(string s, ref int i)
         {
             Skip(s, ref i);
@@ -68,6 +72,7 @@ namespace SkinManager.Core
             return double.Parse(s.Substring(start, i - start), NumberStyles.Float, CultureInfo.InvariantCulture);
         }
 
+        /// <summary>Reads a quoted string starting at i, turning escapes (\n, é...) back into characters.</summary>
         static string Str(string s, ref int i)
         {
             if (s[i] != '"') throw new FormatException("Expected a string at " + i);

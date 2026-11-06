@@ -1,7 +1,6 @@
 // A setup someone shared: every mod in it, whether you already have it, and a button to get each one (or all you're
 // missing) from GameBanana. Each mod goes through the usual add steps and checks, one at a time.
 using System;
-using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -9,6 +8,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The window for a setup a friend shared (.ppsetup): which of its mods you have, and buttons to get the
+    /// rest.</summary>
     class SharedSetupForm : Form
     {
         readonly SharedSetup _setup; readonly Library _lib; readonly Func<SharedMod, bool> _get;
@@ -16,6 +17,8 @@ namespace SkinManager.App
         readonly Button _all = Theme.Primary("Get everything I'm missing"), _close = Theme.Secondary("Close");
         readonly Label _sum = Theme.Label("", Theme.Small, Theme.Muted);
 
+        /// <summary>Lays out the window; get adds one mod from GameBanana (false if it was stopped or failed, which
+        /// ends "get everything").</summary>
         public SharedSetupForm(SharedSetup setup, Library lib, Func<SharedMod, bool> get)
         {
             _setup = setup; _lib = lib; _get = get;
@@ -43,6 +46,8 @@ namespace SkinManager.App
             Fill();
         }
 
+        /// <summary>Lists every mod in the setup again with "You have it", a "Get it" button, or a note when it came
+        /// from a file.</summary>
         void Fill()
         {
             _rows.SuspendLayout();

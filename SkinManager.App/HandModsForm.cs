@@ -10,6 +10,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The window that lists mods put on the card by hand, with buttons to look again or start over from
+    /// now.</summary>
     class HandModsForm : Form
     {
         readonly HandList _list = new HandList();
@@ -17,6 +19,8 @@ namespace SkinManager.App
         readonly Label _intro = Theme.Label("", Theme.Small, Theme.Muted);
         readonly Func<bool, HandScan> _rescan;
 
+        /// <summary>Shows the first scan straight away; rescan does a new one (true = take a fresh snapshot of the card
+        /// first).</summary>
         public HandModsForm(HandScan scan, Func<bool, HandScan> rescan)
         {
             _rescan = rescan;
@@ -47,6 +51,7 @@ namespace SkinManager.App
             finally { if (!IsDisposed) { _again.Enabled = _fresh.Enabled = true; _again.Text = was; } }
         }
 
+        /// <summary>Lays the intro, list and buttons out for the window's current size.</summary>
         void Arrange()
         {
             _intro.Size = new Size(ClientSize.Width - 36, 66);
@@ -56,6 +61,8 @@ namespace SkinManager.App
             _fresh.Location = new Point(18, _close.Top);
         }
 
+        /// <summary>Fills the window from a scan. The wording depends on whether the card is compared with P+ or with
+        /// its own snapshot (a card that isn't the P+ Brawl Online sets up).</summary>
         void Show(HandScan scan)
         {
             int n = scan?.Mods.Count ?? 0;
@@ -86,6 +93,7 @@ namespace SkinManager.App
         public bool Snapshot;   // compared with the card's snapshot, not with P+
         const int H = 40, HeadH = 54;
 
+        /// <summary>A self-drawn, double-buffered list that scrolls with the mouse wheel.</summary>
         public HandList()
         {
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
@@ -96,6 +104,7 @@ namespace SkinManager.App
 
         int Total => _rows.Sum(r => r.Header ? HeadH : H);
 
+        /// <summary>Swaps in a new set of files, grouped by kind, and scrolls back to the top.</summary>
         public void Show(List<HandMod> mods)
         {
             _rows = new List<(bool, string, HandMod)>();
@@ -107,7 +116,8 @@ namespace SkinManager.App
             _scroll = 0; Invalidate();
         }
 
-        static string Note(string kind, int count)
+        /// <summary>The line under each kind's heading: whether that kind of mod is safe online.</summary>
+        static string Note(string kind)
         {
             switch (kind)
             {
@@ -134,7 +144,7 @@ namespace SkinManager.App
                     int count = _rows.Count(x => !x.Header && x.Kind == r.Kind);
                     var color = r.Kind == "Gameplay" ? Theme.Bad : Theme.Accent;
                     using (var b = new SolidBrush(color)) g.DrawString($"{r.Kind.ToUpperInvariant()} · {count}", Theme.BodyBold, b, 12, y + 10);
-                    using (var m = new SolidBrush(r.Kind == "Gameplay" ? Color.FromArgb(230, Theme.Bad) : Theme.Muted)) g.DrawString(Note(r.Kind, count), Theme.Small, m, new RectangleF(12, y + 31, Width - 24, 18), clip);
+                    using (var m = new SolidBrush(r.Kind == "Gameplay" ? Color.FromArgb(230, Theme.Bad) : Theme.Muted)) g.DrawString(Note(r.Kind), Theme.Small, m, new RectangleF(12, y + 31, Width - 24, 18), clip);
                     y += HeadH; continue;
                 }
                 var mod = r.Mod;

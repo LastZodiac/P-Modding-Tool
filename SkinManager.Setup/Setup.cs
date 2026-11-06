@@ -15,6 +15,7 @@ using Microsoft.Win32;
 
 namespace SkinManager.Setup
 {
+    /// <summary>Setup's start, plus the bits both the installer and uninstaller use (names, shortcuts, colors, buttons).</summary>
     static class Program
     {
         public const string AppName = "P+ Modding Tool";
@@ -22,6 +23,7 @@ namespace SkinManager.Setup
         public const string RegKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\PPlusModdingTool";
         public static string Version => Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
 
+        /// <summary>Shows the install window, or the uninstall window when started with /uninstall (from Windows' app list).</summary>
         [STAThread]
         static void Main(string[] args)
         {
@@ -35,11 +37,13 @@ namespace SkinManager.Setup
             Application.Run(new SetupForm());
         }
 
+        /// <summary>Where the app was installed before (from Windows' app list), or null if it isn't installed.</summary>
         public static string InstalledFolder()
         {
             try { using (var k = Registry.CurrentUser.OpenSubKey(RegKey)) return k?.GetValue("InstallLocation") as string; } catch { return null; }
         }
 
+        /// <summary>Whether the app is open from that folder (its files can't be replaced or removed while it is).</summary>
         public static bool AppRunningFrom(string folder)
         {
             foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(ExeName)))
@@ -53,6 +57,7 @@ namespace SkinManager.Setup
         public static string DesktopShortcut => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), AppName + ".lnk");
         public static string StartMenuShortcut => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), AppName + ".lnk");
 
+        /// <summary>Makes a Windows shortcut (.lnk) to the app, using Windows' own shortcut maker.</summary>
         public static void MakeShortcut(string path, string target)
         {
             var type = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException("Windows' shortcut maker isn't available.");
@@ -78,6 +83,7 @@ namespace SkinManager.Setup
         public static Button Secondary(string text) => new Button { Text = text, FlatStyle = FlatStyle.Flat, BackColor = Panel, ForeColor = Text, Font = new Font("Segoe UI", 10f), AutoSize = true, Padding = new Padding(10, 3, 10, 3), Cursor = Cursors.Hand };
     }
 
+    /// <summary>The install window: pick a folder and shortcuts, then Install (or Update when it's already installed).</summary>
     class SetupForm : Form
     {
         readonly TextBox _folder = new TextBox();
@@ -88,6 +94,7 @@ namespace SkinManager.Setup
         readonly ProgressBar _bar = new ProgressBar { Visible = false };
         string _done;
 
+        /// <summary>Lays out the window; when the app is already installed it offers to update that copy in place.</summary>
         public SetupForm()
         {
             Text = Program.AppName + " " + Program.Version + " Setup";
@@ -124,6 +131,7 @@ namespace SkinManager.Setup
             Shown += (s, e) => _install.Left = ClientSize.Width - _install.Width - 24;
         }
 
+        /// <summary>Installs into the chosen folder (waiting for the app to be closed first), then offers to open it.</summary>
         async Task Install()
         {
             string folder;
@@ -153,6 +161,7 @@ namespace SkinManager.Setup
             }
         }
 
+        /// <summary>Opens the newly installed app and closes Setup.</summary>
         void Open()
         {
             try { Process.Start(new ProcessStartInfo(_done) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(_done) }); } catch { }
@@ -160,8 +169,11 @@ namespace SkinManager.Setup
         }
     }
 
+    /// <summary>Does the installing itself, away from the window.</summary>
     static class Installer
     {
+        /// <summary>Unpacks the app into the folder (never touching the Data folder), keeps a copy of Setup as Uninstall.exe,
+        /// notes every file it put there, adds the app to Windows' app list and makes the shortcuts.</summary>
         public static void Install(string folder, bool desktop, bool start, Action<int> progress)
         {
             Directory.CreateDirectory(folder);
@@ -211,8 +223,11 @@ namespace SkinManager.Setup
         }
     }
 
+    /// <summary>Removes the app again ("Setup.exe /uninstall").</summary>
     static class Uninstaller
     {
+        /// <summary>Asks before removing the app (and, if ticked, the mod library); runs itself from the temp folder first so
+        /// the app's folder can be deleted.</summary>
         public static void Run(string folder)
         {
             folder = Path.GetFullPath(folder).TrimEnd('\\');
@@ -248,6 +263,8 @@ namespace SkinManager.Setup
             }
         }
 
+        /// <summary>Deletes the shortcuts, the app-list entry and only the files Setup put there (plus the app's update folder
+        /// and old copies), the Data folder only if asked, then any folders left empty.</summary>
         static void Remove(string folder, bool data)
         {
             foreach (var lnk in new[] { Program.DesktopShortcut, Program.StartMenuShortcut }) try { if (File.Exists(lnk)) File.Delete(lnk); } catch { }

@@ -4,11 +4,14 @@ using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>A small window asking for one line of text (a name), with an optional tick box under it.</summary>
     class InputForm : Form
     {
         readonly TextBox _box = new TextBox { Width = 360, Font = Theme.Body, BorderStyle = BorderStyle.FixedSingle };
         public string Value => _box.Text.Trim();
 
+        /// <summary>Builds the window; extraOption, if given, adds a tick box with that text (read it from
+        /// Option).</summary>
         public InputForm(string title, string prompt, string value, string ok, string extraOption = null)
         {
             Text = title; BackColor = Theme.Back; ForeColor = Theme.Text; Font = Theme.Body;

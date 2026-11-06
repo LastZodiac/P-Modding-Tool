@@ -7,6 +7,8 @@ using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>Where Brawl Online is installed on this PC: its game files, the card it plays from and the Brawl disc
+    /// image.</summary>
     public sealed class BrawlOnlineInstall
     {
         public string NetplayFolder;   // ...\Brawl Online\netplay
@@ -19,6 +21,8 @@ namespace SkinManager.Core
         public string DolphinToolPath => Path.Combine(NetplayFolder, "DolphinTool.exe");
         public string BrawlDiscPath;   // the Brawl disc image Brawl Online plays (may be null)
 
+        /// <summary>Looks for Brawl Online in AppData (following its settings if the game files were moved); null if it
+        /// isn't installed or has no card yet.</summary>
         public static BrawlOnlineInstall Find()
         {
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -45,6 +49,8 @@ namespace SkinManager.Core
             return install;
         }
 
+        /// <summary>One text value from the launcher's own Settings file (JSON), found by its name; null if it isn't
+        /// there.</summary>
         static string ReadSetting(string root, string key)
         {
             string settings = Path.Combine(root, "Settings");

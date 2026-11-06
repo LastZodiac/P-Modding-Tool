@@ -14,8 +14,10 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>Checks GitHub for a newer version of the app and fetches it safely for SelfUpdate to swap in.</summary>
     static class OnlineUpdate
     {
+        /// <summary>A release on GitHub: its version, notes, page, and the update zip and its SHA-256 list.</summary>
         public sealed class Release
         {
             public Version Version;
@@ -51,6 +53,7 @@ namespace SkinManager.App
             catch { return true; }
         }
 
+        /// <summary>A web client set up for GitHub's API (modern TLS, the app's name and version as its user agent).</summary>
         static WebClient Client()
         {
             try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }

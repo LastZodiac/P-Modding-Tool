@@ -6,16 +6,22 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>How sure a row of frame data is: read from the scripts, worked out with an assumption, or not
+    /// drawn.</summary>
     public enum Sureness { Exact, Approximate, NotDrawn }
 
+    /// <summary>One row of the "How accurate" tab: the move, how sure it is, and why.</summary>
     public sealed class AccuracyLine
     {
         public string Move, Why;
         public Sureness Level;
     }
 
+    /// <summary>Builds the "How accurate" list for a fighter's frame data.</summary>
     public static class FrameDataAccuracy
     {
+        /// <summary>One line per move saying how sure its frame data is and, when it isn't exact, what the app had to
+        /// guess or leave out.</summary>
         public static List<AccuracyLine> For(FighterBook b)
         {
             var lines = new List<AccuracyLine>();

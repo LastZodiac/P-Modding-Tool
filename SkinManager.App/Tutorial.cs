@@ -9,6 +9,7 @@ using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>One stop on a tour: a title, what to say, and which part of the page to outline.</summary>
     sealed class TutorialStep
     {
         public string Title, Text;
@@ -25,6 +26,7 @@ namespace SkinManager.App
         Rectangle _card, _back, _next, _skip, _never;
         public event Action Finished, TurnedOff;
 
+        /// <summary>page is the name shown on the card ("MY MODS · 2 OF 6").</summary>
         public TutorialOverlay(string page, List<TutorialStep> steps)
         {
             _page = page; _steps = steps;
@@ -49,6 +51,7 @@ namespace SkinManager.App
         }
 
         void Close(object s, EventArgs e) => Finish();
+        /// <summary>Ends the tour: takes the overlay off the window, says it's finished and lets go of it.</summary>
         void Finish()
         {
             var f = FindForm(); if (f != null) f.Resize -= Close;
@@ -66,6 +69,7 @@ namespace SkinManager.App
             else if (e.KeyCode == Keys.Left) Go(-1);
         }
 
+        /// <summary>Moves forward or back one step; going past the last one ends the tour.</summary>
         void Go(int d)
         {
             int n = _at + d;
@@ -87,6 +91,8 @@ namespace SkinManager.App
             Cursor = hand ? Cursors.Hand : Cursors.Default;
         }
 
+        /// <summary>Where this step's part is on the overlay, with a little room around it; null when there's nothing
+        /// to outline (no part, or it's hidden or off the window).</summary>
         Rectangle? TargetRect()
         {
             try
@@ -156,6 +162,7 @@ namespace SkinManager.App
     /// <summary>The tours of each page.</summary>
     static class Tutorials
     {
+        /// <summary>The first visible control inside root (searching all the way down) that matches.</summary>
         static Control Find(Control root, Func<Control, bool> match)
         {
             if (root == null) return null;
@@ -169,6 +176,8 @@ namespace SkinManager.App
         }
         static Func<Control> Button(Control root, string text) => () => Find(root, c => c is Button b && b.Text.Replace("&&", "&").StartsWith(text, StringComparison.OrdinalIgnoreCase));
         static Func<Control> Of<T>(Control root, Func<T, bool> ok = null) where T : Control => () => Find(root, c => c is T t && (ok == null || ok(t)));
+        /// <summary>Finds, when the step is shown, the largest visible control inside root that matches (for the page's
+        /// main list).</summary>
         static Func<Control> Biggest(Control root, Func<Control, bool> ok) => () =>
         {
             Control best = null; long area = 0;
@@ -177,6 +186,8 @@ namespace SkinManager.App
             return best;
         };
 
+        /// <summary>The tour of a page (by its name), with p the page and header the bar above it; null for a page
+        /// without one.</summary>
         public static List<TutorialStep> For(string page, Control p, Control header)
         {
             switch (page)

@@ -1,4 +1,5 @@
-// Settings: the background picture and how dark it is, plus where the app keeps its files.
+// Settings: the background picture and its colors, your files and app updates, add-ons (Stat Tracker, overlay over
+// the game), tours, which SD card the app uses, frame data accuracy, and the replay folders the Stat Tracker reads.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -10,6 +11,7 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Settings page: one card per group of settings; every change is saved straight away.</summary>
     class SettingsPanel : GlassPanel
     {
         readonly LookSettings _look;
@@ -21,6 +23,8 @@ namespace SkinManager.App
         /// <summary>Asks to save switches that aren't saved yet before the app restarts (false: the user cancelled, or the save failed).</summary>
         public Func<bool> SaveFirst;
 
+        /// <summary>Builds the cards (background, your files and versions, add-ons and the overlay, tours, SD card, frame data,
+        /// replays); changed is called after each change so the app can show it.</summary>
         public SettingsPanel(LookSettings look, Action changed)
         {
             _look = look; _changed = changed;
@@ -105,12 +109,12 @@ namespace SkinManager.App
             }
             hk.SelectedIndexChanged += (s, e) => { _look.HotkeyText = (string)hk.SelectedItem; Changed(); HotkeyNote(); };
             VisibleChanged += (s, e) => { if (Visible) HotkeyNote(); };
-            var sideLabel = Theme.Label("Where the opponent card and slim bar go (Brawl Online's chat is on the left):", Theme.Small, Theme.Muted);
+            var sideLabel = Theme.Label("Where the cards over the game go (you can drag them anywhere; picking here puts them back):", Theme.Small, Theme.Muted);
             sideLabel.Location = new Point(40, 186); sideLabel.AutoSize = false; sideLabel.Size = new Size(540, 20);
             var side = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text, Location = new Point(600, 182) };
             side.Items.AddRange(new object[] { "Top right", "Top left" });
             side.SelectedIndex = look.OverlayLeft == true ? 1 : 0;
-            side.SelectedIndexChanged += (s, e) => { _look.OverlayLeft = side.SelectedIndex == 1 ? (bool?)true : null; Changed(); };
+            side.SelectedIndexChanged += (s, e) => { _look.OverlayLeft = side.SelectedIndex == 1 ? (bool?)true : null; _look.CardSpot = null; _look.ReportSpot = null; Changed(); };
             // the look over the game: themes (seasonal by default), your own color, little animations, and a preview
             var lookLabel = Theme.Label("Overlay look:", Theme.Small, Theme.Muted); lookLabel.Location = new Point(40, 222); lookLabel.AutoSize = true;
             var lookBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text, Location = new Point(140, 218) };
@@ -200,6 +204,8 @@ namespace SkinManager.App
         readonly Panel _replayRows = new Panel { BackColor = Color.Transparent, Height = 24 };
         int _replayAsk;
 
+        /// <summary>Lists the replay folders the Stat Tracker reads (with how many replays each has), with Open and, for ones
+        /// you added, "Stop reading it". Only the newest request fills the list.</summary>
         async void ShowReplayFolders()
         {
             int me = ++_replayAsk;
@@ -243,6 +249,7 @@ namespace SkinManager.App
             _replayRows.ResumeLayout();
         }
 
+        /// <summary>Adds a folder of replays to read, checking first that it has some (or that you want it anyway).</summary>
         void AddReplayFolder()
         {
             using (var dlg = new FolderBrowserDialog { Description = "Pick a folder with your Brawl Online replays (.brep files, loose or in month folders)", ShowNewFolderButton = false })
@@ -259,6 +266,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Saves the replay folders, then tells the Stat Tracker to read them again and refreshes the list.</summary>
         void ReplayFoldersSaved()
         {
             if (_look.ReplayFolders != null && _look.ReplayFolders.Count == 0) _look.ReplayFolders = null;
@@ -274,6 +282,8 @@ namespace SkinManager.App
             LookSettings.GlowBlue, Color.FromArgb(60, 200, 255), Color.FromArgb(60, 220, 140), Color.FromArgb(240, 240, 250),
         };
 
+        /// <summary>A row of color dots (and "Other..." for any color) for the overlay's own color; picking one switches the
+        /// overlay look to "Your own color".</summary>
         void AddOverlaySwatches(Control card, int y, Action pickedCustom)
         {
             for (int i = 0; i < Swatches.Length; i++)
@@ -379,6 +389,7 @@ namespace SkinManager.App
             Application.Restart(); Environment.Exit(0);
         }
 
+        /// <summary>Picks a background picture, keeping a copy in the Data folder (and deleting the copy it replaces).</summary>
         void Choose()
         {
             using (var dlg = new OpenFileDialog { Title = "Choose a background picture", Filter = "Pictures|*.png;*.jpg;*.jpeg;*.bmp;*.gif" })
@@ -400,6 +411,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Saves the settings, updates the preview here and tells the app.</summary>
         void Changed()
         {
             _look.Save();
@@ -407,6 +419,7 @@ namespace SkinManager.App
             _changed();
         }
 
+        /// <summary>Draws the background as it will look into the small preview, and says which one is in use.</summary>
         void ShowPreview()
         {
             var b = new Backdrop(); b.Apply(_look);

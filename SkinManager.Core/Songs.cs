@@ -10,6 +10,7 @@ using BrawlLib.SSBB.ResourceNodes.ProjectPlus;
 
 namespace SkinManager.Core
 {
+    /// <summary>One song P+ plays: its file on the card, its title, and the track lists (stages, menus) that play it.</summary>
     public sealed class SongInfo
     {
         public string CardPath;        // /Project+/pf/sound/strm/Melee/Multi-Man Melee 2.brstm
@@ -40,6 +41,7 @@ namespace SkinManager.Core
         public override string ToString() => Title;
     }
 
+    /// <summary>Reads P+'s track lists and stage settings off the card to find its songs and where each one plays.</summary>
     public static class Songs
     {
         public static string StrmFolder => Build.Pf + "/sound/strm";

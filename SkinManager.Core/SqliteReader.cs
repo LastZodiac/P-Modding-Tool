@@ -9,6 +9,8 @@ using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>Reads tables out of an SQLite file (Brawl Online's match history) without any database
+    /// library.</summary>
     public sealed class SqliteReader
     {
         readonly byte[] _db;
@@ -16,6 +18,8 @@ namespace SkinManager.Core
         readonly int _pageSize, _usable;
         readonly Dictionary<string, (uint Root, List<string> Columns)> _tables = new Dictionary<string, (uint, List<string>)>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>Opens a database file (and its -wal file, if any) without getting in the way of the program using
+        /// it.</summary>
         public static SqliteReader Open(string path)
         {
             byte[] db = ReadShared(path), wal = null;
@@ -30,6 +34,8 @@ namespace SkinManager.Core
             using (var m = new MemoryStream()) { s.CopyTo(m); return m.ToArray(); }
         }
 
+        /// <summary>Reads the file's header and its list of tables, with any committed changes from the write-ahead log
+        /// on top.</summary>
         public SqliteReader(byte[] db, byte[] wal = null)
         {
             if (db.Length < 100 || Encoding.ASCII.GetString(db, 0, 15) != "SQLite format 3") throw new InvalidDataException("That isn't an SQLite database.");
@@ -62,6 +68,8 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>One page of the database (the log's newer copy when it has one); offset is where the page's own
+        /// data starts.</summary>
         byte[] Page(uint n, out int offset)
         {
             offset = n == 1 ? 100 : 0;   // page 1 starts with the file header
@@ -72,7 +80,6 @@ namespace SkinManager.Core
         }
 
         public bool HasTable(string name) => _tables.ContainsKey(name);
-        public IReadOnlyList<string> ColumnsOf(string table) => _tables[table].Columns;
 
         /// <summary>Every row of a table as column name -> value (long, double, string, byte[] or null).</summary>
         public IEnumerable<Dictionary<string, object>> Table(string name)
@@ -121,6 +128,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>A row's stored bytes, following its overflow pages when it's too big for one page.</summary>
         byte[] Payload(byte[] p, int at, long size)
         {
             int x = _usable - 35;
@@ -142,6 +150,7 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Splits a row's bytes into its values (long, double, string, byte[] or null).</summary>
         static List<object> Record(byte[] r)
         {
             int at = 0;
@@ -200,6 +209,7 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Reads SQLite's 1-9 byte variable-length number and moves past it.</summary>
         static long Varint(byte[] b, ref int at)
         {
             long v = 0;

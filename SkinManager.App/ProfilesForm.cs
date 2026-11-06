@@ -10,6 +10,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "Your profiles" window. It doesn't change anything itself: each button calls back to the main
+    /// window.</summary>
     class ProfilesForm : Form
     {
         readonly Library _lib;
@@ -22,6 +24,8 @@ namespace SkinManager.App
                         _share = Theme.Secondary("Share..."), _open = Theme.Secondary("Open a shared one...");
         readonly Label _note = Theme.Label("", Theme.Small, Theme.Muted);
 
+        /// <summary>Lays out the list and buttons; switchTo, create, rename, copy and delete are the main window's own
+        /// actions.</summary>
         public ProfilesForm(Library lib, Func<string, bool> switchTo, Action create, Action<string> rename, Action<string> copy, Action<string> delete)
         {
             _lib = lib; _switch = switchTo; _new = create; _rename = rename; _copy = copy; _delete = delete;
@@ -57,6 +61,7 @@ namespace SkinManager.App
             _list.Select(_lib.ActiveProfile ?? ProfileList.AsItComes);
         }
 
+        /// <summary>Lists the profiles again (with "P+ as it comes" last) after something changed.</summary>
         void Fill()
         {
             var rows = _lib.Profiles.Select(p => new ProfileList.Row { Name = p.Name, Mods = p.On.Count, InUse = _lib.ActiveProfile == p.Name }).ToList();
@@ -65,6 +70,7 @@ namespace SkinManager.App
             Update2();
         }
 
+        /// <summary>Turns the buttons on or off for the picked profile and says why when they're off.</summary>
         void Update2()
         {
             var r = _list.SelectedRow;
@@ -80,6 +86,8 @@ namespace SkinManager.App
     class ProfileList : Control
     {
         public const string AsItComes = Library.DefaultName;
+        /// <summary>One profile in the list: its name, how many mods it turns on, and whether it's in use or can't be
+        /// changed.</summary>
         public sealed class Row { public string Name; public int Mods; public bool InUse, Locked; }
         List<Row> _rows = new List<Row>();
         int _sel = -1, _scroll;
@@ -88,6 +96,7 @@ namespace SkinManager.App
         public Row SelectedRow => _sel >= 0 && _sel < _rows.Count ? _rows[_sel] : null;
         public string SelectedName => SelectedRow?.Locked == true ? null : SelectedRow?.Name;
 
+        /// <summary>Sets up drawing, wheel scrolling, and click to pick / double-click to switch.</summary>
         public ProfileList()
         {
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
@@ -98,6 +107,7 @@ namespace SkinManager.App
             MouseDoubleClick += (s, e) => { if ((e.Y + _scroll) / H == _sel) Activated?.Invoke(); };
         }
 
+        /// <summary>Shows new rows, keeping the same profile picked (or the one in use if it's gone).</summary>
         public void Show(List<Row> rows)
         {
             string keep = SelectedRow?.Name;

@@ -7,12 +7,15 @@ using BrawlLib.Internal;
 
 namespace SkinManager.Core
 {
+    /// <summary>The part of model swapping for models made from P+'s own model, which need no lining up.</summary>
     public static partial class ModelSwap
     {
+        /// <summary>P+'s own model's points sorted into small boxes of space, so the point a new point sits on is found fast.</summary>
         sealed class ExactGrid
         {
             readonly Dictionary<long, List<RefPoint>> _cells = new Dictionary<long, List<RefPoint>>();
             readonly float _cell;
+            /// <summary>Sorts the points into boxes of the given size.</summary>
             public ExactGrid(List<RefPoint> pts, float cell)
             {
                 _cell = Math.Max(1e-4f, cell);
@@ -37,6 +40,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>How close a point must be to P+'s to count as the same point: 0.4% of the model's height.</summary>
         static float Tolerance(List<RefPoint> refs)
         {
             float h = refs.Max(p => p.P._y) - refs.Min(p => p.P._y);

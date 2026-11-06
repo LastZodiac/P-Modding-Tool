@@ -13,160 +13,15 @@ using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>Stage maps that don't play like P+'s stage: explaining what differs, and putting the map's looks on
+    /// P+'s own file.</summary>
     public static partial class StageCheck
     {
-        // ----- what's different -----
-
-        /// <summary>What differs between a map and P+'s stage, one plain line each (empty: plays the same).</summary>
-        public static List<string> Explain(byte[] map, byte[] original, ICollection<string> program = null)
-        {
-            var lines = new List<string>();
-            var ga = Gameplay(map); var gb = Gameplay(original);
-            var programParts = ProgramParts(gb.Keys.Union(ga.Keys).Where(k => !ga.TryGetValue(k, out var x) || !gb.TryGetValue(k, out var y) || x != y), program);
-            foreach (var part in programParts.Take(4))
-                lines.Add($"{part}: the stage program works with this part directly, and the map's version is built differently " +
-                          (ga.Keys.Any(k => k.StartsWith("model " + part, StringComparison.Ordinal)) ? "(other bones, animations or place in the file)" : "(the map doesn't have it)") +
-                          ". It drives stage events, so online games would go out of sync.");
-            bool Differ(string prefix) => gb.Keys.Union(ga.Keys).Where(k => k.StartsWith(prefix, StringComparison.Ordinal))
-                .Any(k => !ga.TryGetValue(k, out var x) || !gb.TryGetValue(k, out var y) || x != y);
-
-            // floors and platforms
-            if (Differ("collision"))
-            {
-                var fit = HowFarOff(map, original);
-                if (fit.Floors >= 1e6f || float.IsNaN(fit.Floors)) lines.Add("Floors and platforms: completely different. One of the two only has floors that move (like Corneria's Great Fox), so they can't be lined up.");
-                else if (fit.Exact) lines.Add("Floors and platforms: same shape, but some edges are a different kind (a ledge you can or can't grab, a platform you can or can't drop through, or a wall).");
-                else
-                {
-                    string w = fit.Width >= 1 ? $" (the stage is {fit.Width:0} wide)" : "";
-                    if (fit.Floors >= 0.5f) lines.Add($"Floors and platforms: where you stand is off by up to {Units(fit.Floors)}{w}.");
-                    if (fit.Rest >= 0.5f) lines.Add($"Sides and underside of the stage: off by up to {Units(fit.Rest)}{w}.");
-                    if (fit.Floors < 0.5f && fit.Rest < 0.5f) lines.Add("Floors and platforms: a moving part's floor is different.");
-                }
-            }
-            if (Differ("material")) lines.Add("Floor materials: some surfaces are made of something else (footstep sounds and effects, and how slippery they are).");
-
-            // blast zones, camera, spawn points
-            if (Differ("positions"))
-            {
-                var pa = Markers(map); var pb = Markers(original);
-                var found = new List<string>();
-                // markers that all moved by the same amount (P+ re-centered the stage: blast zones, spawns and respawns together)
-                var moved = pb.Where(kv => pa.ContainsKey(kv.Key))
-                    .Select(kv => (name: kv.Key, dx: (float)Math.Round(pa[kv.Key].x - kv.Value.x, 1), dy: (float)Math.Round(pa[kv.Key].y - kv.Value.y, 1)))
-                    .Where(x => Math.Abs(x.dx) >= 0.5f || Math.Abs(x.dy) >= 0.5f).ToList();
-                var together = moved.GroupBy(x => (x.dx, x.dy)).OrderByDescending(g => g.Count()).FirstOrDefault();
-                var inGroup = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (together != null && together.Count() >= 4)
-                {
-                    foreach (var x in together) inGroup.Add(x.name);
-                    var kinds = together.Select(x => x.name.ToLowerInvariant()).Select(n => n.StartsWith("dead") ? "blast zones" : n.StartsWith("player") ? "start points"
-                        : n.StartsWith("rebirth") ? "respawn points" : n.StartsWith("camcntr") ? "camera center" : n.StartsWith("camlimit") ? "camera limits" : n.StartsWith("item") ? "item spots" : null)
-                        .Where(k => k != null).Distinct().ToList();
-                    var (dx, dy) = together.Key;
-                    var dir = new List<string>();
-                    if (Math.Abs(dx) >= 0.05f) dir.Add($"{Units(Math.Abs(dx))} further {(dx > 0 ? "right" : "left")}");
-                    if (Math.Abs(dy) >= 0.05f) dir.Add($"{Units(Math.Abs(dy))} {(dy > 0 ? "higher" : "lower")}");
-                    string list = kinds.Count == 0 ? "position markers" : kinds.Count == 1 ? kinds[0] : string.Join(", ", kinds.Take(kinds.Count - 1)) + " and " + kinds.Last();
-                    lines.Add($"The map's {list} are all {string.Join(" and ", dir)} than P+'s." + (kinds.Count >= 3 && kinds.Contains("blast zones")
-                        ? " They moved together, so P+ most likely re-centered the stage after the map was made." : ""));
-                }
-                foreach (var kv in pb.OrderBy(kv => MarkerOrder(kv.Key)))
-                {
-                    if (!pa.TryGetValue(kv.Key, out var mine)) { if (!string.IsNullOrEmpty(MarkerName(kv.Key))) found.Add(MarkerName(kv.Key) + ": missing in the map"); continue; }
-                    if (inGroup.Contains(kv.Key)) continue;
-                    float dx = mine.x - kv.Value.x, dy = mine.y - kv.Value.y;
-                    if (Math.Abs(dx) < 0.5f && Math.Abs(dy) < 0.5f) continue;
-                    if (MarkerName(kv.Key) == "") continue;
-                    string what = MarkerName(kv.Key) ?? "Marker \"" + kv.Key + "\"";
-                    var parts = new List<string>();
-                    if (Math.Abs(dx) >= 0.5f) parts.Add($"{Units(Math.Abs(dx))} further {(dx > 0 ? "right" : "left")}");
-                    if (Math.Abs(dy) >= 0.5f) parts.Add($"{Units(Math.Abs(dy))} {(dy > 0 ? "higher" : "lower")}");
-                    found.Add(what + ": " + string.Join(" and ", parts));
-                }
-                if (found.Count == 0 && inGroup.Count == 0) lines.Add("Blast zones, camera or spawn points: set up differently (the markers are arranged in another way).");
-                else
-                {
-                    lines.AddRange(found.Take(6));
-                    if (found.Count > 6) lines.Add($"...and {found.Count - 6} more markers.");
-                }
-            }
-
-            // moving platforms
-            foreach (var k in gb.Keys.Where(k => k.StartsWith("platform ", StringComparison.Ordinal)))
-            {
-                string name = k.Substring(9);
-                if (!ga.TryGetValue(k, out var x) || x == "missing") lines.Add($"Moving platform ({name}): the map doesn't have it.");
-                else if (x != gb[k]) lines.Add($"Moving platform ({name}): it moves differently (path, speed or timing).");
-            }
-            foreach (var k in ga.Keys.Where(k => k.StartsWith("platform ", StringComparison.Ordinal) && !gb.ContainsKey(k)))
-                lines.Add($"Moving platform ({k.Substring(9)}): the map has it and P+'s stage doesn't.");
-
-            if (Differ("surfaces")) lines.Add("Surface types (grip, ice and the like) are set up differently.");
-            if (Differ("camera")) lines.Add("Camera settings are different (how far it zooms and follows).");
-            if (Differ("items")) lines.Add("Where items appear is different.");
-            if (Differ("settings")) lines.Add("Other stage settings differ (hazards, stage events and the like).");
-            return lines;
-        }
-
-        static float Median(IEnumerable<float> v) { var l = v.OrderBy(x => x).ToList(); return l.Count == 0 ? 0 : l[l.Count / 2]; }
-
-        static string Units(float v) => v.ToString(v < 10 ? "0.#" : "0", CultureInfo.InvariantCulture) + (Math.Abs(v - 1) < 0.05f ? " unit" : " units");
-
-        /// <summary>Position markers by bone name: where each is (2D, as the game uses them).</summary>
-        static Dictionary<string, (float x, float y)> Markers(byte[] stage)
-        {
-            var result = new Dictionary<string, (float, float)>(StringComparer.OrdinalIgnoreCase);
-            using (var tmp = new TempFile(".pac", stage))
-            lock (BrawlGate.Lock) using (var root = NodeFactory.FromFile(null, tmp.Path))
-                foreach (var m in root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(IsPositionModel))
-                    foreach (var b in m.BoneCache.Cast<MDL0BoneNode>())
-                    {
-                        if (b.Parent is MDL0Node) continue;   // the model's own root
-                        var p = b.Translation;
-                        for (var up = b.Parent as MDL0BoneNode; up != null && !(up.Parent is MDL0Node); up = up.Parent as MDL0BoneNode) { p._x += up.Translation._x; p._y += up.Translation._y; }
-                        if (!result.ContainsKey(b.Name)) result[b.Name] = (p._x, p._y);
-                    }
-            return result;
-        }
-
-        static string MarkerName(string bone)
-        {
-            string b = bone.ToLowerInvariant();
-            if (b == "dead0n") return "Top-left blast zone corner";
-            if (b == "dead1n") return "Bottom-right blast zone corner";
-            if (b == "camlimit0n") return "Camera limit (top-left)";
-            if (b == "camlimit1n") return "Camera limit (bottom-right)";
-            var m = System.Text.RegularExpressions.Regex.Match(b, @"^player(\d)n$");
-            if (m.Success) return $"Player {int.Parse(m.Groups[1].Value) + 1} start point";
-            m = System.Text.RegularExpressions.Regex.Match(b, @"^rebirth(\d)n$");
-            if (m.Success) return $"Respawn point {int.Parse(m.Groups[1].Value) + 1}";
-            if (b.StartsWith("item")) return "Item spawn area";
-            if (System.Text.RegularExpressions.Regex.IsMatch(b, @"^(player|rebirth)\de$")) return "";   // the far end of a start/respawn point: goes with it
-            return null;
-        }
-        static int MarkerOrder(string bone) { string b = bone.ToLowerInvariant(); return b.StartsWith("dead") ? 0 : b.StartsWith("camlimit") ? 1 : b.StartsWith("player") ? 2 : b.StartsWith("rebirth") ? 3 : 4; }
 
         // ----- shapes -----
 
         static string Outline(ResourceNode root) => string.Join(";", Surfaces(root).Select(f => string.Format(CultureInfo.InvariantCulture,
             "{0}{1:0.#},{2:0.#},{3:0.#},{4:0.#}", f.floor ? "F" : "W", f.x1, f.y1, f.x2, f.y2)));
-
-        static List<(float x1, float y1, float x2, float y2, bool floor)> FromOutline(string o) =>
-            (o ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(p =>
-            {
-                var n = p.Substring(1).Split(',').Select(x => float.Parse(x, CultureInfo.InvariantCulture)).ToArray();
-                return (n[0], n[1], n[2], n[3], p[0] == 'F');
-            }).ToList();
-
-        /// <summary>How far apart two stages' shapes are (from their fingerprints' outlines); null when one has none.</summary>
-        public static Fit ShapeFit(Dictionary<string, string> map, Dictionary<string, string> pplus)
-        {
-            if (map == null || pplus == null || !map.TryGetValue("outline", out var a) || !pplus.TryGetValue("outline", out var b)) return null;
-            var sa = FromOutline(a); var sb = FromOutline(b);
-            if (sa.Count == 0 || sb.Count == 0) return null;
-            return FitOf(sa, sb);
-        }
 
         // ----- the map's looks on P+'s stage -----
 
@@ -182,6 +37,20 @@ namespace SkinManager.Core
         }
 
         static IEnumerable<ResourceNode> All(ResourceNode n) { foreach (var c in n.Children) { yield return c; foreach (var d in All(c)) yield return d; } }
+        /// <summary>The bones P+'s collision rides on (the map's models with a bone by one of these names are its copies of
+        /// P+'s moving parts, and stay out: P+'s move instead).</summary>
+        static HashSet<string> RideBones(ResourceNode b) =>
+            new HashSet<string>(b.FindChildrenByType(null, ResourceType.CollisionDef).OfType<CollisionNode>()
+                .SelectMany(c => c.Children.OfType<CollisionObject>()).Select(o => o._boneName).Where(n => !string.IsNullOrEmpty(n)), StringComparer.Ordinal);
+
+        /// <summary>How wide a model is drawn at rest. (BrawlLib's GetBox reads points placed by ApplyCHR; on a model just read
+        /// it measured 0, so every part P+'s collision rides on kept P+'s look, however wide: fixed 2026-11-04.)</summary>
+        static float ModelWidth(MDL0Node m)
+        {
+            try { m.Populate(); m.ApplyCHR(null, 0); var box = m.GetBox(); float w = box.Max._x - box.Min._x; return float.IsNaN(w) || w < 0 ? 0 : w; }
+            catch { return 0; }
+        }
+
         static int Polys(MDL0Node m) => m.FindChild("Objects", false)?.Children.Count ?? 0;
 
         /// <summary>P+'s pictures that nothing left visible uses (its scenery is out of sight once the map's looks are on):
@@ -217,6 +86,10 @@ namespace SkinManager.Core
                 foreach (var t in root.FindChildrenByType(null, ResourceType.TEX0).OfType<TEX0Node>().ToList())
                 {
                     if (used.Contains(t.Name) || t.Width * t.Height <= 16) continue;
+                    // a picture drawn with a palette stays as it is: made a plain picture, its model (still loaded by the game,
+                    // even with nothing left to draw) would ask for a palette it no longer has, and the game crashes loading the
+                    // stage (Snowman's Land on Dream Land, 2026-11-04: Dream Land's Scarfy). Same for pictures sharing their data.
+                    if (t.HasPalette || t.SharesData) continue;
                     t.ReplaceRaw(BrawlLib.Wii.Textures.TextureConverter.I4.EncodeTEX0Texture(tiny, 1));
                     n++;
                 }
@@ -261,8 +134,123 @@ namespace SkinManager.Core
         static List<BRRESNode> ModelFiles(ResourceNode root) =>
             root.FindChildrenByType(null, ResourceType.BRES).OfType<BRRESNode>().Where(b => b.FindChildrenByType(null, ResourceType.MDL0).Any()).ToList();
 
+        /// <summary>Did an older version turn one of P+'s palette pictures into a plain one (ShrinkHidden, before
+        /// 2026-11-04)? The game then can't put the picture on its model and crashes loading the stage. stage: the install;
+        /// original: P+'s file.</summary>
+        public static bool BrokenPictures(byte[] stage, byte[] original)
+        {
+            try
+            {
+                lock (BrawlGate.Lock)
+                using (var tA = new TempFile(".pac", stage))
+                using (var tB = new TempFile(".pac", original))
+                using (var a = NodeFactory.FromFile(null, tA.Path))
+                using (var b = NodeFactory.FromFile(null, tB.Path))
+                {
+                    var mine = a.FindChildrenByType(null, ResourceType.TEX0).OfType<TEX0Node>().GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.First().HasPalette, StringComparer.Ordinal);
+                    return b.FindChildrenByType(null, ResourceType.TEX0).OfType<TEX0Node>().Any(x => x.HasPalette && mine.TryGetValue(x.Name, out bool pal) && !pal);
+                }
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Is a part of P+'s file only far-off background (none of its scenery anywhere near where the fighters
+        /// are) that the stage program doesn't name? Some stage programs draw such a part their own way (Green Hill Zone's
+        /// distant hills, Frigate's husk), so a map's ground put there shows far off P+'s floor (Emerald Coast on Green Hill
+        /// Zone, 2026-11-04: its ground missing, its boardwalk huge in front of the camera).</summary>
+        static bool FarBackground(BRRESNode part, List<(float x1, float y1, float x2, float y2, bool floor)> surfaces, ICollection<string> program)
+        {
+            var floors = surfaces.Where(s => s.floor).ToList();
+            if (floors.Count == 0) return false;
+            var models = part.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().ToList();
+            if (models.Any(m => program.Contains(m.Name) || m.BoneCache.Any(x => program.Contains(x.Name)))) return false;
+            float x0 = floors.Min(s => Math.Min(s.x1, s.x2)) - 20, x1 = floors.Max(s => Math.Max(s.x1, s.x2)) + 20;
+            float y0 = floors.Min(s => Math.Min(s.y1, s.y2)) - 40, y1 = floors.Max(s => Math.Max(s.y1, s.y2)) + 40;
+            try
+            {
+                foreach (var (p, q, r) in ModelPreview.Triangles(models.Where(m => Polys(m) > 0)))
+                    foreach (var v in new[] { p, q, r })
+                        if (v._x >= x0 && v._x <= x1 && v._y >= y0 && v._y <= y1 && Math.Abs(v._z) <= 40) return false;
+            }
+            catch { return false; }
+            return true;
+        }
+
+        /// <summary>Of some parts of a stage, the one whose scenery covers its main floor: the ground the fighters stand on
+        /// (null if none does). Checked at 11 points along the longest floor, at the fighters' depth.</summary>
+        static BRRESNode GroundPart(List<BRRESNode> parts, List<(float x1, float y1, float x2, float y2, bool floor)> surfaces)
+        {
+            var floor = surfaces.Where(s => s.floor).OrderByDescending(s => Math.Abs(s.x2 - s.x1)).FirstOrDefault();
+            if (parts.Count == 0 || Math.Abs(floor.x2 - floor.x1) < 1) return null;
+            BRRESNode best = null; int bestHits = 0;
+            foreach (var part in parts)
+            {
+                List<(BrawlLib.Internal.Vector3 a, BrawlLib.Internal.Vector3 b, BrawlLib.Internal.Vector3 c)> tris;
+                try { tris = ModelPreview.Triangles(part.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(m => Polys(m) > 0)); }
+                catch { continue; }
+                int hits = 0;
+                for (int s = 0; s <= 10; s++)
+                {
+                    float u = 0.05f + 0.9f * s / 10, x = floor.x1 + (floor.x2 - floor.x1) * u, y = floor.y1 + (floor.y2 - floor.y1) * u;
+                    if (tris.Any(t => new[] { -5f, 0f, 5f }.Any(z => SurfaceAt(t.a, t.b, t.c, x, z) is float h && Math.Abs(h - y) < 3))) hits++;
+                }
+                if (hits > bestHits) { bestHits = hits; best = part; }
+            }
+            return bestHits >= 6 ? best : null;   // most of the floor: a few touches are props, not the ground
+        }
+
+        /// <summary>The height of a triangle straight above or below (x, z), or null if it isn't there.</summary>
+        static float? SurfaceAt(BrawlLib.Internal.Vector3 a, BrawlLib.Internal.Vector3 b, BrawlLib.Internal.Vector3 c, float x, float z)
+        {
+            if (x < Math.Min(a._x, Math.Min(b._x, c._x)) || x > Math.Max(a._x, Math.Max(b._x, c._x))) return null;
+            float d = (b._z - c._z) * (a._x - c._x) + (c._x - b._x) * (a._z - c._z);
+            if (Math.Abs(d) < 1e-6) return null;
+            float l1 = ((b._z - c._z) * (x - c._x) + (c._x - b._x) * (z - c._z)) / d, l2 = ((c._z - a._z) * (x - c._x) + (a._x - c._x) * (z - c._z)) / d, l3 = 1 - l1 - l2;
+            if (l1 < 0 || l2 < 0 || l3 < 0) return null;
+            return l1 * a._y + l2 * b._y + l3 * c._y;
+        }
+
+        /// <summary>The part of P+'s file a map's looks go in: P+'s biggest part with nothing gameplay uses in it (always
+        /// drawn), unless that's far-off background the program doesn't name (see FarBackground): then the part with P+'s
+        /// own ground in it. P+'s file must be posed at rest.</summary>
+        static BRRESNode LooksPart(List<BRRESNode> files, Func<BRRESNode, bool> pure, Func<BRRESNode, int> size,
+                                   List<(float x1, float y1, float x2, float y2, bool floor)> surfaces, ICollection<string> program)
+        {
+            var biggest = files.Where(pure).OrderByDescending(size).FirstOrDefault(f => size(f) > 0);
+            if (biggest == null || !FarBackground(biggest, surfaces, program)) return biggest;
+            return GroundPart(files.Where(pure).Where(f => size(f) > 0).ToList(), surfaces) ?? biggest;
+        }
+
+        /// <summary>Did an older version put a looks install in a part LooksPart wouldn't pick now (far-off background:
+        /// Emerald Coast on Green Hill Zone, Phendrana Husk on Frigate)? stage: the install; original: P+'s file.</summary>
+        public static bool LooksMisplaced(byte[] stage, byte[] original, ICollection<string> program)
+        {
+            try
+            {
+                program = program ?? new HashSet<string>();
+                lock (BrawlGate.Lock)
+                using (var tA = new TempFile(".pac", stage))
+                using (var tB = new TempFile(".pac", original))
+                using (var a = NodeFactory.FromFile(null, tA.Path))
+                using (var b = NodeFactory.FromFile(null, tB.Path))
+                {
+                    var keep = GameplayModels(b);
+                    bool Pure(BRRESNode f) => f.FindChildrenByType(null, ResourceType.MDL0).All(m => !keep.Contains(m.Name));
+                    int Size(BRRESNode f) => f.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Sum(Polys);
+                    foreach (var m in b.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>()) try { m.ApplyCHR(null, 0); } catch { }
+                    var want = LooksPart(ModelFiles(b), Pure, Size, Surfaces(original), program);
+                    if (want == null) return false;
+                    // where the looks are now: the install's part with the most to draw (P+'s own pieces were taken out)
+                    var now = ModelFiles(a).Where(Pure).OrderByDescending(Size).FirstOrDefault(f => Size(f) > 0);
+                    return now != null && now.Name != want.Name;
+                }
+            }
+            catch { return false; }
+        }
+
         /// <param name="program">names P+'s stage program looks up (StageIndex.ProgramNames): those parts stay exactly P+'s</param>
-        public static LooksResult SwapLooks(byte[] map, byte[] original, ICollection<string> program = null)
+        /// <param name="keepPPlus">P+'s pieces ("model/object") that stay in sight: floors the map draws nothing for (FitPieces)</param>
+        public static LooksResult SwapLooks(byte[] map, byte[] original, ICollection<string> program = null, ICollection<string> keepPPlus = null)
         {
             program = program ?? new HashSet<string>();
             var r = new LooksResult();
@@ -284,8 +272,10 @@ namespace SkinManager.Core
                             var files = ModelFiles(b);
                             bool Pure(BRRESNode f) => f.FindChildrenByType(null, ResourceType.MDL0).All(m => !keep.Contains(m.Name));
                             int Size(BRRESNode f) => f.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Sum(Polys);
-                            // P+'s main scenery part: the biggest part with nothing gameplay uses in it (always drawn)
-                            var main = files.Where(Pure).OrderByDescending(Size).FirstOrDefault(f => Size(f) > 0);
+                            // P+'s main scenery part (see LooksPart: the biggest part with nothing gameplay uses in it, unless that's
+                            // far-off background the program draws its own way: then the part with P+'s ground)
+                            foreach (var m in b.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>()) try { m.ApplyCHR(null, 0); } catch { }
+                            var main = LooksPart(files, Pure, Size, Surfaces(original), program);
                             if (main == null) { r.Problem = "P+'s stage keeps its scenery together with its gameplay parts, so there's no place to put the map's looks."; return r; }
                             // the map's animations go first (the one a stage plays) only where the stage program uses nothing:
                             // otherwise after P+'s, so nothing the program times its events by changes
@@ -295,25 +285,28 @@ namespace SkinManager.Core
                             // P+'s scenery out of sight: its pieces go, its bones and names stay (so nothing the stage program looks for is missing)
                             var surf = Surfaces(original);
                             float width = surf.Count == 0 ? 0 : surf.Max(s => Math.Max(s.x1, s.x2)) - surf.Min(s => Math.Min(s.x1, s.x2));
+                            var pMoving = MovingGameplay(b);
                             foreach (var f in files)
                                 foreach (var m in f.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(m => Polys(m) > 0).ToList())
                                 {
                                     if (keep.Contains(m.Name))
                                     {
                                         // a moving platform keeps P+'s look (the map's version wouldn't move with it); a part the whole stage rides on goes
-                                        float w = 0;
-                                        try { m.Populate(); var box = m.GetBox(); w = box.Max._x - box.Min._x; } catch { }
-                                        if (width <= 0 || w < width * 0.5f) { r.KeptLooks.Add(m.Name); continue; }
+                                        // (a part that moves always keeps it, however wide: the map's copy of it is left out too)
+                                        float w = pMoving.Contains(m.Name) ? 0 : ModelWidth(m);
+                                        if (pMoving.Contains(m.Name) || width <= 0 || w < width * 0.5f) { r.KeptLooks.Add(m.Name); continue; }
                                     }
                                     foreach (var obj in m.FindChildrenByType(null, ResourceType.MDL0Object).OfType<MDL0ObjectNode>().ToList())
+                                        if (keepPPlus == null || !keepPPlus.Contains(m.Name + "/" + obj.Name))   // P+'s own look for a floor the map doesn't draw (see FitPieces)
                                         obj.Remove(true, true, true, true, true, true, true, true, true, true, true, true);
                                 }
 
                             // the map's looks: every model with something to draw that its own gameplay doesn't use
-                            var mapKeep = GameplayModels(a);
+                            // (a part collision rides on that doesn't move is only scenery here: Yoshi's Story 64 draws its whole stage
+                            // in one; left out, its ground would be missing; 2026-11-04)
+                            var mapKeep = MovingGameplay(a);
                             // the map's own copy of a moving platform (it has the bone P+'s platform floor rides on): left out, P+'s moves instead
-                            var rideBones = new HashSet<string>(b.FindChildrenByType(null, ResourceType.CollisionDef).OfType<CollisionNode>()
-                                .SelectMany(c => c.Children.OfType<CollisionObject>()).Select(o => o._boneName).Where(n => !string.IsNullOrEmpty(n)), StringComparer.Ordinal);
+                            var rideBones = RideBones(b);
                             foreach (var m in a.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>())
                                 if (!mapKeep.Contains(m.Name) && Polys(m) > 0 && m.BoneCache.Cast<MDL0BoneNode>().Any(x => rideBones.Contains(x.Name)))
                                 { mapKeep.Add(m.Name); r.PlatformsLeftOut++; }

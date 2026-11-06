@@ -36,6 +36,8 @@ namespace SkinManager.Core
         public string Region =>      // its part of the preview picture
             Button == 0 ? "main" : Button == 0x40 ? "L" : Button == 0x20 ? "R" : Button == 0x10 ? "Z" : null;
 
+        /// <summary>How you get this version on the stage select, in words: "just pick it", "hold L+Z", or its entry in
+        /// the L or R list.</summary>
         public string HowToPick
         {
             get
@@ -57,6 +59,8 @@ namespace SkinManager.Core
         public string Text => Where + ", " + HowToPick + (SubStage != null ? $" ({SubStage})" : "");
     }
 
+    /// <summary>P+'s stage select screen as read from the card: where each stage file shows up and how to pick it, and
+    /// its pictures.</summary>
     public sealed class StageSelect
     {
         public static string PicturesFile => Build.Pf + "/menu2/sc_selmap.pac";
@@ -66,6 +70,7 @@ namespace SkinManager.Core
 
         // the preview picture's parts (312x112): three thumbnails on top, a line, the stage below
         public static readonly Size PreviewSize = new Size(312, 112);
+        /// <summary>Where a part ("main", "L", "R", "Z") sits in the preview picture.</summary>
         public static Rectangle RegionRect(string region) =>
             region == "L" ? new Rectangle(0, 0, 76, 44) : region == "R" ? new Rectangle(78, 0, 156, 44) : region == "Z" ? new Rectangle(236, 0, 76, 44)
             : new Rectangle(0, 46, 312, 66);
@@ -197,16 +202,6 @@ namespace SkinManager.Core
         /// <summary>Every way to get every stage file, slot by slot.</summary>
         public List<StageSpot> All => _byFile.Values.SelectMany(x => x).ToList();
 
-        /// <summary>The stage files you get by just picking a slot's icon (Smashville: its five times of day).</summary>
-        public List<string> FrontFiles(int slot) =>
-            _byFile.Where(kv => kv.Value.Any(x => x.Slot == slot && x.Button == 0)).Select(kv => kv.Key).ToList();
-
-        public string WhereText(string cardPath)
-        {
-            var s = SpotsOf(cardPath);
-            return s.Count == 0 ? null : string.Join("; or ", s.Take(3).Select(x => x.Text));
-        }
-
         /// <summary>Reads the stage select from the card. original: a stage slot list as P+ made it (when the app changed it
         /// for a stage swap), so a swap doesn't change what counts as P+'s own version.</summary>
         public static StageSelect Read(Fat32Image card, Func<string, byte[]> original = null)
@@ -324,6 +319,8 @@ namespace SkinManager.Core
             return result;
         }
 
+        /// <summary>The name of an L or R list entry ("Beach Concert"), from its file name in the slot's stagelist
+        /// folder; null if it isn't there.</summary>
         static string ListEntry(Fat32Image card, string root, int slot, ushort button)
         {
             try

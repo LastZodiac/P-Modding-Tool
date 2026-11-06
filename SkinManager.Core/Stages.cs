@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>One stage file on the card and how it's shown: the stage's name and which version of it this is.</summary>
     public sealed class StageFile
     {
         public string CardPath;      // /Project+/pf/stage/melee/STGBATTLEFIELD_L_BF_MELEE.pac
@@ -24,6 +25,7 @@ namespace SkinManager.Core
         public override string ToString() => Label;
     }
 
+    /// <summary>Stage files on the card: finding them, and turning file names into names players know.</summary>
     public static class Stages
     {
         // Brawl's own file names for stages P+ renamed
@@ -32,6 +34,7 @@ namespace SkinManager.Core
             ["STGFINAL"] = "STGFINALDESTINATION", ["STGGREENHILL"] = "STGGREENHILLZONE", ["STGSTADIUM"] = "STGPOKEMONSTADIUM",
             ["STGVILLAGE"] = "STGSMASHVILLE", ["STGBATTLE"] = "STGBATTLEFIELD", ["STGDXGREENS"] = "STGFOUNTAINOFDREAMS",
             ["STGDXYORSTER"] = "STGYOSHISSTORY", ["STGPUPUPU"] = "STGDREAMLAND", ["STGDXPSTADIUM"] = "STGPOKEMONSTADIUM",
+            ["STGMANSION"] = "STGLUIGISMANSION", ["STGLUIGIMANSION"] = "STGLUIGISMANSION",
         };
         // short names people use in download titles
         static readonly Dictionary<string, string> ShortNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -68,7 +71,21 @@ namespace SkinManager.Core
                 if (ShortNames.TryGetValue(w, out var b)) Add(b);
             string fileBase = Describe(stageFile ?? "").Base;
             Add(OldNames.TryGetValue(fileBase, out var renamed) ? renamed : fileBase);
+            // a file named one letter off one of P+'s (STGLUIGIMANSION for P+'s STGLUIGISMANSION): an older or other build's name
+            if (result.Count == 0 && fileBase != null && fileBase.Length >= 10)
+                foreach (var b in bases.Where(b => b.Length >= 10 && OneOff(b, fileBase))) Add(b);
             return result;
+        }
+
+        /// <summary>Are two names the same but for one letter added, dropped or changed (case ignored)?</summary>
+        static bool OneOff(string a, string b)
+        {
+            a = a.ToUpperInvariant(); b = b.ToUpperInvariant();
+            if (a == b || Math.Abs(a.Length - b.Length) > 1) return false;
+            int i = 0; while (i < a.Length && i < b.Length && a[i] == b[i]) i++;
+            // after the first difference the rest must match, skipping that letter in the longer one (or in both: a change)
+            return a.Length == b.Length ? a.Substring(i + 1) == b.Substring(i + 1)
+                 : a.Length > b.Length ? a.Substring(i + 1) == b.Substring(i) : a.Substring(i) == b.Substring(i + 1);
         }
 
         /// <summary>The P+ stages a download's title says it's for ("Emerald Coast (P+ GHZ 1:1)" -> Green Hill Zone), by base name.</summary>
@@ -157,21 +174,6 @@ namespace SkinManager.Core
             catch { return named; }
         }
 
-        /// <summary>A numbered stage file (Project M's STGVILLAGE_02) goes on the P+ version with the same number (_02_DUSK).</summary>
-        public static bool SameNumber(string stageFile, StageFile target)
-        {
-            var m = Regex.Match(Path.GetFileNameWithoutExtension(stageFile ?? ""), @"^STG[A-Za-z]+_(\d\d)$", RegexOptions.IgnoreCase);
-            return m.Success && target.Suffix.StartsWith("_" + m.Groups[1].Value, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>P+ stage versions whose own name (FOD_SAURIA) shows up in a download's title ("Fountain of Sauria"):
-        /// the same stage, already in P+.</summary>
-        public static List<StageFile> AlreadyInPPlus(string downloadName, IEnumerable<StageFile> all)
-        {
-            string plain = new string((downloadName ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
-            return all.Where(s => !s.IsMain && s.Suffix.Split('_').Any(w => w.Length >= 5 && !Regex.IsMatch(w, @"^\d+$") && plain.Contains(w.ToLowerInvariant()))).ToList();
-        }
-
         public static string Folder => Build.Pf + "/stage/melee";
 
         static readonly Dictionary<string, string> Names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -198,6 +200,8 @@ namespace SkinManager.Core
         static readonly HashSet<string> Short = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { "BF", "FD", "SV", "PS1", "PS2", "BC", "CS", "DL", "DS", "DP", "FH", "FOD", "GHZ", "KJ", "LM", "MC", "MK3", "NF", "SBG", "SSZ", "TOT", "WL", "YI", "CSC", "DED", "N64", "GBA", "P+", "X", "64", "OOT", "SSE" };
 
+        /// <summary>Turns a stage file's path into a stage name and version ("Battlefield", "L: BF Melee") from its
+        /// file name.</summary>
         public static StageFile Describe(string cardPath)
         {
             string name = Path.GetFileNameWithoutExtension(cardPath);
@@ -218,6 +222,8 @@ namespace SkinManager.Core
             return new StageFile { CardPath = cardPath, Base = bas, Suffix = suffix, StageName = stage, Version = version };
         }
 
+        /// <summary>Makes one word of a file name readable: known short names and words with numbers in capitals,
+        /// others in Title Case.</summary>
         static string Pretty(string word)
         {
             if (Short.Contains(word) || Regex.IsMatch(word, @"\d")) return word.ToUpperInvariant();
@@ -240,6 +246,7 @@ namespace SkinManager.Core
     /// <summary>Gameplay fingerprints of P+'s own stage files, kept in a file so they're worked out once.</summary>
     public sealed class StageIndex
     {
+        /// <summary>One stage file's saved fingerprint, as it's written in the index file.</summary>
         [DataContract]
         sealed class Entry
         {
@@ -253,9 +260,10 @@ namespace SkinManager.Core
         readonly string _file;
         readonly Dictionary<string, Entry> _byPath = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>Loads the saved fingerprints; a damaged file is ignored and they get worked out again.</summary>
         public StageIndex(string dataFolder)
         {
-            _file = Path.Combine(dataFolder, "stage-index-4.json");   // -2: fingerprints compare content, not bytes
+            _file = Path.Combine(dataFolder, "stage-index-4.json");   // the number goes up when what a fingerprint holds changes, so an older index is left alone and made again
             try
             {
                 if (File.Exists(_file))
@@ -265,6 +273,8 @@ namespace SkinManager.Core
             catch { _byPath.Clear(); }
         }
 
+        /// <summary>Writes the index to a temporary file first and then swaps it in, so a crash can't leave half a
+        /// file.</summary>
         void Save()
         {
             try
@@ -294,41 +304,11 @@ namespace SkinManager.Core
             return g;
         }
 
-        public sealed class Near
-        {
-            public StageFile Stage;
-            public List<string> Differences;
-            public bool FloorsDiffer;
-        }
-
-        /// <summary>P+'s stages that come closest to a stage file that doesn't match any exactly:
-        /// the ones with the same name first, then the fewest differences.</summary>
-        public List<Near> Closest(Fat32Image card, Library lib, Dictionary<string, string> mine, string baseName, int count = 4, Func<StageFile, bool> allowed = null)
-        {
-            var result = new List<Near>();
-            foreach (var s in Stages.All(card))
-            {
-                if (allowed != null && !allowed(s)) continue;
-                Dictionary<string, string> theirs;
-                try { theirs = Of(card, lib, s.CardPath); } catch { continue; }
-                if (theirs == null || theirs.ContainsKey("unreadable")) continue;
-                result.Add(new Near { Stage = s, Differences = StageCheck.Differences(mine, theirs), FloorsDiffer = StageCheck.FloorsDiffer(mine, theirs) });
-            }
-            return result.Where(n => n.Differences.Count > 0)
-                .OrderBy(n => string.Equals(n.Stage.Base, baseName, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .ThenBy(n => n.FloorsDiffer ? 1 : 0)
-                .ThenBy(n => n.Differences.Count)
-                .ThenBy(n => n.Stage.IsMain ? 0 : 1)
-                .Take(count).ToList();
-        }
-
         // ----- the stage programs -----
 
         Dictionary<string, (string TrackList, string Module)> _info;
         readonly Dictionary<string, HashSet<string>> _programNames = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>The names a P+ stage's program looks up in its stage file (every text in the program file, like
-        /// "StgGreenhillMain"). Models with these names must be exactly P+'s for the stage to play the same.</summary>
         /// <summary>The stage program (module) a stage file on the card runs on, or null.</summary>
         public string ProgramOf(Fat32Image card, string cardPath)
         {
@@ -337,6 +317,8 @@ namespace SkinManager.Core
             return _info.TryGetValue(stem, out var i) && !string.IsNullOrEmpty(i.Module) ? i.Module : Stages.MadeFor(cardPath, _info);
         }
 
+        /// <summary>The names a P+ stage's program looks up in its stage file (every text in the program file, like
+        /// "StgGreenhillMain"). Models with these names must be exactly P+'s for the stage to play the same.</summary>
         public HashSet<string> ProgramNames(Fat32Image card, string cardPath)
         {
             if (_info == null) { try { _info = Songs.StageInfo(card); } catch { _info = new Dictionary<string, (string, string)>(); } }
@@ -362,35 +344,6 @@ namespace SkinManager.Core
             }
             catch { }
             return _programNames[module] = names;
-        }
-
-        /// <summary>P+'s stages shaped most like a map (where you stand lines up best), any stage program.</summary>
-        public List<(StageFile Stage, StageCheck.Fit Fit)> ByShape(Fat32Image card, Library lib, Dictionary<string, string> mine, int count = 3, float within = 10f)
-        {
-            var result = new List<(StageFile, StageCheck.Fit)>();
-            foreach (var s in Stages.All(card))
-            {
-                Dictionary<string, string> theirs;
-                try { theirs = Of(card, lib, s.CardPath); } catch { continue; }
-                var fit = StageCheck.ShapeFit(mine, theirs);
-                if (fit != null && fit.Floors <= within) result.Add((s, fit));
-            }
-            return result.OrderBy(x => x.Item2.Floors).ThenBy(x => x.Item2.Rest).ThenBy(x => x.Item1.IsMain ? 0 : 1).Take(count).ToList();
-        }
-
-        /// <summary>P+'s stages a stage file plays exactly like (the ones it can safely replace).</summary>
-        public List<StageFile> Matches(Fat32Image card, Library lib, Dictionary<string, string> mine, Action<int, int> progress = null, Func<StageFile, bool> allowed = null)
-        {
-            var all = Stages.All(card);
-            var result = new List<StageFile>();
-            for (int i = 0; i < all.Count; i++)
-            {
-                progress?.Invoke(i, all.Count);
-                Dictionary<string, string> theirs;
-                try { theirs = Of(card, lib, all[i].CardPath); } catch { continue; }
-                if (theirs != null && StageCheck.Compare(mine, theirs, "", ProgramNames(card, all[i].CardPath)).Passed && (allowed == null || allowed(all[i]))) result.Add(all[i]);
-            }
-            return result;
         }
     }
 }

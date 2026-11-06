@@ -12,9 +12,12 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>Finds where Brawl Online's Dolphin draws the game on screen, so overlays can sit on it.</summary>
     static class GameWindow
     {
+        /// <summary>Windows' rectangle, for GetClientRect.</summary>
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+        /// <summary>Windows' point, for ClientToScreen.</summary>
         [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
         delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
         [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr lParam);
@@ -24,15 +27,23 @@ namespace SkinManager.App
         [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out RECT r);
         [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
 
+        /// <summary>Brawl Online's Dolphin was running at the last Find (the app then does its own work at a lower priority,
+        /// so the game always comes first).</summary>
+        public static bool Running { get; private set; }
+
         /// <summary>Where the game is drawn on screen (the biggest visible window of Brawl Online's Dolphin), or null.</summary>
         public static Rectangle? Find(BrawlOnlineInstall install)
         {
+            var procs = new Process[0];
             try
             {
-                var pids = new HashSet<uint>(Process.GetProcessesByName("Dolphin").Where(p =>
+                procs = Process.GetProcessesByName("Dolphin");
+                // (this app is 32-bit, so it usually can't read a 64-bit Dolphin's path: then any Dolphin counts)
+                var pids = new HashSet<uint>(procs.Where(p =>
                 {
                     try { return install == null || p.MainModule.FileName.StartsWith(install.NetplayFolder, StringComparison.OrdinalIgnoreCase); } catch { return true; }
                 }).Select(p => (uint)p.Id));
+                Running = pids.Count > 0;
                 if (pids.Count == 0) return null;
                 Rectangle? best = null;
                 EnumWindows((h, l) =>
@@ -49,14 +60,16 @@ namespace SkinManager.App
                 return best;
             }
             catch { return null; }   // not on Windows (tests) or no access
+            finally { foreach (var p in procs) p.Dispose(); }   // each holds a handle to the process until disposed (this runs every 2 seconds)
         }
     }
 
-    /// <summary>A window over the game: see-through, clicks go to the game, never takes focus.</summary>
     /// <summary>The look of everything shown over the game: a theme (its colors, and a few little touches drawn in it:
     /// snow, bats, stars...), picked in Settings. "Seasonal" follows the calendar: Halloween in October, Christmas in December.</summary>
     static class OverlayLook
     {
+        /// <summary>One overlay theme: its name, two accent colours, two background colours, and its little touches
+        /// (snow, bats, stars, or none).</summary>
         public sealed class Look
         {
             public string Id, Name; public Color Accent, Accent2, Back, Back2; public string Deco;
@@ -76,6 +89,8 @@ namespace SkinManager.App
         public static Color? CustomAccent;
         public static bool Effects = true;
 
+        /// <summary>The theme in use: the one picked, the season's for "seasonal", or one made from your colour for
+        /// "custom".</summary>
         public static Look Current
         {
             get
@@ -166,6 +181,7 @@ namespace SkinManager.App
         }
     }
 
+    /// <summary>A window over the game: see-through, clicks go to the game, never takes focus.</summary>
     class OverlayForm : Form
     {
         public double BaseOpacity = 0.86;   // how see-through it is when fully in
@@ -174,12 +190,16 @@ namespace SkinManager.App
         static readonly Timer Effects = new Timer { Interval = 50 };
         static readonly System.Collections.Generic.List<OverlayForm> Open = new System.Collections.Generic.List<OverlayForm>();
 
+        /// <summary>One shared timer redraws every open overlay 20 times a second while the theme has moving
+        /// touches.</summary>
         static OverlayForm()
         {
             Effects.Tick += (s, e) => { if (!OverlayLook.Moving) return; foreach (var f in Open.ToArray()) if (f.Visible && f._fade > 0) f.Invalidate(); };
             Effects.Start();
         }
 
+        /// <summary>A borderless window kept on top, with the timer that fades it in and out (it really hides once
+        /// faded out).</summary>
         public OverlayForm()
         {
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
@@ -217,6 +237,46 @@ namespace SkinManager.App
 
         public bool Fading => _dir < 0;
 
+        // ---- moving it: an overlay that takes clicks can be dragged anywhere over the game; where it's put is kept
+        /// <summary>It was dragged somewhere (its Spot has been set).</summary>
+        public event Action Dragged;
+        protected bool Draggable;            // set by the overlays that take clicks
+        /// <summary>The last press ended a drag (so it isn't also a click).</summary>
+        public bool WasDragged;
+        /// <summary>Where it was put, as a share of the room around it in the game's window (0,0 top left; 1,1 bottom
+        /// right), so it stays put when the window changes size. Null: its usual corner.</summary>
+        public PointF? Spot;
+        Point _downAt, _startAt; bool _pressed;
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (Draggable && e.Button == MouseButtons.Left) { _pressed = true; _downAt = Cursor.Position; _startAt = Location; WasDragged = false; }
+        }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (!_pressed) return;
+            int dx = Cursor.Position.X - _downAt.X, dy = Cursor.Position.Y - _downAt.Y;
+            if (!WasDragged && Math.Abs(dx) + Math.Abs(dy) > 5) { WasDragged = true; Cursor = Cursors.SizeAll; }
+            if (WasDragged) Location = new Point(_startAt.X + dx, _startAt.Y + dy);
+        }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (!_pressed) return;
+            _pressed = false;
+            if (!WasDragged) return;
+            Cursor = Cursors.Hand;
+            var area = DragArea;
+            Spot = new PointF(Math.Max(0, Math.Min(1, (Left - area.X) / (float)Math.Max(1, area.Width - Width))), Math.Max(0, Math.Min(1, (Top - area.Y) / (float)Math.Max(1, area.Height - Height))));
+            Dragged?.Invoke();
+        }
+        /// <summary>The area it's placed in (the game's window when known).</summary>
+        protected virtual Rectangle DragArea => Screen.PrimaryScreen.WorkingArea;
+        /// <summary>Where a Spot puts it in an area (kept inside it).</summary>
+        protected Point AtSpot(Rectangle area, PointF spot) =>
+            new Point(area.X + (int)Math.Round(spot.X * Math.Max(0, area.Width - Width)), area.Y + (int)Math.Round(spot.Y * Math.Max(0, area.Height - Height)));
+
         protected override bool ShowWithoutActivation => true;
         protected override CreateParams CreateParams
         {
@@ -226,11 +286,13 @@ namespace SkinManager.App
         protected override void OnPaintBackground(PaintEventArgs e) => OverlayLook.PaintBack(e.Graphics, ClientRectangle);
         protected sealed override void OnPaint(PaintEventArgs e)
         {
-            PaintContent(e);
-            OverlayLook.Decorate(e.Graphics, ClientRectangle);
+            var was = Program.Doing; Program.Doing = "drawing " + GetType().Name;
+            try { PaintContent(e); OverlayLook.Decorate(e.Graphics, ClientRectangle); }
+            finally { Program.Doing = was; }
         }
         protected virtual void PaintContent(PaintEventArgs e) { }
-        protected static void Text(Graphics g, string t, Font f, Color c, RectangleF r, bool center = false)
+        /// <summary>Draws one line of text cut off with "..." when it doesn't fit (centred if asked).</summary>
+        protected static new void Text(Graphics g, string t, Font f, Color c, RectangleF r, bool center = false)
         {
             using (var b = new SolidBrush(c)) g.DrawString(t ?? "", f, b, r, new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap, Alignment = center ? StringAlignment.Center : StringAlignment.Near });
         }
@@ -244,6 +306,8 @@ namespace SkinManager.App
 
         public FullOverlay() { Size = new Size(860, 520); }
 
+        /// <summary>Sizes the overlay to fit and centres it over the game (or the main screen when the game isn't
+        /// found).</summary>
         public void Place(Rectangle? game)
         {
             var area = game ?? Screen.PrimaryScreen.WorkingArea;
@@ -293,7 +357,6 @@ namespace SkinManager.App
             if (stage != null) { StatsArt.Cover(g, stage, top, 0); using (var b = new SolidBrush(Color.FromArgb(160, 12, 13, 18))) g.FillRectangle(b, top); }
             if (left != null) StatsArt.Cover(g, left, new RectangleF(14, 10, 116, 134), 8, false, 0.5f, 0.1f);
             if (right != null) StatsArt.Cover(g, right, new RectangleF(Width - 130, 10, 116, 134), 8, true, 0.5f, 0.1f);
-            float cx = Width / 2f;
             Text(g, title, Theme.Title, Theme.Text, new RectangleF(140, 14, Width - 280, 30), true);
             Text(g, sub, Theme.Small, Theme.Text, new RectangleF(140, 46, Width - 280, 18), true);
             if (chance != null)
@@ -303,6 +366,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>During a match: the banner with your chance to win, then three columns: them (head-to-head and
+        /// their habits), your best picks against their character, and your best stages.</summary>
         void Opponent(Graphics g, MatchHistory h, LiveState s)
         {
             string oppId = s.OpponentCode != null ? h.UserIdOf(s.OpponentCode) : null;
@@ -357,6 +422,8 @@ namespace SkinManager.App
                 Text(g, $"{f.What}: {f.Record} ({f.Record.Percent})", Theme.Small, Rate(f.Record.Rate), new RectangleF(x, (y += 18) - 18, colW, 18));
         }
 
+        /// <summary>Outside a match: your record and last 20 games, your characters, your stages, and the characters
+        /// you do worst against.</summary>
         void Yourself(Graphics g, MatchHistory h)
         {
             var all = h.Singles().ToList();

@@ -22,6 +22,7 @@ namespace SkinManager.Core
         public SavedButException(string message, Exception inner) : base(message, inner) { }
     }
 
+    /// <summary>Turns any error into a plain sentence for the player.</summary>
     public static class Friendly
     {
         /// <summary>A sentence about what went wrong and what to do.</summary>

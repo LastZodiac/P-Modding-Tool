@@ -15,6 +15,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "Stage versions" window: choose how each version of a stage looks, or (when adding a stage from a
+    /// download) which versions it goes on.</summary>
     class StageVersionsForm : Form
     {
         readonly Installer _installer;
@@ -26,6 +28,7 @@ namespace SkinManager.App
         /// <summary>Closed with "Add a stage mod from a file…".</summary>
         public bool AddStageAsked { get; private set; }
 
+        /// <summary>One version of a stage (the normal one, Hold L, an alt from its list...) and its files on the card.</summary>
         sealed class Version
         {
             public StageSpot Spot;                        // the first way to get it (its button, its settings)
@@ -47,6 +50,7 @@ namespace SkinManager.App
             public string Name => First.Name;
             public bool Enabled => Entries.Any(e => e.Enabled);
         }
+        /// <summary>A stage on the stage select screen, with its normal version and the others.</summary>
         sealed class Slot
         {
             public int Id; public string Name; public int Picture = -1; public Version Normal; public List<Version> Others = new List<Version>();
@@ -61,7 +65,7 @@ namespace SkinManager.App
         readonly Panel _stagePage = new Panel { BackColor = Theme.Back, Visible = false, AutoScroll = true };
         readonly Button _back = Theme.Secondary("←  All stages");
         readonly Label _stageName = Theme.Label("", Theme.Title);
-        readonly Label _step1 = Theme.Label("1. Which version do you want to change?", Theme.Heading), _step2 = Theme.Label("2. What should it look like?", Theme.Heading);
+        readonly Label _step1 = Theme.Label("1. Which versions do you want to change? Tick one or more.", Theme.Heading), _step2 = Theme.Label("2. What should it look like?", Theme.Heading);
         // the versions wrap onto more rows (Smashville has 13): the page scrolls, every choice stays in view
         readonly FlowLayoutPanel _targets = new FlowLayoutPanel { WrapContents = true, BackColor = Theme.Back };
         readonly FlowLayoutPanel _looks = new FlowLayoutPanel { WrapContents = true, BackColor = Theme.Back };
@@ -78,23 +82,42 @@ namespace SkinManager.App
         Dictionary<string, (string TrackList, string Module)> _info;
         List<Slot> _slots = new List<Slot>();
         Slot _slot; Version _target, _look; Mod _mod; bool _undo; int _asking;
+        readonly List<Version> _chosen = new List<Version>();   // the versions ticked to change (several get the same look)
+        Mod _startMod;                                          // opened from a stage mod in My Mods: it's the look
+        readonly InstalledStage _startFrom;                     // ...that mod (the stage it's on opens straight away)
         readonly CheckBox _move = new CheckBox { AutoSize = true, Checked = true, ForeColor = Theme.Text, BackColor = Color.Transparent, Font = Theme.Body, Visible = false };
 
         // ----- adding a stage from a download (install mode): its stage files are the looks, put on the versions you tick
 
         readonly SkinPackage _pkg;
-        sealed class NewLook { public string File; public string Name; public Dictionary<string, string> Gameplay; }
-        sealed class Target { public Version V; public List<string> Files; public string Title; public string Key; }
+        /// <summary>One stage file from the download being added: its gameplay fingerprint once worked out, and its own
+        /// choice (a download can bring files for several stages: Radical Highway for Green Hill Zone and for Luigi's
+        /// Mansion), so each file keeps the versions ticked for it and what checking them found, and all go in together.</summary>
+        sealed class NewLook
+        {
+            public string File; public string Name; public Dictionary<string, string> Gameplay;
+            public Slot Slot;                                       // the stage it's for (the one shown when it's picked)
+            public readonly List<Target> Picked = new List<Target>();
+            public List<StagePlan> Plans;                           // what checking the ticked versions found (null: not yet)
+            public List<string> Lines = new List<string>();         // the verdicts, one per ticked version
+            public bool Bad;                                        // some ticked version can't have it
+            public int Checks;                                      // counts the checks started (an older one's result is dropped)
+            public bool Checking;
+        }
+        /// <summary>A version ticked to put the download on: all its files, or one of them (one time of day).</summary>
+        sealed class Target { public Slot S; public Version V; public List<string> Files; public string Title; public string Key; }
         readonly List<NewLook> _new = new List<NewLook>();
         NewLook _newLook;
-        readonly List<Target> _picked = new List<Target>();
-        List<StagePlan> _newPlans;
+        /// <summary>The versions ticked for the stage file shown.</summary>
+        List<Target> _picked => _newLook?.Picked ?? new List<Target>();
         StageSelect _select;
         Dictionary<string, uint> _modules;
         List<StageFile> _allFiles;
         /// <summary>Adding a stage: what to install (empty: nothing).</summary>
         public List<StagePlan> Plans { get; private set; } = new List<StagePlan>();
 
+        /// <summary>The window for adding a stage from a download: its stage files are the looks, put on the versions
+        /// you tick.</summary>
         public StageVersionsForm(Installer installer, Library lib, SkinPackage pkg) : this(installer, lib)
         {
             _pkg = pkg;
@@ -106,8 +129,18 @@ namespace SkinManager.App
                          "You see how it will look before anything changes. You always play on P+'s own floors, platforms and blast zones, so it's safe online.";
         }
 
+        /// <summary>The window opened from a stage mod in My Mods: its stage opens straight away, with the mod as the look,
+        /// so ticking the versions to put it on is all that's left.</summary>
+        public StageVersionsForm(Installer installer, Library lib, InstalledStage from) : this(installer, lib)
+        {
+            _startFrom = from;
+            _title.Text = $"Put \"{Short(from.Name, 50)}\" on other versions";
+            _hint.Text = "Tick every version it should be on (as many as you like), then press the button. You always play on P+'s own floors, platforms and blast zones, so it's safe online.";
+        }
+
         static string Short(string t, int n) => t == null ? "" : t.Length > n ? t.Substring(0, n - 1) + "…" : t;
 
+        /// <summary>Builds the window (stage tiles, then one stage's page) and reads the card's stages once it's shown.</summary>
         public StageVersionsForm(Installer installer, Library lib)
         {
             _installer = installer; _lib = lib;
@@ -146,6 +179,7 @@ namespace SkinManager.App
             Shown += async (s, e) => await LoadStages();
         }
 
+        /// <summary>Fits the stage list and the stage page to the window's size.</summary>
         void Lay()
         {
             int w = ClientSize.Width - 48, top = 100, bottom = ClientSize.Height - 56 - 12;
@@ -206,8 +240,19 @@ namespace SkinManager.App
         List<Mod> Mods(Slot s)
         {
             var result = new List<Mod>();
-            foreach (var g in _lib.Stages.Where(x => !x.IsSong && !x.IsSwap && !(x.PackageKey ?? "").StartsWith("version|", StringComparison.OrdinalIgnoreCase))
-                         .Select(x => (x, On: s.All.FirstOrDefault(v => v.Files.Any(f => string.Equals(f, x.CardPath, StringComparison.OrdinalIgnoreCase)))))
+            var mine = _lib.Stages.Where(x => !x.IsSong && !x.IsSwap && !(x.PackageKey ?? "").StartsWith("version|", StringComparison.OrdinalIgnoreCase)).ToList();
+            string Key(InstalledStage x) => x.Group ?? x.PackageKey ?? x.Id;
+            // A file can belong to more than one version (Smashville's normal one picks between the files its R list
+            // names). A mod covering every file of the bigger version is on that one; otherwise it's on the smallest.
+            Version OnFor(InstalledStage x)
+            {
+                var have = new HashSet<string>(mine.Where(y => Key(y) == Key(x)).Select(y => y.CardPath), StringComparer.OrdinalIgnoreCase);
+                var fits = s.All.Where(v => v.Files.Any(f => string.Equals(f, x.CardPath, StringComparison.OrdinalIgnoreCase))).ToList();
+                return fits.Where(v => v.Files.All(have.Contains)).OrderByDescending(v => v.Files.Count).FirstOrDefault()
+                       ?? fits.OrderBy(v => v.Files.Count).FirstOrDefault();
+            }
+            foreach (var g in mine
+                         .Select(x => (x, On: OnFor(x)))
                          .Where(x => x.On != null)
                          .GroupBy(x => (x.x.Group ?? x.x.PackageKey ?? x.x.Id) + "|" + x.On.Spot.Entry))
                 result.Add(new Mod { Entries = g.Select(x => x.x).ToList(), On = g.First().On });
@@ -217,6 +262,8 @@ namespace SkinManager.App
         /// <summary>The mod of yours that's on a version now (null: none).</summary>
         Mod ModOn(Slot s, Version v) => Mods(s).FirstOrDefault(m => m.On == v && m.Enabled);
 
+        /// <summary>Reads P+'s stages and their versions from the card (stages with only one version are left out
+        /// unless adding a stage), then opens the stage a download is named for.</summary>
         async Task LoadStages()
         {
             try
@@ -264,15 +311,32 @@ namespace SkinManager.App
             if (IsDisposed) return;
             if (_slots.Count == 0) _hint.Text = "No stage on your SD card has other versions.";
             ShowStages();
+            if (_startFrom != null)
+            {
+                var from = _slots.FirstOrDefault(sl => sl.All.Any(v => v.Files.Contains(_startFrom.CardPath, StringComparer.OrdinalIgnoreCase)));
+                if (from != null) OpenStage(from);
+                else { _hint.Text = $"{_startFrom.Name} is on a stage that has no other versions, so there's nowhere else to put it."; _hint.ForeColor = Theme.Bad; }
+            }
             if (_pkg != null && _allFiles != null)
             {
-                // the stage the download is named for (its title or file name), opened straight away
-                var named = _new.SelectMany(n => Stages.NamedFor(n.File, _pkg.Name, _allFiles)).ToList();
-                var slot = named.Select(b => _slots.FirstOrDefault(sl => sl.All.Any(v => v.Files.Any(f => string.Equals(Stages.Describe(f).Base, b, StringComparison.OrdinalIgnoreCase))))).FirstOrDefault(x => x != null);
-                if (slot != null) OpenStage(slot);
+                // each of the download's stage files: the stage it's for, and the version it's named exactly like ticked for it
+                // (a file called like one of P+'s, STGGREENHILLZONE_Z_RADICALHIGHWAY.pac, was made to go there), so a
+                // download made for several stages goes on all of them with one click
+                foreach (var n in _new)
+                {
+                    n.Slot = SlotFor(n);
+                    var exact = ExactTarget(n);
+                    if (exact != null) n.Picked.Add(exact);
+                }
+                // the first file that has a stage is shown; the others are checked meanwhile
+                var first = _new.FirstOrDefault(n => n.Slot != null);
+                if (first != null) { _newLook = first; OpenStage(first.Slot); }
+                foreach (var n in _new.Where(n => n != _newLook && n.Picked.Count > 0)) Recheck(n);
             }
         }
 
+        /// <summary>The stage select picture for a version: its own one for Hold L/R/Z when there is one, else the
+        /// stage's.</summary>
         Bitmap Thumb(Slot s, Version v)
         {
             if (v != null && v.Spot.Region != null && v.Spot.Region != "main" && _thumbs.TryGetValue((s.Picture, v.Spot.Region), out var part)) return part;
@@ -332,13 +396,15 @@ namespace SkinManager.App
 
         void OpenStage(Slot s)
         {
-            _slot = s; _target = null; _look = null; _undo = false;
+            _slot = s; _target = null; _look = null; _undo = false; _chosen.Clear();
             _stageTiles.Visible = _search.Visible = false; _stagePage.Visible = true;
             _stageName.Text = s.Name;
             if (_pkg != null) { OpenForInstall(s); return; }
             FillTargets();
             _looks.Controls.Clear(); _step2.Visible = false;
-            _status.Text = "Pick the version you want to change. (In matchmaking, the game can give you any of them.)"; _status.ForeColor = Theme.Muted;
+            _startMod = _startFrom == null ? null : Mods(s).FirstOrDefault(m => m.Entries.Any(e => e.Id == _startFrom.Id));
+            _status.Text = _startMod != null ? $"Tick the versions to put {_startMod.Name} on (as many as you like)."
+                         : "Tick the version you want to change, or several to give them all the same look. (In matchmaking, the game can give you any of them.)"; _status.ForeColor = Theme.Muted;
             _use.Enabled = false; _use.Visible = false; _pic.Visible = _picCap.Visible = false;
             _stagePage.AutoScrollPosition = Point.Empty;
             LayPage();
@@ -349,18 +415,17 @@ namespace SkinManager.App
 
         void OpenForInstall(Slot s)
         {
-            _picked.Clear(); _newPlans = null;
             _step1.Text = $"1. Which versions of {s.Name} should it go on? Tick as many as you like.";
             foreach (Control c in _targets.Controls.Cast<Control>().ToList()) c.Dispose();
             _targets.Controls.Clear();
             var mods = Mods(s);
             foreach (var v in s.All)
             {
-                var targets = new List<Target> { new Target { V = v, Files = v.Files, Title = v.IsNormal ? "Normal " + s.Name + (v.Files.Count > 1 ? $" (all {v.Files.Count})" : "") : v.Label, Key = v.Spot.Entry + "|all" } };
+                var targets = new List<Target> { new Target { S = s, V = v, Files = v.Files, Title = v.IsNormal ? "Normal " + s.Name + (v.Files.Count > 1 ? $" (all {v.Files.Count})" : "") : v.Label, Key = v.Spot.Entry + "|all" } };
                 // a normal version that's several files (Smashville's times of day): each one on its own too
                 if (v.IsNormal && v.Files.Count > 1)
                     foreach (var f in v.Files)
-                        targets.Add(new Target { V = v, Files = new List<string> { f }, Title = "Normal: " + (Stages.Describe(f).Version is string tv && tv != "" ? tv : v.SubStages.TryGetValue(f, out var sub) ? sub : Path.GetFileNameWithoutExtension(f)), Key = v.Spot.Entry + "|" + f });
+                        targets.Add(new Target { S = s, V = v, Files = new List<string> { f }, Title = "Normal: " + (Stages.Describe(f).Version is string tv && tv != "" ? tv : v.SubStages.TryGetValue(f, out var sub) ? sub : Path.GetFileNameWithoutExtension(f)), Key = v.Spot.Entry + "|" + f });
                 foreach (var t in targets)
                 {
                     var on = mods.Where(m => m.Enabled && m.Entries.Any(e => t.Files.Contains(e.CardPath, StringComparer.OrdinalIgnoreCase))).Select(m => m.Name).Distinct().ToList();
@@ -368,8 +433,9 @@ namespace SkinManager.App
                     var tile = VersionTile(s, v, sub);
                     tile.Title = t.Title; tile.Value = t;
                     if (t.Files.Count == 1 && v.Files.Count > 1) tile.Badge = "One of them";
+                    tile.Selected = _picked.Any(p => p.Key == t.Key && p.S == s);
                     var target = t;
-                    tile.Click += (o, e) => ToggleTarget(target, tile);
+                    tile.Click += (o, e) => ToggleTarget(target);
                     _targets.Controls.Add(tile);
                 }
             }
@@ -380,20 +446,118 @@ namespace SkinManager.App
             if (_new.Count > 1)
                 foreach (var n in _new)
                 {
-                    var tile = new PictureTile(214, 146) { Value = n, Title = n.Name, Badge = "New", Subtitle = Path.GetFileName(n.File), Selected = n == _newLook, Glyph = "★" };
+                    var tile = new PictureTile(214, 146) { Value = n, Title = n.Name, Badge = "New", Subtitle = FileLine(n), Selected = n == _newLook, Glyph = "★" };
                     var look = n;
-                    tile.Click += (o, e) => { _newLook = look; foreach (var t in _looks.Controls.OfType<PictureTile>()) t.Selected = t.Value == look; Recheck(); };
+                    tile.Click += (o, e) => PickNewLook(look);
                     _looks.Controls.Add(tile);
                 }
-            _status.Text = "Tick the versions it should go on."; _status.ForeColor = Theme.Muted;
-            _use.Visible = true; _use.Enabled = false; _use.Text = "Install"; _move.Visible = false; _pic.Visible = _picCap.Visible = false;
+            _use.Visible = true; _move.Visible = false; _pic.Visible = _picCap.Visible = false;
             _stagePage.AutoScrollPosition = Point.Empty;
-            LayPage();
+            ShowNewStatus();
             RenderVersions(s);
             DrawNewLooks();
+            if (_newLook != null && _newLook.Picked.Count > 0 && _newLook.Plans == null && !_newLook.Checking) Recheck(_newLook);
+        }
+
+        /// <summary>Shows one of the download's stage files: its stage (when it's for another one than the one shown) with
+        /// the versions ticked for it.</summary>
+        void PickNewLook(NewLook n)
+        {
+            _newLook = n;
+            var slot = n.Slot ?? _slot;
+            if (slot != null && slot != _slot) { OpenStage(slot); return; }
+            // the same stage: the ticks change to this file's
+            n.Slot = slot;
+            foreach (var t in _targets.Controls.OfType<PictureTile>()) t.Selected = t.Value is Target xt && _picked.Any(p => p.Key == xt.Key && p.S == _slot);
+            foreach (var t in _looks.Controls.OfType<PictureTile>()) t.Selected = t.Value == n;
+            ShowNewStatus();
+            if (n.Picked.Count > 0 && n.Plans == null && !n.Checking) Recheck(n);
+        }
+
+        /// <summary>The stage a download's stage file is for: the one with a file of exactly that name, else the one it's
+        /// named for (its title or file name), else none.</summary>
+        Slot SlotFor(NewLook n)
+        {
+            string name = Path.GetFileName(n.File);
+            var exact = _slots.FirstOrDefault(sl => sl.All.Any(v => v.Files.Any(f => string.Equals(Path.GetFileName(f), name, StringComparison.OrdinalIgnoreCase))));
+            if (exact != null) return exact;
+            // only its own file name here: the download's title names one stage, and the other files are for others
+            foreach (var b in Stages.NamedFor(n.File, _new.Count == 1 ? _pkg.Name : "", _allFiles))
+            {
+                var sl = _slots.FirstOrDefault(x => x.All.Any(v => v.Files.Any(f => string.Equals(Stages.Describe(f).Base, b, StringComparison.OrdinalIgnoreCase))));
+                if (sl != null) return sl;
+            }
+            return null;
+        }
+
+        /// <summary>The version a stage file is named exactly like (the whole version, or that one file of a normal version
+        /// that's several: one time of day), or null.</summary>
+        Target ExactTarget(NewLook n)
+        {
+            if (n.Slot == null) return null;
+            string name = Path.GetFileName(n.File);
+            var mods = Mods(n.Slot).Where(m => m.Enabled).ToList();
+            foreach (var v in n.Slot.All)
+            {
+                var f = v.Files.FirstOrDefault(x => string.Equals(Path.GetFileName(x), name, StringComparison.OrdinalIgnoreCase));
+                if (f == null) continue;
+                // one of your mods is on it already: not replaced unless you tick it yourself
+                if (mods.Any(m => m.Entries.Any(e => string.Equals(e.CardPath, f, StringComparison.OrdinalIgnoreCase)))) return null;
+                if (v.Files.Count == 1 || !v.IsNormal)
+                    return new Target { S = n.Slot, V = v, Files = v.Files, Title = v.IsNormal ? "Normal " + n.Slot.Name : v.Label, Key = v.Spot.Entry + "|all" };
+                string sub = Stages.Describe(f).Version is string tv && tv != "" ? tv : v.SubStages.TryGetValue(f, out var ss) ? ss : Path.GetFileNameWithoutExtension(f);
+                return new Target { S = n.Slot, V = v, Files = new List<string> { f }, Title = "Normal: " + sub, Key = v.Spot.Entry + "|" + f };
+            }
+            // named like the stage itself under another name (STGLUIGIMANSION for P+'s STGLUIGISMANSION), with no version in
+            // its name: the normal one (one file only: a stage with several, like Smashville's times of day, is left to you)
+            var normal = n.Slot.Normal;
+            if (normal.Files.Count == 1 && Stages.Describe(n.File).Version == "" &&
+                Stages.NamedFor(n.File, "", _allFiles).Contains(Stages.Describe(normal.Files[0]).Base, StringComparer.OrdinalIgnoreCase) &&
+                !mods.Any(m => m.Entries.Any(e => string.Equals(e.CardPath, normal.Files[0], StringComparison.OrdinalIgnoreCase))))
+                return new Target { S = n.Slot, V = normal, Files = normal.Files, Title = "Normal " + n.Slot.Name, Key = normal.Spot.Entry + "|all" };
+            return null;
+        }
+
+        /// <summary>A stage file's line under its tile: where it's going, or its file name.</summary>
+        string FileLine(NewLook n) =>
+            n.Picked.Count == 0 ? Path.GetFileName(n.File) + (n.Slot != null ? " · for " + n.Slot.Name : "")
+            : "→ " + (n.Picked.Count == 1 ? (n.Picked[0].S != null && !n.Picked[0].Title.Contains(n.Picked[0].S.Name) ? n.Picked[0].S.Name + ": " : "") + n.Picked[0].Title : $"{n.Picked.Count} versions of {n.Picked[0].S?.Name}");
+
+        /// <summary>The verdicts for the file shown, a line for each other file going in too, and the install button (it
+        /// installs every file that has versions ticked, once they're all checked).</summary>
+        void ShowNewStatus()
+        {
+            var n = _newLook;
+            var lines = new List<string>();
+            if (n == null || n.Picked.Count == 0) lines.Add(_new.Count > 1 ? $"Tick the versions {n?.Name ?? "it"} should go on (or leave them unticked to leave it out)." : "Tick the versions it should go on.");
+            else if (n.Checking || n.Plans == null) lines.Add($"Checking it on {n.Picked.Count} version{(n.Picked.Count == 1 ? "" : "s")}…");
+            else lines.AddRange(n.Lines);
+            var others = _new.Where(o => o != n && o.Picked.Count > 0).ToList();
+            if (others.Count > 0)
+            {
+                lines.Add("");
+                lines.Add("Also going in with it:");
+                foreach (var o in others)
+                    lines.Add((o.Checking || o.Plans == null ? "…  " : o.Plans.Count == 0 ? "✗  " : "✓  ") + o.Name + " " + FileLine(o).Replace("→", "on") +
+                              (o.Checking || o.Plans == null ? " (checking)" : o.Plans.Count == 0 ? " (can't go on it: pick it to see why)"
+                               : o.Lines.Any(l => l.Contains("doesn't line up")) ? " (doesn't line up well: pick it to see)" : ""));
+            }
+            var ready = _new.Where(o => o.Picked.Count > 0).ToList();
+            bool checking = ready.Any(o => o.Checking || o.Plans == null);
+            int files = ready.Count(o => o.Plans != null && o.Plans.Count > 0), versions = ready.Where(o => o.Plans != null && o.Plans.Count > 0).Sum(o => o.Picked.Count - o.Lines.Count(l => l.StartsWith("✗")));
+            if (!checking && files > 0) lines.Add("You play on P+'s own floors, platforms and blast zones on each one, so it's safe online.");
+            _status.Text = string.Join("\r\n", lines);
+            bool anyBad = ready.Any(o => o.Bad);
+            _status.ForeColor = checking || ready.Count == 0 ? Theme.Muted : anyBad ? (files > 0 ? Theme.Warn : Theme.Bad)
+                              : ready.Any(o => o.Lines.Any(l => l.Contains("doesn't line up") || l.Contains("check it once offline"))) ? Theme.Warn : Theme.Good;
+            _use.Text = files > 1 ? $"Install all {files} ({versions} versions)" : versions <= 1 ? "Install" : $"Install on {versions} versions";
+            _use.Enabled = !checking && files > 0;
+            foreach (var t in _looks.Controls.OfType<PictureTile>()) if (t.Value is NewLook tn) { t.Subtitle = FileLine(tn); t.Invalidate(); }
+            LayPage();
         }
 
         bool _drawingNew;
+        /// <summary>Draws the download's stage files in the background and puts the pictures on their tiles.</summary>
         async void DrawNewLooks()
         {
             if (_drawingNew) return; _drawingNew = true;
@@ -415,30 +579,42 @@ namespace SkinManager.App
             finally { _drawingNew = false; }
         }
 
-        void ToggleTarget(Target t, PictureTile tile)
+        /// <summary>Ticks or unticks a version to put the download on; ticking "all of them" unticks the single files
+        /// and the other way round.</summary>
+        void ToggleTarget(Target t)
         {
-            var have = _picked.FirstOrDefault(x => x.Key == t.Key);
-            if (have != null) _picked.Remove(have); else _picked.Add(t);
-            // "all of them" and one of them: whichever was ticked last stays
+            var n = _newLook;
+            if (n == null) return;
+            n.Slot = _slot;
+            var have = n.Picked.FirstOrDefault(x => x.Key == t.Key && x.S == t.S);
+            if (have != null) n.Picked.Remove(have); else n.Picked.Add(t);
             if (have == null)
             {
+                // "all of them" and one of them: whichever was ticked last stays
                 bool all = t.Files.Count > 1;
-                _picked.RemoveAll(x => x != t && x.V == t.V && (all ? x.Files.Count == 1 : x.Files.Count > 1));
+                n.Picked.RemoveAll(x => x != t && x.V == t.V && (all ? x.Files.Count == 1 : x.Files.Count > 1));
+                // one file of the download per version: ticking it here unticks it for another of the download's files
+                foreach (var o in _new.Where(o => o != n))
+                    if (o.Picked.RemoveAll(x => x.Files.Intersect(t.Files, StringComparer.OrdinalIgnoreCase).Any()) > 0) Recheck(o);
             }
-            foreach (var x in _targets.Controls.OfType<PictureTile>()) x.Selected = x.Value is Target xt && _picked.Any(p => p.Key == xt.Key);
-            Recheck();
+            // a file of the download goes on one stage (switching stages starts its ticks again)
+            n.Picked.RemoveAll(x => x.S != _slot);
+            foreach (var x in _targets.Controls.OfType<PictureTile>()) x.Selected = x.Value is Target xt && n.Picked.Any(p => p.Key == xt.Key && p.S == _slot);
+            Recheck(n);
         }
 
-        int _rechecks;
-        async void Recheck()
+        /// <summary>Works out how one of the download's stage files goes on every version ticked for it, and shows the
+        /// verdicts (and a preview when it's the file shown). Waits a moment first, so ticking several in a row is checked once.</summary>
+        async void Recheck(NewLook look)
         {
-            int me = ++_rechecks;
-            _newPlans = null; _use.Enabled = false; _pic.Visible = _picCap.Visible = false;
-            var look = _newLook; var picked = _picked.ToList(); var s = _slot;
-            if (look == null || picked.Count == 0) { _status.Text = "Tick the versions it should go on."; _status.ForeColor = Theme.Muted; LayPage(); return; }
-            _status.Text = $"Checking it on {picked.Count} version{(picked.Count == 1 ? "" : "s")}…"; _status.ForeColor = Theme.Muted;
+            int me = ++look.Checks;
+            look.Plans = null; look.Lines = new List<string>(); look.Bad = false; look.Checking = look.Picked.Count > 0;
+            if (look == _newLook) _pic.Visible = _picCap.Visible = false;
+            ShowNewStatus();
+            var picked = look.Picked.ToList();
+            if (picked.Count == 0) return;
             await Task.Delay(350);   // ticking several in a row: checked once at the end
-            if (IsDisposed || me != _rechecks) return;
+            if (IsDisposed || me != look.Checks) return;
             var lines = new List<string>(); var plans = new List<StagePlan>(); bool bad = false;
             try
             {
@@ -448,14 +624,16 @@ namespace SkinManager.App
                     using (var card = _installer.OpenCard())
                         foreach (var t in picked)
                         {
-                            if (me != _rechecks) return;
+                            if (me != look.Checks) return;
                             string group = t.Files.Count > 1 ? Guid.NewGuid().ToString("N") : null;
                             var verdicts = new List<string>(); bool first = true; string problem = null;
                             foreach (var f in t.Files)
                             {
                                 var (plan, how) = PlanFor(card, look, f);
                                 if (!plan.CanInstall) { problem = string.Join(" ", plan.Checks.Where(c => !c.Passed).Select(c => c.Detail ?? c.Title)); break; }
-                                plan.Name = look.Name; plan.Group = group;
+                                // a download for several stages: each one's mod says which stage it's for
+                                plan.Name = _new.Count > 1 && t.S != null ? $"{_pkg.Name} ({t.S.Name}{(t.V.IsNormal ? "" : ", " + t.Title)})" : look.Name;
+                                plan.Group = group;
                                 if (first) plan.SelectPictures = PicturesFor(Stages.Describe(f)); first = false;
                                 plans.Add(plan); verdicts.Add(how);
                             }
@@ -465,23 +643,16 @@ namespace SkinManager.App
                 });
             }
             catch (Exception e) { lines.Add("✗  Couldn't check it: " + Friendly.Explain(e)); bad = true; plans.Clear(); }
-            if (IsDisposed || me != _rechecks) return;
-            _newPlans = plans;
-            _status.Text = string.Join("\r\n", lines) + (plans.Count > 0 ? "\r\nYou play on P+'s own floors, platforms and blast zones on each one, so it's safe online." : "");
-            _status.ForeColor = bad ? (plans.Count > 0 ? Theme.Warn : Theme.Bad) : lines.Any(l => l.Contains("doesn't line up") || l.Contains("check it once offline")) ? Theme.Warn : Theme.Good;
-            int on = picked.Count - lines.Count(l => l.StartsWith("✗"));
-            _use.Text = on <= 1 ? "Install" : $"Install on {on} versions";
-            _use.Enabled = plans.Count > 0;
-            LayPage();
+            if (IsDisposed || me != look.Checks) return;
+            look.Plans = plans; look.Lines = lines; look.Bad = bad; look.Checking = false;
+            ShowNewStatus();
+            if (look != _newLook || plans.Count == 0) return;
             _stagePage.ScrollControlIntoView(_use);
-            if (plans.Count > 0)
-            {
-                Bitmap shot = null;
-                try { var bytes = plans[0].Bytes; shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
-                if (IsDisposed || me != _rechecks) return;
-                var old = _pic.Image; _pic.Image = shot; old?.Dispose();
-                _pic.Visible = _picCap.Visible = shot != null;
-            }
+            Bitmap shot = null;
+            try { var bytes = plans[0].Bytes; shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
+            if (IsDisposed || me != look.Checks || look != _newLook) { shot?.Dispose(); return; }
+            var old = _pic.Image; _pic.Image = shot; old?.Dispose();
+            _pic.Visible = _picCap.Visible = shot != null;
         }
 
         /// <summary>The download's stage file on one of P+'s stage files: the whole file when it plays exactly like it (and
@@ -490,24 +661,36 @@ namespace SkinManager.App
         {
             var t = Stages.Describe(target);
             bool same = Stages.SameProgram(Stages.MadeFor(look.File, _info, _modules), target, _info);
+            StagePlan fixd = null;
             if (same)
             {
                 var whole = _installer.PlanStage(card, _pkg, look.File, t, look.Gameplay);
                 if (whole.CanInstall) return (whole, "made for it, it goes in as it is");
-                var fixd = _installer.PlanFixedStage(card, _pkg, look.File, t);
-                if (fixd.CanInstall) return (fixd, Lines(fixd) + "P+'s floors and blast zones copied into it");
+                fixd = _installer.PlanFixedStage(card, _pkg, look.File, t);
+                if (fixd.CanInstall && Off(fixd) < 1f) return (fixd, Lines(fixd) + "P+'s floors and blast zones copied into it");
             }
+            // its looks on P+'s file: also where they fit P+'s floors clearly better than with P+'s floors copied in
+            // (only there can P+'s own look stay for a floor the map doesn't draw)
             var looks = _installer.PlanLooks(card, _pkg, look.File, t);
+            if (fixd != null && fixd.CanInstall && !(looks.CanInstall && Off(looks) + 0.5f < Off(fixd)))
+                return (fixd, Lines(fixd) + "P+'s floors and blast zones copied into it");
             return (looks, Lines(looks) + "its scenery on P+'s stage" + (same ? "" : " (made for another stage: check it once offline)"));
         }
 
+        /// <summary>How far a plan's scenery is from P+'s floors (as far as can be when it wasn't measured).</summary>
+        static float Off(StagePlan p) => p.Fit == null || float.IsNaN(p.Fit.Floors) ? float.MaxValue : p.Fit.Floors;
+
+        /// <summary>How well the scenery lines up with P+'s floors, as the start of a verdict line.</summary>
         static string Lines(StagePlan p)
         {
             var fit = p.Fit;
             if (fit == null || fit.Floors >= 1e6f || float.IsNaN(fit.Floors)) return "";
-            return fit.Floors < 1f ? "lines up, " : fit.Floors < 6f ? "nearly lines up, " : "doesn't line up well (you may stand off its ground), ";
+            // its scenery was fitted onto P+'s floors (moved as a whole, or floor by floor): say what was done
+            string moved = p.Aligned != null && p.Aligned.Did ? " once " + p.Aligned.Words() : "";
+            return fit.Floors < 1f ? "lines up" + moved + ", " : fit.Floors < 6f ? "nearly lines up" + moved + ", " : "doesn't line up well (you may stand off its ground), ";
         }
 
+        /// <summary>The stage select pictures in the download that go with this stage file, as PNGs.</summary>
         Dictionary<string, byte[]> PicturesFor(StageFile target)
         {
             var result = new Dictionary<string, byte[]>();
@@ -522,6 +705,8 @@ namespace SkinManager.App
             return result;
         }
 
+        /// <summary>A tile for a version, with its picture (drawn from its file when ready, else the stage select
+        /// picture).</summary>
         PictureTile VersionTile(Slot s, Version v, string sub)
         {
             var tile = new PictureTile(214, 146) { Value = v, Title = v.IsNormal ? "Normal " + s.Name : v.Label, Badge = v.Badge, Subtitle = sub };
@@ -529,6 +714,7 @@ namespace SkinManager.App
             return tile;
         }
 
+        /// <summary>Fills step 1 with the stage's versions, each saying what it looks like now.</summary>
         void FillTargets()
         {
             var s = _slot;
@@ -540,38 +726,50 @@ namespace SkinManager.App
                 string how = v.IsNormal ? "just pick it" : HowTo(v);
                 var tile = VersionTile(s, v, mod != null ? $"Your mod: {mod.Name}" : now != null ? $"Looks like {(now.IsNormal ? "the normal one" : now.Label)} now" : how);
                 if (mod != null) tile.Picture = _renders.TryGetValue("mod:" + mod.First.Id, out var mr) && mr != null ? mr : tile.Picture;
-                tile.Selected = v == _target;
+                tile.Selected = _chosen.Contains(v);
                 var version = v;
                 tile.Click += (o, e) => PickTarget(version);
                 _targets.Controls.Add(tile);
             }
         }
 
+        /// <summary>Ticks or unticks a version to change (several can be ticked: they all get the look you pick) and fills
+        /// step 2 with the looks they can have: P+'s own, the other versions', your mods.</summary>
         void PickTarget(Version t)
         {
-            var s = _slot; _target = t; _look = null; _mod = null; _undo = false;
-            foreach (var tile in _targets.Controls.OfType<PictureTile>()) tile.Selected = tile.Value == t;
-            _step2.Visible = true;
-            _step2.Text = $"2. What should {(t.IsNormal ? "the normal " + s.Name : t.Label)} look like?";
+            var s = _slot; _look = null; _mod = null; _undo = false;
+            if (_chosen.Contains(t)) _chosen.Remove(t); else _chosen.Add(t);
+            _target = _chosen.FirstOrDefault();
+            foreach (var tile in _targets.Controls.OfType<PictureTile>()) tile.Selected = tile.Value is Version tv && _chosen.Contains(tv);
             foreach (Control c in _looks.Controls.Cast<Control>().ToList()) c.Dispose();
             _looks.Controls.Clear();
-            var now = LookNow(s, t);
+            _use.Enabled = false; _move.Visible = false; _pic.Visible = _picCap.Visible = false;
+            if (_chosen.Count == 0)
+            {
+                _step2.Visible = false; _use.Visible = false;
+                _status.Text = _startMod != null ? $"Tick the versions to put {_startMod.Name} on." : "Tick the versions you want to change: one, or several to give them all the same look."; _status.ForeColor = Theme.Muted;
+                LayPage(); return;
+            }
+            _step2.Visible = true;
+            _step2.Text = $"2. What should {ChosenNames()} look like?";
+            bool one = _chosen.Count == 1;
+            var now = one ? LookNow(s, t) : null;
             // its own look (P+'s): picking it undoes a change
-            var own = VersionTile(s, t, now == null ? "What it looks like now" : "Back to how P+ made it");
-            own.Title = "P+'s own look"; own.Badge = now == null ? "Now" : null;
+            var own = VersionTile(s, _target, one ? (now == null ? "What it looks like now" : "Back to how P+ made it") : "Back to how P+ made each one");
+            own.Title = "P+'s own look"; own.Badge = one && now == null ? "Now" : null;
             own.Click += (o, e) => PickLook(null);
             _looks.Controls.Add(own);
-            foreach (var v in s.All.Where(v => v != t))
+            foreach (var v in s.All.Where(v => !_chosen.Contains(v)))
             {
                 var tile = VersionTile(s, v, v.IsNormal ? "The normal stage's scenery" : (v.Badge.EndsWith("list") ? "From its list" : HowTo(v)) + "'s scenery");
-                if (now == v) tile.Badge = "Now";
+                if (one && now == v) tile.Badge = "Now";
                 var version = v;
                 tile.Click += (o, e) => PickLook(version);
                 _looks.Controls.Add(tile);
             }
             foreach (var m in Mods(s))
             {
-                bool here = m.On == t;
+                bool here = one && m.On == t;
                 var tile = new PictureTile(214, 146)
                 {
                     Value = m, Title = m.Name, Badge = here && m.Enabled ? "Now" : "Your mod",
@@ -582,56 +780,76 @@ namespace SkinManager.App
                 tile.Click += (o, e) => PickMod(mod);
                 _looks.Controls.Add(tile);
             }
-            _status.Text = "Pick the look you want: another version's, or one of your stage mods."; _status.ForeColor = Theme.Muted;
-            _use.Visible = true; _use.Enabled = false; _move.Visible = false; _pic.Visible = _picCap.Visible = false;
+            _status.Text = one ? "Pick the look you want: another version's, or one of your stage mods. (Tick more versions to give them all the same look.)"
+                               : $"{_chosen.Count} versions ticked. Pick the look they should all have."; _status.ForeColor = Theme.Muted;
+            _use.Visible = true;
             LayPage();
+            // opened from a mod in My Mods: that mod is the look, checked straight away
+            if (_startMod != null) { var start = Mods(s).FirstOrDefault(m => m.First.Id == _startMod.First.Id); if (start != null) { PickMod(start); return; } }
             _stagePage.ScrollControlIntoView(_step2);
         }
 
+        /// <summary>"the normal Smashville", "SV Sakura", or "3 versions" for the ticked versions.</summary>
+        string ChosenNames() => _chosen.Count == 1 ? (_chosen[0].IsNormal ? "the normal " + _slot.Name : _chosen[0].Label) : $"these {_chosen.Count} versions";
+
+        /// <summary>Picks one of your stage mods as the look for the ticked versions: checks it can go on each and offers
+        /// to move it rather than copy.</summary>
         async void PickMod(Mod m)
         {
-            var s = _slot; var t = _target; if (t == null) return;
+            var s = _slot; if (_chosen.Count == 0) return;
             int me = ++_asking;
             _look = null; _mod = m; _undo = false;
             foreach (var tile in _looks.Controls.OfType<PictureTile>()) tile.Selected = tile.Value == m;
-            _use.Enabled = false; _move.Visible = false; _pic.Visible = _picCap.Visible = false; _use.Text = "Use this mod here";
-            string tName = t.IsNormal ? "the normal " + s.Name : t.Label, onName = m.On.IsNormal ? "the normal " + s.Name : m.On.Label;
-            if (m.On == t)
+            _use.Enabled = false; _move.Visible = false; _pic.Visible = _picCap.Visible = false; _use.Text = _chosen.Count > 1 ? $"Use this mod on {_chosen.Count} versions" : "Use this mod here";
+            string tName = ChosenNames(), onName = m.On.IsNormal ? "the normal " + s.Name : m.On.Label;
+            var targets = _chosen.Where(t => t != m.On).ToList();
+            if (targets.Count == 0)
             {
                 _status.Text = m.Enabled ? $"{m.Name} is on {tName} now." : $"{m.Name} is on {tName} but turned off: turn it on in My Mods.";
                 _status.ForeColor = Theme.Muted; return;
             }
-            string key = "mod|" + m.First.Id + "|" + t.Spot.Entry;
-            if (!_checked.TryGetValue(key, out var r))
+            byte[] picture = null;
+            foreach (var t in targets)
             {
-                _status.Text = $"Putting {m.Name} on {tName} and checking it plays exactly like P+'s…"; _status.ForeColor = Theme.Muted;
-                try { r = await Task.Run(() => CheckMod(s, t, m)); }
-                catch (Exception e) { r = (Friendly.Explain(e), null, null, null); }
-                _checked[key] = r;
-                if (IsDisposed || me != _asking) return;
+                string key = "mod|" + m.First.Id + "|" + t.Spot.Entry;
+                if (!_checked.TryGetValue(key, out var r))
+                {
+                    string at = t.IsNormal ? "the normal " + s.Name : t.Label;
+                    _status.Text = $"Putting {m.Name} on {at} and checking it plays exactly like P+'s…"; _status.ForeColor = Theme.Muted;
+                    try { r = await Task.Run(() => CheckMod(t, m)); }
+                    catch (Exception e) { r = (Friendly.Explain(e), null, null, null); }
+                    _checked[key] = r;
+                    if (IsDisposed || me != _asking) return;
+                }
+                if (r.Looks == null) { _status.Text = $"{m.Name} can't go on {(t.IsNormal ? "the normal " + s.Name : t.Label)}: {r.Why}."; _status.ForeColor = Theme.Bad; return; }
+                picture = picture ?? r.Picture;
             }
-            if (r.Looks == null) { _status.Text = $"{m.Name} can't go on {tName}: {r.Why}."; _status.ForeColor = Theme.Bad; return; }
+            bool onAnother = m.Enabled && !_chosen.Contains(m.On);
             _move.Text = $"Take it off {onName} (move it here)";
-            _move.Visible = m.Enabled;
-            _status.Text = $"{m.Name} goes on {tName}" + (t.Files.Count > 1 ? $" (all {t.Files.Count} of its files)" : "") +
-                           $". You still play on {tName} exactly as P+ made it, so it's safe online." +
-                           (m.Enabled ? $" Tick the box to take it off {onName} (it goes back to P+'s look there), or untick it to have it on both." : "");
+            _move.Visible = onAnother;
+            _status.Text = $"{m.Name} goes on {tName}" + (targets.Count == 1 && targets[0].Files.Count > 1 ? $" (all {targets[0].Files.Count} of its files)" : "") +
+                           $". You still play on P+'s stage exactly as P+ made it, so it's safe online." +
+                           (onAnother ? $" Tick the box to take it off {onName} (it goes back to P+'s look there), or untick it to keep it there too." : "");
             _status.ForeColor = Theme.Good;
             _use.Enabled = true;
             _stagePage.ScrollControlIntoView(_use);
-            if (r.Picture != null)
-            {
-                Bitmap shot = null;
-                try { var bytes = r.Picture; shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
-                if (IsDisposed || me != _asking) return;
-                var old = _pic.Image; _pic.Image = shot; old?.Dispose();
-                _pic.Visible = _picCap.Visible = shot != null;
-            }
+            await ShowPreview(picture, me);
+        }
+
+        /// <summary>Draws a stage file for the "how it will look" box (unless another choice came since).</summary>
+        async Task ShowPreview(byte[] bytes, int me)
+        {
+            if (bytes == null) return;
+            Bitmap shot = null;
+            try { shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
+            if (IsDisposed || me != _asking) { shot?.Dispose(); return; }
+            var old = _pic.Image; _pic.Image = shot; old?.Dispose();
+            _pic.Visible = _picCap.Visible = shot != null;
         }
 
         /// <summary>A mod of yours on another version: made to play like P+'s version there (its gameplay copied in, when
         /// the mod is for the same stage program), else its looks on P+'s file for that version.</summary>
-        (string Why, StagePlan Swap, List<StagePlan> Looks, byte[] Picture) CheckMod(Slot s, Version t, Mod m)
+        (string Why, StagePlan Swap, List<StagePlan> Looks, byte[] Picture) CheckMod(Version t, Mod m)
         {
             var (map, pictures) = _installer.ModLooks(m.First);
             string dir = Path.Combine(Path.GetTempPath(), "PPlusModdingTool", "move-" + Guid.NewGuid().ToString("N"));
@@ -652,7 +870,12 @@ namespace SkinManager.App
                     var target = Stages.Describe(f);
                     StagePlan plan = null;
                     if (Stages.SameProgram(madeFor, f, _info)) { plan = _installer.PlanFixedStage(card, pkg, file, target); if (!plan.CanInstall) plan = null; }
-                    plan = plan ?? _installer.PlanLooks(card, pkg, file, target);
+                    if (plan == null || Off(plan) >= 1f)
+                    {
+                        // its looks on P+'s file when they fit P+'s floors clearly better (see PlanFor)
+                        var looks = _installer.PlanLooks(card, pkg, file, target);
+                        if (plan == null || (looks.CanInstall && Off(looks) + 0.5f < Off(plan))) plan = looks;
+                    }
                     if (!plan.CanInstall) return (string.Join(" ", plan.Checks.Where(c => !c.Passed).Select(c => c.Detail ?? c.Title)), null, null, null);
                     plan.Name = m.Name; plan.PackageKey = m.First.PackageKey; plan.Group = group;
                     plan.Source = source; plan.SourcePath = m.First.SourcePath;
@@ -663,54 +886,51 @@ namespace SkinManager.App
             return (null, null, plans, plans[0].Bytes);
         }
 
+        /// <summary>Picks another version's look (or P+'s own, null) for the ticked versions: checks whether it can be
+        /// swapped for real (one version ticked: the normal one, when they play alike) or its scenery put on each, and
+        /// shows a preview.</summary>
         async void PickLook(Version v)
         {
-            var s = _slot; var t = _target; if (t == null) return;
+            var s = _slot; if (_chosen.Count == 0) return;
             int me = ++_asking;
             _look = v; _mod = null; _undo = v == null; _move.Visible = false;
             foreach (var tile in _looks.Controls.OfType<PictureTile>()) tile.Selected = v == null ? tile.Title == "P+'s own look" : tile.Value == v;
             _use.Enabled = false; _pic.Visible = _picCap.Visible = false;
-            string tName = t.IsNormal ? "the normal " + s.Name : t.Label;
+            string tName = ChosenNames();
             if (v == null)
             {
-                bool changed = Current(s, t).Any(x => x.Enabled);
-                _status.Text = changed ? $"{char.ToUpper(tName[0]) + tName.Substring(1)} goes back to how P+ made it." : "That's how it looks now.";
+                bool changed = _chosen.Any(t => Current(s, t).Any(x => x.Enabled));
+                _status.Text = changed ? $"{Cap(tName)} go{(_chosen.Count == 1 ? "es" : "")} back to how P+ made {(_chosen.Count == 1 ? "it" : "them")}." : "That's how it looks now.";
                 _status.ForeColor = Theme.Muted; _use.Enabled = changed; _use.Text = "Put P+'s look back";
                 return;
             }
-            _use.Text = "Use this look";
-            string key = Key(s, t, v);
-            if (!_checked.TryGetValue(key, out var r))
+            _use.Text = _chosen.Count > 1 ? $"Use this look on {_chosen.Count} versions" : "Use this look";
+            bool swapOk = _chosen.Count == 1;
+            byte[] picture = null; bool swapped = false;
+            foreach (var t in _chosen.ToList())
             {
-                _status.Text = $"Putting {(v.IsNormal ? "the normal one" : v.Label)}'s look on {tName} and checking it plays exactly like P+'s…"; _status.ForeColor = Theme.Muted;
-                try { r = await Task.Run(() => Check(s, t, v)); }
-                catch (Exception e) { r = (Friendly.Explain(e), null, null, null); }
-                _checked[key] = r;
-                if (IsDisposed || me != _asking) return;
+                string key = Key(s, t, v) + (swapOk ? "" : "|looks");
+                if (!_checked.TryGetValue(key, out var r))
+                {
+                    _status.Text = $"Putting {(v.IsNormal ? "the normal one" : v.Label)}'s look on {(t.IsNormal ? "the normal " + s.Name : t.Label)} and checking it plays exactly like P+'s…"; _status.ForeColor = Theme.Muted;
+                    try { var tt = t; r = await Task.Run(() => Check(s, tt, v, swapOk)); }
+                    catch (Exception e) { r = (Friendly.Explain(e), null, null, null); }
+                    _checked[key] = r;
+                    if (IsDisposed || me != _asking) return;
+                }
+                if (r.Swap == null && r.Looks == null) { _status.Text = $"{Cap(v.IsNormal ? "the normal " + s.Name : v.Label)}'s look can't go on {(t.IsNormal ? "the normal " + s.Name : t.Label)}: {r.Why}."; _status.ForeColor = Theme.Bad; return; }
+                swapped |= r.Swap != null;
+                picture = picture ?? r.Picture;
             }
             string vName = v.IsNormal ? "the normal " + s.Name : v.Label;
-            if (r.Swap != null)
-            {
+            if (swapped)
                 _status.Text = $"{Cap(vName)} plays exactly like {tName}, so they're swapped for real: just picking {s.Name} gives {v.Label}, and {v.Spot.HowToPick} gives the normal one. Only what you see changes, so it's safe online.";
-                _status.ForeColor = Theme.Good;
-            }
-            else if (r.Looks != null)
-            {
-                _status.Text = $"{Cap(tName)} gets {vName}'s scenery" + (t.Files.Count > 1 ? $" (all {t.Files.Count} of its files)" : "") +
-                               $". You still play on {tName} exactly as P+ made it (same floors, platforms and blast zones), so it's safe online. Try it offline once to check the scenery sits right.";
-                _status.ForeColor = Theme.Good;
-            }
-            else { _status.Text = $"{Cap(vName)}'s look can't go on {tName}: {r.Why}."; _status.ForeColor = Theme.Bad; }
-            _use.Enabled = r.Swap != null || r.Looks != null;
+            else
+                _status.Text = $"{Cap(tName)} get{(_chosen.Count == 1 ? "s" : "")} {vName}'s scenery. You still play on each exactly as P+ made it (same floors, platforms and blast zones), so it's safe online. Try it offline once to check the scenery sits right.";
+            _status.ForeColor = Theme.Good;
+            _use.Enabled = true;
             _stagePage.ScrollControlIntoView(_use);
-            if (r.Picture != null)
-            {
-                Bitmap shot = null;
-                try { var bytes = r.Picture; shot = await Task.Run(() => ModelPreview.RenderStage(bytes, 480, 270)); } catch (Exception e) { Program.Trace("preview: " + e.Message); }
-                if (IsDisposed || me != _asking) return;
-                var old = _pic.Image; _pic.Image = shot; old?.Dispose();
-                _pic.Visible = _picCap.Visible = shot != null;
-            }
+            await ShowPreview(picture, me);
         }
 
         static string HowTo(Version v) { var h = (v.Spot.HowToPick ?? "").Trim(); return h == "" || h == "hold" ? "a button combination" : h; }
@@ -772,13 +992,13 @@ namespace SkinManager.App
 
         /// <summary>Works out what giving a version another's look would do: a real swap (the normal one, when they play
         /// alike), the look's scenery on the version's files, or why neither.</summary>
-        (string Why, StagePlan Swap, List<StagePlan> Looks, byte[] Picture) Check(Slot s, Version t, Version v)
+        (string Why, StagePlan Swap, List<StagePlan> Looks, byte[] Picture) Check(Slot s, Version t, Version v, bool swapOk = true)
         {
             using (var card = _installer.OpenCard())
             {
                 byte[] Read(string f) => _lib.HasOriginalFile(f) ? _lib.OriginalFile(f) : card.ReadFile(f);
                 string pkgKey = KeyFor(s, t, v);
-                if (t.IsNormal && _installer.PlayAlike(card, s.Normal.Files, v.Files, _info) == null)
+                if (swapOk && t.IsNormal && _installer.PlayAlike(card, s.Normal.Files, v.Files, _info) == null)
                 {
                     var swap = _installer.PlanSwap(card, s.Normal.Spot, v.Spot, v.Name);
                     swap.PackageKey = pkgKey; swap.Name = $"{s.Name}: {v.Label} as the normal one";
@@ -806,45 +1026,60 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Turns the choice into the change to make (or, adding a stage, the plans to install) and closes with
+        /// OK.</summary>
         void Use()
         {
             if (_pkg != null)
             {
-                if (_newPlans == null || _newPlans.Count == 0) return;
-                Plans = _newPlans;
+                // every file of the download that has versions ticked (and passed), all at once
+                var all = _new.Where(n => n.Picked.Count > 0 && n.Plans != null).SelectMany(n => n.Plans).ToList();
+                if (all.Count == 0 || _new.Any(n => n.Picked.Count > 0 && (n.Checking || n.Plans == null))) return;
+                Plans = all;
                 DialogResult = DialogResult.OK; Close();
                 return;
             }
-            var s = _slot; var t = _target; var v = _look;
-            if (s == null || t == null) return;
+            var s = _slot; var v = _look;
+            if (s == null || _chosen.Count == 0) return;
             var change = new Installer.Change();
-            change.StageRemove.AddRange(Current(s, t));   // this version's look set by us before: replaced by this choice
+            void Remove(InstalledStage x) { if (!change.StageRemove.Contains(x)) change.StageRemove.Add(x); }
+            foreach (var t in _chosen) foreach (var x in Current(s, t)) Remove(x);   // these versions' looks set by us before: replaced by this choice
+            string tName = _chosen.Count == 1 ? (_chosen[0].IsNormal ? "the normal " + s.Name : $"{s.Name}'s {_chosen[0].Label}") : $"{_chosen.Count} versions of {s.Name}";
             if (_mod != null)
             {
-                if (!_checked.TryGetValue("mod|" + _mod.First.Id + "|" + t.Spot.Entry, out var mr) || mr.Looks == null) return;
-                // whatever else is on this version now (another mod) is turned off by the install itself
-                change.StageInstall.AddRange(mr.Looks);
                 bool moving = _move.Visible && _move.Checked;
-                if (moving) foreach (var e in _mod.Entries) if (!change.StageRemove.Contains(e)) change.StageRemove.Add(e);
-                string onName = _mod.On.IsNormal ? "the normal " + s.Name : $"{s.Name}'s {_mod.On.Label}", here = t.IsNormal ? "the normal " + s.Name : $"{s.Name}'s {t.Label}";
-                Done = moving ? $"Done. {_mod.Name} is on {here} now, and {onName} looks the way P+ made it again. You still play on P+'s stage, so it's safe online."
-                              : $"Done. {_mod.Name} is on {here} too. You still play on P+'s stage, so it's safe online.";
+                foreach (var t in _chosen.Where(t => t != _mod.On))
+                {
+                    if (!_checked.TryGetValue("mod|" + _mod.First.Id + "|" + t.Spot.Entry, out var mr) || mr.Looks == null) return;
+                    // whatever else is on these versions now (another mod) is turned off by the install itself
+                    change.StageInstall.AddRange(mr.Looks);
+                }
+                if (moving) foreach (var e in _mod.Entries) Remove(e);
+                string onName = _mod.On.IsNormal ? "the normal " + s.Name : $"{s.Name}'s {_mod.On.Label}";
+                Done = moving ? $"Done. {_mod.Name} is on {tName} now, and {onName} looks the way P+ made it again. You still play on P+'s stage, so it's safe online."
+                              : $"Done. {_mod.Name} is on {tName} too. You still play on P+'s stage, so it's safe online.";
                 Change = change; DialogResult = DialogResult.OK; Close();
                 return;
             }
-            string tName = t.IsNormal ? "the normal " + s.Name : $"{s.Name}'s {t.Label}";
-            if (_undo) Done = $"Done. {Cap(tName)} looks the way P+ made it again.";
+            if (_undo) Done = $"Done. {Cap(tName)} {(_chosen.Count == 1 ? "looks" : "look")} the way P+ made {(_chosen.Count == 1 ? "it" : "them")} again.";
             else
             {
-                if (v == null || !_checked.TryGetValue(Key(s, t, v), out var r) || (r.Swap == null && r.Looks == null)) return;
-                // a real swap moves versions around: looks set on either of the two swapped versions are taken off first
-                var others = r.Swap != null ? AnyCurrent(s).Where(x => x.PackageKey.Contains("|@" + v.Spot.Entry + "|")).ToList()
-                           : !t.IsNormal ? Current(s, s.Normal).Where(x => x.IsSwap && x.PackageKey.EndsWith("#" + t.Spot.Entry, StringComparison.OrdinalIgnoreCase)).ToList()
-                           : new List<InstalledStage>();
-                foreach (var o in others) if (!change.StageRemove.Contains(o)) change.StageRemove.Add(o);
-                string note = others.Count > 0 ? " (a change you made before that clashed with it was taken off)" : "";
-                if (r.Swap != null) { change.StageInstall.Add(r.Swap); Done = $"Done. Just picking {s.Name} now gives {v.Label}; {v.Spot.HowToPick} gives the normal one. They play exactly alike, so it's safe online{note}."; }
-                else { change.StageInstall.AddRange(r.Looks); Done = $"Done. {Cap(tName)} now has {(v.IsNormal ? "the normal " + s.Name : v.Label)}'s scenery and still plays exactly like P+'s, so it's safe online{note}. Try it offline once to check it looks right."; }
+                if (v == null) return;
+                bool swapOk = _chosen.Count == 1, swapped = false; int clashed = 0;
+                foreach (var t in _chosen)
+                {
+                    if (!_checked.TryGetValue(Key(s, t, v) + (swapOk ? "" : "|looks"), out var r) || (r.Swap == null && r.Looks == null)) return;
+                    // a real swap moves versions around: looks set on either of the two swapped versions are taken off first
+                    var others = r.Swap != null ? AnyCurrent(s).Where(x => x.PackageKey.Contains("|@" + v.Spot.Entry + "|")).ToList()
+                               : !t.IsNormal ? Current(s, s.Normal).Where(x => x.IsSwap && x.PackageKey.EndsWith("#" + t.Spot.Entry, StringComparison.OrdinalIgnoreCase)).ToList()
+                               : new List<InstalledStage>();
+                    foreach (var o in others) { if (!change.StageRemove.Contains(o)) clashed++; Remove(o); }
+                    if (r.Swap != null) { change.StageInstall.Add(r.Swap); swapped = true; }
+                    else change.StageInstall.AddRange(r.Looks);
+                }
+                string note = clashed > 0 ? " (a change you made before that clashed with it was taken off)" : "";
+                Done = swapped ? $"Done. Just picking {s.Name} now gives {v.Label}; {v.Spot.HowToPick} gives the normal one. They play exactly alike, so it's safe online{note}."
+                               : $"Done. {Cap(tName)} now {(_chosen.Count == 1 ? "has" : "have")} {(v.IsNormal ? "the normal " + s.Name : v.Label)}'s scenery and still play{(_chosen.Count == 1 ? "s" : "")} exactly like P+'s, so it's safe online{note}. Try it offline once to check it looks right.";
             }
             Change = change;
             DialogResult = DialogResult.OK;

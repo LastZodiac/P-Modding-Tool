@@ -9,8 +9,12 @@ using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>The SD card image opened for reading or writing files inside it. Keeps the whole file table (FAT) in
+    /// memory.</summary>
     public sealed class Fat32Image : IDisposable
     {
+        /// <summary>One file or folder in a folder on the card, with where its entry sits so it can be changed or
+        /// deleted.</summary>
         public sealed class Entry
         {
             public string Name;          // long name if present, else 8.3
@@ -41,6 +45,8 @@ namespace SkinManager.Core
             if (deferred) _pending = new Dictionary<long, byte[]>();
         }
 
+        /// <summary>Opens the card image and reads its layout and file table. Writable opens it so nothing else can use
+        /// it meanwhile; read-only lets other programs keep it open.</summary>
         public Fat32Image(string path, bool writable)
         {
             _fs = new FileStream(path, FileMode.Open, writable ? FileAccess.ReadWrite : FileAccess.Read,
@@ -71,7 +77,6 @@ namespace SkinManager.Core
         public long TotalBytes => (long)_totalClusters * _clusterBytes;
         /// <summary>Space a file of this many bytes takes on the card (whole clusters).</summary>
         public long OnCard(long bytes) => (bytes + _clusterBytes - 1) / _clusterBytes * _clusterBytes;
-        public int ClusterBytes => _clusterBytes;
 
         // ---------- reading ----------
 
@@ -96,6 +101,7 @@ namespace SkinManager.Core
         public bool Exists(string path) => Find(path) != null;
         public long FileSize(string path) => Find(path)?.Size ?? 0;
 
+        /// <summary>The whole of a file on the card. Throws if it isn't there, is a folder, or is cut short.</summary>
         public byte[] ReadFile(string path)
         {
             var e = Find(path) ?? throw new FileNotFoundException("Not on the SD card: " + path);
@@ -114,6 +120,7 @@ namespace SkinManager.Core
             return data;
         }
 
+        /// <summary>What's in a folder on the card (empty if there's no such folder).</summary>
         public List<Entry> ListFolder(string path)
         {
             var e = Find(path);
@@ -121,6 +128,8 @@ namespace SkinManager.Core
             return List(e.FirstCluster == 0 ? _rootCluster : e.FirstCluster);
         }
 
+        /// <summary>Reads a folder's entries, joining long names to their 8.3 entries; skips deleted ones, the volume
+        /// label and "."/"..".</summary>
         List<Entry> List(uint dirCluster)
         {
             var result = new List<Entry>();
@@ -222,6 +231,8 @@ namespace SkinManager.Core
             return true;
         }
 
+        /// <summary>Walks down a folder path from the top of the card, making any folder that's missing; returns the
+        /// last one's cluster.</summary>
         uint EnsureFolders(IEnumerable<string> folders)
         {
             uint dir = _rootCluster;
@@ -246,6 +257,7 @@ namespace SkinManager.Core
             return dir;
         }
 
+        /// <summary>Writes a new folder's "." or ".." entry into its first cluster.</summary>
         void MakeDotEntry(byte[] buf, int at, string name, uint cluster)
         {
             Encoding.ASCII.GetBytes(name).CopyTo(buf, at);
@@ -255,6 +267,8 @@ namespace SkinManager.Core
             Array.Copy(e, 0, buf, at, 32);
         }
 
+        /// <summary>Adds a file or folder entry to a folder: a unique 8.3 name, plus long-name entries when the name
+        /// doesn't fit 8.3.</summary>
         void AddEntry(uint dir, string longName, byte attr, uint firstCluster, uint size)
         {
             var siblings = List(dir);
@@ -338,6 +352,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>How many clusters are free.</summary>
         uint CountFree()
         {
             uint n = 0;
@@ -345,6 +360,8 @@ namespace SkinManager.Core
             return n;
         }
 
+        /// <summary>Takes this many free clusters (searching on from the last one taken) and links them into a chain;
+        /// returns the first. Only changes the table in memory: FlushFat saves it.</summary>
         uint Allocate(uint count)
         {
             var got = new List<uint>();
@@ -360,11 +377,14 @@ namespace SkinManager.Core
             return got[0];
         }
 
+        /// <summary>Marks every cluster of a chain free (in memory: FlushFat saves it).</summary>
         void FreeChain(uint first)
         {
             foreach (var c in Chain(first).ToList()) _fat[c] = 0;
         }
 
+        /// <summary>Writes the table in memory to every FAT copy and updates the free count in the FSInfo
+        /// sector.</summary>
         void FlushFat()
         {
             var raw = ReadAt((long)_reserved * _bps, (int)(_fatSize * _bps));
@@ -395,10 +415,12 @@ namespace SkinManager.Core
 
         static string[] Split(string path) => path.Replace('\\', '/').Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
 
+        /// <summary>True when an entry has this name, long or 8.3 (case doesn't matter).</summary>
         static bool NameEquals(Entry e, string name) =>
             string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(PrettyShortFromSfn(e.ShortName), name, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>The (up to 13) letters held in one long-name entry.</summary>
         static string LfnChars(byte[] b, int i)
         {
             var sb = new StringBuilder();
@@ -411,6 +433,8 @@ namespace SkinManager.Core
             return sb.ToString();
         }
 
+        /// <summary>The checksum of an 8.3 name that its long-name entries carry, so they can be matched to
+        /// it.</summary>
         static byte SfnChecksum(byte[] b, int i)
         {
             byte sum = 0;
@@ -420,6 +444,7 @@ namespace SkinManager.Core
 
         static string PrettyShort(byte[] b, int i) => PrettyShortFromSfn(Encoding.ASCII.GetString(b, i, 11));
 
+        /// <summary>"NAME    EXT" as "NAME.EXT".</summary>
         static string PrettyShortFromSfn(string sfn)
         {
             if (sfn == null) return null;
@@ -427,6 +452,8 @@ namespace SkinManager.Core
             return x.Length > 0 ? n + "." + x : n;
         }
 
+        /// <summary>An 8.3 name for a new entry that no other entry in the folder has: the name itself if it fits, else
+        /// NAME~1.EXT and so on.</summary>
         static string MakeShortName(string longName, IEnumerable<string> taken)
         {
             var set = new HashSet<string>(taken.Where(t => t != null));
@@ -454,12 +481,15 @@ namespace SkinManager.Core
             throw new IOException("Too many files with similar names.");
         }
 
+        /// <summary>Puts a first cluster number into a 32-byte entry (it's split in two halves).</summary>
         static void SetCluster(byte[] e, uint c)
         {
             BitConverter.GetBytes((ushort)(c >> 16)).CopyTo(e, 20);
             BitConverter.GetBytes((ushort)(c & 0xFFFF)).CopyTo(e, 26);
         }
 
+        /// <summary>Sets an entry's changed and last-used dates to now (and its created date too for a new
+        /// one).</summary>
         static void StampTime(byte[] e, bool created)
         {
             var t = DateTime.Now;
@@ -518,6 +548,8 @@ namespace SkinManager.Core
             return b;
         }
 
+        /// <summary>Writes to the card, or, when changes are kept for Commit, into the copies of the blocks in
+        /// memory.</summary>
         void WriteAt(long off, byte[] b)
         {
             if (_pending == null) { WriteRaw(off, b); return; }
@@ -530,6 +562,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Reads straight from the image file, ignoring changes kept in memory.</summary>
         byte[] ReadRaw(long off, int n)
         {
             var b = new byte[n];
@@ -544,6 +577,7 @@ namespace SkinManager.Core
             return b;
         }
 
+        /// <summary>Writes straight to the image file.</summary>
         void WriteRaw(long off, byte[] b)
         {
             _fs.Position = off;
@@ -559,6 +593,8 @@ namespace SkinManager.Core
         public const int Writing = 1, Written = 2, Done = 3;
         const uint Magic = 0x4A434350;   // "PCCJ"
 
+        /// <summary>Saves the journal: which card it's for, its size, and each block's bytes as they are now. Written
+        /// through to disk.</summary>
         public static void Write(string path, string cardPath, long cardLength, List<KeyValuePair<long, byte[]>> blocks)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
@@ -572,6 +608,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Changes a journal's state (Writing, Written or Done) in place, written through to disk.</summary>
         public static void SetState(string path, int state)
         {
             using (var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.WriteThrough))

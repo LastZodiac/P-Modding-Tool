@@ -8,12 +8,14 @@ using BrawlLib.SSBB.ResourceNodes;
 
 namespace SkinManager.Core
 {
+    /// <summary>Where a move's hitboxes are on one frame, in game units, and where the fighter's root is.</summary>
     public sealed class FramePlace
     {
         public List<(Hitbox Hit, float X, float Y, float R)> Hits = new List<(Hitbox, float, float, float)>();
         public float RootX, RootY;   // where the fighter's root (TransN) is
     }
 
+    /// <summary>The frame-data side of the previewer: where hitboxes really are on each frame, from the posed model.</summary>
     public static unsafe partial class ModelPreview
     {
         /// <summary>For each move, each frame's hitboxes in game units. Also the fighter's standing body (from its hurtboxes).</summary>

@@ -13,8 +13,10 @@ using System.Threading;
 
 namespace SkinManager.Core
 {
+    /// <summary>How a GameBanana list is sorted.</summary>
     public enum GbSort { MostDownloaded, MostLiked, Newest }
 
+    /// <summary>One mod as GameBanana lists it: name, author, counts, dates and preview pictures.</summary>
     public sealed class GbMod
     {
         public long Id;
@@ -27,8 +29,10 @@ namespace SkinManager.Core
         public List<GbShot> Shots = new List<GbShot>();   // every preview picture on the mod's page
     }
 
+    /// <summary>One preview picture on a mod's page, small and big, with its caption.</summary>
     public sealed class GbShot { public string Small, Big, Caption; }
 
+    /// <summary>One page of a GameBanana list or search.</summary>
     public sealed class GbPage
     {
         public List<GbMod> Mods = new List<GbMod>();
@@ -37,6 +41,7 @@ namespace SkinManager.Core
         public int Pages => PerPage <= 0 ? 1 : (int)Math.Max(1, (Total + PerPage - 1) / PerPage);
     }
 
+    /// <summary>One downloadable file on a mod's page, and the files inside it when GameBanana knows them.</summary>
     public sealed class GbFile
     {
         public long Id;
@@ -47,6 +52,7 @@ namespace SkinManager.Core
         public string Extension => Path.GetExtension(Name ?? "").ToLowerInvariant();
     }
 
+    /// <summary>Everything on a mod's page: its text, license, files and links to other sites.</summary>
     public sealed class GbDetails
     {
         public GbMod Mod;
@@ -57,8 +63,12 @@ namespace SkinManager.Core
         public List<KeyValuePair<string, string>> OtherSites = new List<KeyValuePair<string, string>>();   // url, description
     }
 
+    /// <summary>What a file looks like from its list of contents: a skin for this character, for another, unsure, not a
+    /// skin, or hosted elsewhere.</summary>
     public enum GbVerdictKind { Good, OtherCharacter, Maybe, NotASkin, OtherSite }
 
+    /// <summary>What the app thinks of a file before downloading it, with a line to show and the costumes it found
+    /// inside.</summary>
     public sealed class GbVerdict
     {
         public GbVerdictKind Kind;
@@ -66,12 +76,11 @@ namespace SkinManager.Core
         public List<PackageCostume> Costumes = new List<PackageCostume>();
     }
 
+    /// <summary>Talks to GameBanana: lists and searches mods, reads mod pages and file lists, and downloads files and
+    /// pictures.</summary>
     public static class GameBanana
     {
-        public const int BrawlGameId = 5678;
         public const int AllCostumes = 10131;
-        public const int CostumePacks = 10170;
-        public const int PokemonTrainer = 10149;
         public const int AllStages = 6540, CompetitiveStages = 12498, OneToOneStages = 12499;
         public const int AllMusic = 3108, StageMusic = 3110, VictoryThemes = 3111;
         public const int PerPage = 24;
@@ -98,6 +107,8 @@ namespace SkinManager.Core
         static readonly string Site = (Environment.GetEnvironmentVariable("SKINMANAGER_GB_BASE") ?? "https://gamebanana.com").TrimEnd('/');
         static readonly string Images = Environment.GetEnvironmentVariable("SKINMANAGER_GB_IMAGES")?.TrimEnd('/');
 
+        /// <summary>Points a GameBanana address at the stand-in hosts when testing against saved answers; otherwise
+        /// leaves it alone.</summary>
         public static string Local(string url)
         {
             if (string.IsNullOrEmpty(url)) return url;
@@ -106,6 +117,7 @@ namespace SkinManager.Core
             return url;
         }
 
+        /// <summary>Turns on TLS 1.2, which GameBanana needs and older Windows doesn't use by default.</summary>
         static GameBanana()
         {
             try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
@@ -113,6 +125,7 @@ namespace SkinManager.Core
 
         const string UserAgent = "PPlusModdingTool/1.1 (Project+ costume manager for Brawl Online)";
 
+        /// <summary>A web request set up the way GameBanana expects (our name, JSON, compressed, with time limits).</summary>
         static HttpWebRequest Request(string url)
         {
             var r = (HttpWebRequest)WebRequest.Create(Local(url));
@@ -124,6 +137,8 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Downloads a page as text; GameBanana's error replies come back as text too, so their message can be
+        /// shown.</summary>
         public static string GetText(string url)
         {
             try
@@ -145,6 +160,8 @@ namespace SkinManager.Core
             catch (WebException e) { throw new GbException("Couldn't reach GameBanana. Check that this PC is online, then try again.", e); }
         }
 
+        /// <summary>Downloads and reads a JSON answer, turning GameBanana's own error replies into a GbException with
+        /// its message.</summary>
         static object GetJson(string url)
         {
             string text = GetText(url);
@@ -171,6 +188,7 @@ namespace SkinManager.Core
         public static GbPage List(int category, string search, GbSort sort, int page, string model = "Mod") =>
             ParseList(GetJson(ListUrl(category, search, sort, page, model)), page);
 
+        /// <summary>Reads one page of a list or search answer (mods and sounds only).</summary>
         public static GbPage ParseList(object j, int page)
         {
             var result = new GbPage { Page = page, PerPage = PerPage };
@@ -187,6 +205,8 @@ namespace SkinManager.Core
 
         static DateTime FromUnix(long ts) => ts <= 0 ? DateTime.MinValue : new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(ts).ToLocalTime();
 
+        /// <summary>Reads one mod from GameBanana's answer, picking a thumbnail Windows can open (not .webp) when there
+        /// is one.</summary>
         static GbMod ParseMod(object r)
         {
             var m = new GbMod
@@ -242,6 +262,7 @@ namespace SkinManager.Core
             return d;
         }
 
+        /// <summary>Reads a mod's page: its text, license, download count, files and links to other sites.</summary>
         public static GbDetails ParseDetails(object j)
         {
             var d = new GbDetails
@@ -292,6 +313,7 @@ namespace SkinManager.Core
             return paths;
         }
 
+        /// <summary>Turns a mod page's HTML into plain text, keeping line breaks and list bullets.</summary>
         public static string HtmlToText(string html)
         {
             if (string.IsNullOrEmpty(html)) return "";
@@ -413,6 +435,7 @@ namespace SkinManager.Core
 
         static void TryDelete(string p) { try { if (File.Exists(p)) File.Delete(p); } catch { } }
 
+        /// <summary>The MD5 of a file, to check a download against what GameBanana says it should be.</summary>
         static string Md5Of(string path)
         {
             using (var md5 = MD5.Create())
@@ -464,12 +487,14 @@ namespace SkinManager.Core
 
         static readonly System.Runtime.Serialization.Json.DataContractJsonSerializer Ser = new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(DownloadInfo));
 
+        /// <summary>Writes this record next to the downloaded file (as name.info.json).</summary>
         public void Save()
         {
             string p = System.IO.Path.ChangeExtension(Path, ".info.json");
             using (var f = File.Create(p)) Ser.WriteObject(f, this);
         }
 
+        /// <summary>Every download still on this PC, read from the records in the Downloads folder.</summary>
         public static List<DownloadInfo> All(string dataFolder)
         {
             var list = new List<DownloadInfo>();
@@ -488,6 +513,7 @@ namespace SkinManager.Core
             return list.OrderByDescending(d => d.DownloadedAt).ToList();
         }
 
+        /// <summary>Removes the downloaded file and its record.</summary>
         public void Delete()
         {
             try { if (File.Exists(Path)) File.Delete(Path); } catch { }
@@ -495,6 +521,7 @@ namespace SkinManager.Core
         }
     }
 
+    /// <summary>A GameBanana problem with a message fit to show the player.</summary>
     public sealed class GbException : Exception
     {
         public GbException(string message, Exception inner = null) : base(message, inner) { }

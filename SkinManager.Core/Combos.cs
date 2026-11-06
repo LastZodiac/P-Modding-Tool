@@ -14,6 +14,7 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>What a fighter's body does when hit or jumping: weight, falling, jumps and size, read from its moveset.</summary>
     public sealed class Body
     {
         public string Name;
@@ -21,6 +22,7 @@ namespace SkinManager.Core
         public int Jumpsquat = 4;
         public float JumpV = 3, HopV = 2, AirSpeed = 1;
         public float Width = 6, Height = 12;    // standing body in game units (from its hurtboxes)
+        /// <summary>Reads the body numbers from a fighter's moveset attributes.</summary>
         public static Body Of(FighterBook b) => new Body
         {
             Name = b.Character.Name, Weight = b.Moves.Attr(0xB0), Gravity = b.Moves.Attr(0x64), FallSpeed = b.Moves.Attr(0x68),
@@ -29,6 +31,8 @@ namespace SkinManager.Core
         };
     }
 
+    /// <summary>What happens to the target after a hit: how far and which way it flies, how long it's stuck, and its
+    /// path.</summary>
     public sealed class LaunchResult
     {
         public Hitbox Hit;
@@ -41,6 +45,7 @@ namespace SkinManager.Core
         public float StartX, StartY;      // the target's feet when hit
     }
 
+    /// <summary>Whether one move can follow another hit, and by how many frames it makes it or misses.</summary>
     public sealed class FollowUp
     {
         public MoveEntry Move;
@@ -51,12 +56,16 @@ namespace SkinManager.Core
         public string How;                // "short hop", "full hop" for aerials
     }
 
+    /// <summary>Works out combos from frame data: knockback, hitstun and which follow-ups connect before the target can
+    /// act.</summary>
     public static class Combos
     {
         /// <summary>When the attacker can start something else: the move's first actionable frame, or for an aerial
         /// landing right after the hit with an L-cancel (half landing lag).</summary>
         public static int Ready(MoveData move, int hitFrame) => move.LandingLag > 0 ? hitFrame + 1 + move.LandingLag / 2 : move.Faf;
 
+        /// <summary>How hard a hit launches the target at a given damage and weight (Brawl's knockback formula, set
+        /// knockback included).</summary>
         public static float Knockback(Hitbox h, float percentBefore, float weight)
         {
             float d = float.IsNaN(h.Damage) ? 0 : h.Damage;

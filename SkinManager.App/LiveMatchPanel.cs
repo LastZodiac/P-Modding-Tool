@@ -4,16 +4,17 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
 using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Live Match page: a title over the live view.</summary>
     class LiveMatchPanel : Panel
     {
         readonly LiveView _view = new LiveView { Dock = DockStyle.Fill };
+        /// <summary>Lays out the page's title above the view, which fills the rest.</summary>
         public LiveMatchPanel()
         {
             Dock = DockStyle.Fill; Padding = new Padding(28, 18, 16, 8); BackColor = Color.Transparent;
@@ -21,6 +22,8 @@ namespace SkinManager.App
             Controls.Add(_view); Controls.Add(title);
         }
 
+        /// <summary>Shows the latest match state and event list (following: the Stat Tracker is watching the game's
+        /// log).</summary>
         public void Show(LiveState s, List<(DateTime When, string Text, int Kind)> events, MatchHistory h, bool following)
         {
             _view.State = s; _view.Events = events; _view.History = h; _view.Following = following;
@@ -28,9 +31,11 @@ namespace SkinManager.App
         }
     }
 
+    /// <summary>Draws the match you're in: status, both characters and the stage, stocks on a timeline, connection,
+    /// chance to win and events.</summary>
     class LiveView : ScrollView
     {
-        public LiveState State; public List<(DateTime When, string Text, int Kind)> Events; public MatchHistory History; public bool Following;
+        public LiveState State; public new List<(DateTime When, string Text, int Kind)> Events; public MatchHistory History; public bool Following;
 
         static string Clock(int frame) { var t = TimeSpan.FromSeconds(Math.Max(0, frame) / 60.0); return $"{(int)t.TotalMinutes}:{t.Seconds:00}"; }
 
@@ -147,6 +152,7 @@ namespace SkinManager.App
             ContentHeight = y;
         }
 
+        /// <summary>Draws the "What happened" list (newest first, the last 40) and moves y below it.</summary>
         void DrawEvents(Graphics g, int w, ref int y)
         {
             var ev = Events ?? new List<(DateTime, string, int)>();

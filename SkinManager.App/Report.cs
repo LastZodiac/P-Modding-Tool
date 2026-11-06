@@ -11,6 +11,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>Drawing pieces shared by the after-game card and the full report: grade rings, badge colours, combo
+    /// lines.</summary>
     static class ReportArt
     {
         public static Color GradeColor(string grade) =>
@@ -49,15 +51,23 @@ namespace SkinManager.App
         }
 
         /// <summary>The level bar from the XP before to after (t: 0..1 of the fill); says LEVEL UP when it passes one.</summary>
-        public static void XpBar(Graphics g, string label, int before, int gained, RectangleF r, float t, Color fill)
+        public static void XpBar(Graphics g, string label, int before, int gained, RectangleF r, float t, Color fill, bool brief = false)
         {
             int now = before + (int)(gained * EaseOut(t));
             var (level, into, need) = Progress.LevelOf(now);
             var lb = Progress.LevelOf(before).Level;
-            using (var b = new SolidBrush(Theme.Text)) g.DrawString($"{label} {level}", Theme.BodyBold, b, r.X, r.Y);
             bool up = level > lb;
-            if (up) using (var b = new SolidBrush(Theme.Accent)) g.DrawString("LEVEL UP!", Theme.Bold(9.5f), b, r.X + g.MeasureString($"{label} {level}", Theme.BodyBold).Width + 6, r.Y + 1);
-            using (var m = new SolidBrush(Theme.Muted)) g.DrawString($"+{(int)(gained * EaseOut(t))} XP · {into}/{need}", Theme.Small, m, new RectangleF(r.X, r.Y + 1, r.Width, 18), new StringFormat { Alignment = StringAlignment.Far });
+            if (brief)
+            {
+                // half-width bars (the card over the game): the name cut short if it must be, and "+XP" or "LEVEL UP!"
+                var fmt = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+                using (var b = new SolidBrush(Theme.Text)) g.DrawString($"{label} {level}", Theme.BodyBold, b, new RectangleF(r.X, r.Y, r.Width - (up ? 66 : 40), 20), fmt);
+                using (var b = new SolidBrush(up ? Theme.Accent : Theme.Muted))
+                    g.DrawString(up ? "LEVEL UP!" : $"+{(int)(gained * EaseOut(t))}", up ? Theme.Bold(8.5f) : Theme.Small, b, new RectangleF(r.X, r.Y + 2, r.Width, 18), new StringFormat { Alignment = StringAlignment.Far });
+            }
+            else using (var b = new SolidBrush(Theme.Text)) g.DrawString($"{label} {level}", Theme.BodyBold, b, r.X, r.Y);
+            if (up && !brief) using (var b = new SolidBrush(Theme.Accent)) g.DrawString("LEVEL UP!", Theme.Bold(9.5f), b, r.X + g.MeasureString($"{label} {level}", Theme.BodyBold).Width + 6, r.Y + 1);
+            if (!brief) using (var m = new SolidBrush(Theme.Muted)) g.DrawString($"+{(int)(gained * EaseOut(t))} XP · {into}/{need}", Theme.Small, m, new RectangleF(r.X, r.Y + 1, r.Width, 18), new StringFormat { Alignment = StringAlignment.Far });
             var bar = new RectangleF(r.X, r.Y + 22, r.Width, 9);
             using (var b = new SolidBrush(Color.FromArgb(55, 255, 255, 255))) using (var p = StatsArt.Round(bar, 4.5f)) g.FillPath(b, p);
             // what was there before (this level), then what this game added
@@ -100,23 +110,25 @@ namespace SkinManager.App
         }
     }
 
-    /// <summary>The card over the game right after it: everything comes in with a little motion (the grade pops,
-    /// the score counts up, each bit of XP floats up as the bars fill, LEVEL UP bursts, badges pop one by one), then
-    /// the coach's notes slide in once they're worked out (how to DI the hits that took your stocks, a fun fact, a
-    /// combo idea).</summary>
+    /// <summary>The small card over the game right after it: the grade pops, the score counts up, XP floats up as the
+    /// two bars fill, then the coach's main note (how to DI a hit that took a stock) and the move to look out for slide
+    /// in, the move playing on a loop. Kept small so it doesn't cover the game; all the notes are in Stat Tracker &gt;
+    /// Matches.</summary>
     class ReportCard : OverlayForm
     {
-        GameProgress _p; GameSmash _s; GamePlayer _me, _them; string _stage; Func<int, int, string> _name; StatsArt _art;
+        GameProgress _p; GameSmash _s; GamePlayer _me, _them; string _stage;
         GameCoach _coach; DateTime _coachAt; Rectangle? _under;
         readonly Timer _timer = new Timer { Interval = 30 };
-        DateTime _shown; public Rectangle? Game; public bool Left;
+        DateTime _shown; public Rectangle? Game; public new bool Left;
         static readonly bool Testing = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") != null;
         float Seconds => Testing ? 90 : _coach != null && _coach.Any ? 24 : 16;
         public long GameId => _p?.GameId ?? 0;
 
+        /// <summary>Sets up the timer that redraws the card while it animates and takes it away after a while.</summary>
         public ReportCard()
         {
-            Size = new Size(470, 300); BaseOpacity = 0.93;
+            Size = new Size(CardWidth, 200); BaseOpacity = 0.93;
+            Draggable = true; Cursor = Cursors.Hand;   // drag it anywhere over the game
             _timer.Tick += (s, e) =>
             {
                 if ((DateTime.Now - _shown).TotalSeconds > Seconds) { _timer.Stop(); Disappear(); return; }
@@ -124,12 +136,18 @@ namespace SkinManager.App
             };
         }
 
-        int BaseHeight => 196 + (_p.NewBadges.Count > 0 ? 70 : 0) + Math.Min(2, _p.NewBests.Count) * 20 + (_s != null && _s.BestComboHits >= 2 ? 22 : 0);
-        int CoachHeight => _coach == null || !_coach.Any ? 0 : 30 + Math.Min(2, _coach.Tips.Count) * 46 + Math.Min(1, _coach.Facts.Count) * 36 + (_coach.Combo != null ? 36 : 0) + (_coach.Watch != null ? 132 : 0);
+        // the card is kept small so it doesn't cover the game: the result, both level bars, one line of badges and bests,
+        // the coach's main note and the move to look out for (the rest of the coach's notes are in Stat Tracker > Matches)
+        const int CardWidth = 340;
+        public const int PictureWidth = 132, PictureHeight = 94;   // the "look out for" picture, drawn at this size
+        bool HasNews => _p.NewBadges.Count > 0 || _p.NewBests.Count > 0;
+        int BaseHeight => 128 + (HasNews ? 20 : 0);
+        int CoachHeight => _coach == null || !_coach.Any ? 0 : 22 + (_coach.Tips.Count > 0 ? 40 : _coach.Combo != null ? 34 : 0) + (_coach.Watch != null ? PictureHeight + 22 : 0);
 
-        public void Show(GameProgress p, GameSmash s, GamePlayer me, GamePlayer them, string stage, Func<int, int, string> name, StatsArt art, GameCoach coach = null)
+        /// <summary>Shows the card for a game that just ended, starting its animations and its time on screen.</summary>
+        public void Show(GameProgress p, GameSmash s, GamePlayer me, GamePlayer them, string stage, GameCoach coach = null)
         {
-            _p = p; _s = s; _me = me; _them = them; _stage = stage; _name = name; _art = art; _coach = coach; _coachAt = DateTime.Now.AddSeconds(2.6);
+            _p = p; _s = s; _me = me; _them = them; _stage = stage; _coach = coach; _coachAt = DateTime.Now.AddSeconds(2.6);
             _shown = DateTime.Now;
             Fit();
             _timer.Start();
@@ -145,9 +163,10 @@ namespace SkinManager.App
             Fit(); Invalidate();
         }
 
+        /// <summary>Sizes the card to what it has to show and puts it back in its corner.</summary>
         void Fit()
         {
-            Size = new Size(470, BaseHeight + CoachHeight);
+            Size = new Size(CardWidth, BaseHeight + CoachHeight);
             Place();
         }
 
@@ -156,12 +175,17 @@ namespace SkinManager.App
         {
             if (card != null) _under = card;
             var area = Game ?? Screen.PrimaryScreen.WorkingArea;
+            if (Spot != null) { var to = AtSpot(area, Spot.Value); if (Location != to) Location = to; return; }   // where you dragged it
             int x = Left ? area.X + 14 : area.Right - Width - 14;
             int y = _under != null && _under.Value.Height > 0 ? _under.Value.Bottom + 10 : area.Y + 14;
             if (y + Height > area.Bottom - 10) y = Math.Max(area.Y + 14, area.Bottom - 10 - Height);
             var at = new Point(x, y);
             if (Location != at) Location = at;
         }
+
+        protected override Rectangle DragArea => Game ?? Screen.PrimaryScreen.WorkingArea;
+        // it takes clicks (to be dragged), unlike the slim bar during the fight
+        protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle &= ~0x20; return cp; } }
 
         float T(double from, double length) => (float)Math.Max(0, Math.Min(1, ((DateTime.Now - _shown).TotalSeconds - from) / length));
         float Since(DateTime at, double length) => (float)Math.Max(0, Math.Min(1, (DateTime.Now - at).TotalSeconds / length));
@@ -174,131 +198,115 @@ namespace SkinManager.App
             using (var border = new Pen(gc, 2)) g.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
             bool won = _me?.Won == true;
             // top: the grade, the result
-            ReportArt.Grade(g, _p.Grade, _p.Score, new RectangleF(14, 14, 82, 82), T(0, 0.5));
-            float x = 108;
-            Text(g, won ? "WIN" : "LOSS", Theme.Bold(18f), won ? Theme.Good : Theme.Bad, new RectangleF(x, 12, 120, 32));
+            ReportArt.Grade(g, _p.Grade, _p.Score, new RectangleF(10, 10, 56, 56), T(0, 0.5));
+            float x = 76;
+            Text(g, won ? "WIN" : "LOSS", Theme.Bold(14f), won ? Theme.Good : Theme.Bad, new RectangleF(x, 8, 70, 26));
             string stocks = _s?.MyStocksLeft != null ? (won ? $"{_s.MyStocksLeft} stock{(_s.MyStocksLeft == 1 ? "" : "s")} left" : $"took {_s.Kills} stock{(_s.Kills == 1 ? "" : "s")}") : "";
-            Text(g, stocks, Theme.Body, Theme.Text, new RectangleF(x + 74, 20, Width - x - 90, 20));
-            Text(g, $"vs {_them?.Name} ({Fighters.Name(_them?.Character ?? 0)})" + (_stage != null ? " · " + _stage : ""), Theme.Small, Theme.Muted, new RectangleF(x, 46, Width - x - 14, 18));
+            Text(g, stocks, Theme.Small, Theme.Text, new RectangleF(x + 62, 13, Width - x - 72, 18));
+            Text(g, $"vs {_them?.Name} ({Fighters.Name(_them?.Character ?? 0)})" + (_stage != null ? " · " + _stage : ""), Theme.Small, Theme.Muted, new RectangleF(x, 32, Width - x - 10, 18));
             int score = (int)Math.Round(_p.Score * ReportArt.EaseOut(T(0.1, 0.8)));
-            Text(g, $"Score {score} · better than {_p.Percentile}% of your games", Theme.Small, gc, new RectangleF(x, 66, Width - x - 14, 18));
-            if (_p.WinStreak >= 2) Text(g, $"{_p.WinStreak} wins in a row!", Theme.Small, OverlayLook.Accent, new RectangleF(x, 82, Width - x - 14, 18));
-            // the bars, and each bit of XP floating up off them as they fill
-            float y = 108;
+            Text(g, $"Score {score} · better than {_p.Percentile}% of your games" + (_p.WinStreak >= 2 ? $" · {_p.WinStreak} in a row" : ""), Theme.Small, gc, new RectangleF(x, 49, Width - x - 10, 18));
+            // the two bars side by side, and each bit of XP floating up off them as they fill
+            float y = 76, half = (Width - 30) / 2f;
             float fill = T(0.5, 1.6);
-            ReportArt.XpBar(g, "Level", _p.XpBefore, _p.Xp, new RectangleF(16, y, Width - 32, 34), fill, OverlayLook.Accent);
+            ReportArt.XpBar(g, "Level", _p.XpBefore, _p.Xp, new RectangleF(10, y, half, 34), fill, OverlayLook.Accent, true);
             for (int i = 0; i < _p.XpParts.Count; i++)
             {
                 float t = T(0.5 + i * 1.4 / Math.Max(1, _p.XpParts.Count), 1.1);
                 if (t <= 0 || t >= 1) continue;
                 int alpha = (int)(255 * (t < 0.2f ? t / 0.2f : 1 - (t - 0.2f) / 0.8f));
-                float px = 16 + (Width - 32) * Math.Min(0.82f, (i + 0.5f) / Math.Max(1, _p.XpParts.Count));
                 var part = _p.XpParts[i];
-                Text(g, $"+{part.Xp} {part.Why}", Theme.Bold(9f), Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), OverlayLook.Accent), new RectangleF(px - 50, y + 4 - 26 * ReportArt.EaseOut(t), 140, 18));
+                Text(g, $"+{part.Xp} {part.Why}", Theme.Bold(9f), Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), OverlayLook.Accent), new RectangleF(10, y + 4 - 26 * ReportArt.EaseOut(t), Width - 20, 18));
             }
             bool levelUp = Progress.LevelOf(_p.XpBefore + _p.Xp).Level > Progress.LevelOf(_p.XpBefore).Level;
-            if (levelUp) Burst(g, new PointF(60, y + 8), T(2.1, 0.9), OverlayLook.Accent);
-            y += 40;
-            ReportArt.XpBar(g, Fighters.Name(_p.Character), _p.CharXpBefore, _p.Xp, new RectangleF(16, y, Width - 32, 34), T(0.8, 1.6), Color.FromArgb(96, 182, 255));
+            if (levelUp) Burst(g, new PointF(40, y + 8), T(2.1, 0.9), OverlayLook.Accent);
+            ReportArt.XpBar(g, Fighters.Name(_p.Character), _p.CharXpBefore, _p.Xp, new RectangleF(20 + half, y, half, 34), T(0.8, 1.6), Color.FromArgb(96, 182, 255), true);
             bool charUp = Progress.LevelOf(_p.CharXpBefore + _p.Xp).Level > Progress.LevelOf(_p.CharXpBefore).Level;
-            if (charUp) Burst(g, new PointF(60, y + 8), T(2.4, 0.9), Color.FromArgb(96, 182, 255));
+            if (charUp) Burst(g, new PointF(50 + half, y + 8), T(2.4, 0.9), Color.FromArgb(96, 182, 255));
             y += 44;
-            // badges, one after another
-            if (_p.NewBadges.Count > 0)
+            // badges and personal bests: one line
+            if (HasNews)
             {
-                int n = Math.Min(5, _p.NewBadges.Count);
-                float w = (Width - 32) / 5f;
-                for (int i = 0; i < n; i++)
-                {
-                    var b = _p.NewBadges[i]; float pop = T(2.0 + i * 0.35, 0.35);
-                    if (pop <= 0) continue;
-                    var r = new RectangleF(16 + i * w + w / 2 - 20, y, 40, 40);
-                    ReportArt.Medal(g, b, r, pop);
-                    if (pop < 1) using (var pen = new Pen(Color.FromArgb((int)(180 * (1 - pop)), ReportArt.TierColor(b.Tier)), 2)) g.DrawEllipse(pen, RectangleF.Inflate(r, 10 * pop, 10 * pop));
-                    Text(g, b.Tier > 0 ? $"{b.Name} {Badge.Tiers[b.Tier]}" : b.Name, Theme.Small, Theme.Text, new RectangleF(16 + i * w, y + 44, w, 18), true);
-                }
-                if (_p.NewBadges.Count > n) Text(g, $"+{_p.NewBadges.Count - n} more", Theme.Small, Theme.Muted, new RectangleF(Width - 90, y - 16, 76, 16));
-                y += 70;
-            }
-            foreach (var b in _p.NewBests.Take(2))
-            {
-                float t = T(2.4, 0.4);
-                if (t > 0) Text(g, $"★ NEW BEST · {b.Name}: {b.Text}", Theme.BodyBold, Color.FromArgb((int)(255 * t), OverlayLook.Accent), new RectangleF(16 + 30 * (1 - ReportArt.EaseOut(t)), y, Width - 32, 20));
+                float t = T(2.0, 0.4);
+                var news = _p.NewBadges.Select(b => b.Tier > 0 ? $"{b.Name} {Badge.Tiers[b.Tier]}" : b.Name).ToList();
+                string line = (news.Count > 0 ? "★ " + string.Join(", ", news) : "") + (_p.NewBests.Count > 0 ? (news.Count > 0 ? " · " : "★ ") + $"new best: {_p.NewBests[0].Name} {_p.NewBests[0].Text}" : "");
+                if (t > 0) Text(g, line, Theme.Small, Color.FromArgb((int)(255 * t), OverlayLook.Accent), new RectangleF(10 + 20 * (1 - ReportArt.EaseOut(t)), y, Width - 20, 18));
                 y += 20;
             }
-            if (_s != null && _s.BestComboHits >= 2)
-            {
-                Text(g, $"Best combo: {_s.BestComboDamage:0}% · {ReportArt.Combo(_s, _name)}", Theme.Small, Theme.Text, new RectangleF(16, y + 2, Width - 32, 18));
-                y += 22;
-            }
-            // the coach's notes slide in
+            // the coach's main note, then the move to look out for
             if (_coach != null && _coach.Any)
             {
                 float t = Since(_coachAt, 0.5);
                 if (t > 0)
                 {
-                    float off = 24 * (1 - ReportArt.EaseOut(t));
+                    float off = 16 * (1 - ReportArt.EaseOut(t));
                     int a = (int)(255 * t);
-                    y += 4;
-                    using (var pen = new Pen(Color.FromArgb(a / 3, 255, 255, 255))) g.DrawLine(pen, 16, y, Width - 16, y);
-                    Text(g, "COACH'S NOTES", Theme.Bold(8.5f), Color.FromArgb(a, OverlayLook.Accent), new RectangleF(16 + off, y + 6, 200, 16));
-                    y += 26;
-                    for (int i = 0; i < Math.Min(2, _coach.Tips.Count); i++)
+                    using (var pen = new Pen(Color.FromArgb(a / 3, 255, 255, 255))) g.DrawLine(pen, 10, y + 2, Width - 10, y + 2);
+                    y += 6;
+                    if (_coach.Tips.Count > 0)
                     {
-                        var tip = _coach.Tips[i]; float ti = Since(_coachAt.AddSeconds(0.25 * i), 0.45);
-                        ReportArt.Stick(g, tip, new RectangleF(16 + off, y + 2, 38, 38), ti);
-                        using (var b = new SolidBrush(Color.FromArgb((int)(255 * ti), tip.Saved ? Theme.Text : Theme.Muted)))
-                            g.DrawString(DeathCoach.Say(tip), Theme.Small, b, new RectangleF(62 + off, y + 2, Width - 78, 40), new StringFormat { Trimming = StringTrimming.EllipsisWord });
-                        y += 46;
+                        var tip = _coach.Tips[0];
+                        ReportArt.Stick(g, tip, new RectangleF(10 + off, y + 3, 30, 30), t);
+                        using (var b = new SolidBrush(Color.FromArgb(a, tip.Saved ? Theme.Text : Theme.Muted)))
+                            g.DrawString(DeathCoach.Say(tip), Theme.Small, b, new RectangleF(46 + off, y + 2, Width - 56, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord, FormatFlags = StringFormatFlags.LineLimit });
+                        y += 40;
                     }
-                    foreach (var f in _coach.Facts.Take(1))
-                    {
-                        using (var b = new SolidBrush(Color.FromArgb(a, Theme.Text))) g.DrawString("★ " + f, Theme.Small, b, new RectangleF(16 + off, y, Width - 32, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord });
-                        y += 36;
-                    }
-                    if (_coach.Combo != null)
+                    else if (_coach.Combo != null)
                     {
                         using (var b = new SolidBrush(Color.FromArgb(a, OverlayLook.Accent)))
-                            g.DrawString(_coach.Combo, Theme.Small, b, new RectangleF(16 + off, y, Width - 32, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord });
-                        y += 36;
+                            g.DrawString(_coach.Combo, Theme.Small, b, new RectangleF(10 + off, y + 2, Width - 20, 32), new StringFormat { Trimming = StringTrimming.EllipsisWord, FormatFlags = StringFormatFlags.LineLimit });
+                        y += 34;
                     }
-                    // look out for this move: their move as it hits, how much it did, and what to do on shield
+                    // look out for this move: their move around the moment it hits (on a loop, slowed down, holding on the
+                    // hit), how much it did, and what to do on shield
                     var wo = _coach.Watch;
                     if (wo != null)
                     {
                         float tw = Since(_coachAt.AddSeconds(0.6), 0.5);
                         int aw = (int)(255 * tw);
-                        Text(g, "LOOK OUT FOR", Theme.Bold(8.5f), Color.FromArgb(aw, Theme.Bad), new RectangleF(16 + off, y, 200, 16));
+                        Text(g, "LOOK OUT FOR", Theme.Bold(8f), Color.FromArgb(aw, Theme.Bad), new RectangleF(10 + off, y, 200, 16));
                         y += 18;
-                        var pr = new Rectangle(16 + (int)off, (int)y, 150, 107);
-                        using (var path = Theme.Rounded(pr, 8))
+                        var pr = new Rectangle(10 + (int)off, (int)y, PictureWidth, PictureHeight);
+                        using (var path = Theme.Rounded(pr, 6))
                         {
                             using (var b = new SolidBrush(Color.FromArgb(aw / 2, 0, 0, 0))) g.FillPath(b, path);
-                            if (wo.Picture != null)
+                            var pic = FrameOf(wo);
+                            if (pic != null)
                             {
                                 var clip = g.Clip; g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
                                 var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = tw };
-                                using (var ia = new System.Drawing.Imaging.ImageAttributes()) { ia.SetColorMatrix(cm); g.DrawImage(wo.Picture, pr, 0, 0, wo.Picture.Width, wo.Picture.Height, GraphicsUnit.Pixel, ia); }
+                                using (var ia = new System.Drawing.Imaging.ImageAttributes()) { ia.SetColorMatrix(cm); g.DrawImage(pic, pr, 0, 0, pic.Width, pic.Height, GraphicsUnit.Pixel, ia); }
                                 g.Clip = clip;
                             }
                             using (var pen = new Pen(Color.FromArgb(aw, Theme.Bad), 1.5f)) g.DrawPath(pen, path);
                         }
-                        float tx = pr.Right + 12;
-                        string who = Fighters.Name(wo.Character) + "'s " + wo.Move;
-                        Text(g, who, Theme.BodyBold, Color.FromArgb(aw, Theme.Text), new RectangleF(tx, y, Width - tx - 14, 20));
-                        string did = $"Hit you {wo.Times} time{(wo.Times == 1 ? "" : "s")} for {wo.Damage:0}%" + (wo.Stocks > 0 ? $" and took {wo.Stocks} stock{(wo.Stocks == 1 ? "" : "s")}." : ".");
+                        float tx = pr.Right + 10;
+                        Text(g, Fighters.Name(wo.Character) + "'s " + wo.Move, Theme.BodyBold, Color.FromArgb(aw, Theme.Text), new RectangleF(tx, y, Width - tx - 8, 20));
+                        string did = $"Hit you {wo.Times}× for {wo.Damage:0}%" + (wo.Stocks > 0 ? $", took {wo.Stocks} stock{(wo.Stocks == 1 ? "" : "s")}." : ".");
                         using (var b = new SolidBrush(Color.FromArgb(aw, Theme.Muted)))
-                            g.DrawString(did, Theme.Small, b, new RectangleF(tx, y + 22, Width - tx - 14, 34), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+                            g.DrawString(did, Theme.Small, b, new RectangleF(tx, y + 20, Width - tx - 8, 32), new StringFormat { Trimming = StringTrimming.EllipsisWord, FormatFlags = StringFormatFlags.LineLimit });
                         var advice = wo.Advice;
                         if (advice != null)
                             using (var b = new SolidBrush(Color.FromArgb(aw, OverlayLook.Accent)))
-                                g.DrawString(advice, Theme.Small, b, new RectangleF(tx, y + 54, Width - tx - 14, 54), new StringFormat { Trimming = StringTrimming.EllipsisWord });
+                                g.DrawString(advice, Theme.Small, b, new RectangleF(tx, y + 50, Width - tx - 8, PictureHeight - 50), new StringFormat { Trimming = StringTrimming.EllipsisWord, FormatFlags = StringFormatFlags.LineLimit });
                     }
                 }
             }
             // how long it stays
             float left = 1 - (float)((DateTime.Now - _shown).TotalSeconds / Seconds);
             using (var b = new SolidBrush(Color.FromArgb(120, gc))) g.FillRectangle(b, 2, Height - 4, (Width - 4) * Math.Max(0, left), 2);
+        }
+
+        /// <summary>The picture of the move to look out for right now: it plays at a third of game speed, holds on the
+        /// hit for half a second, and pauses a moment before going round again.</summary>
+        static Bitmap FrameOf(WatchOut wo)
+        {
+            var f = wo.Frames;
+            if (f == null || f.Count == 0) return null;
+            int hold = 10, rest = 8, n = f.Count + hold + rest;                // in steps of 50 ms
+            int step = (int)(Environment.TickCount / 50 % n); if (step < 0) step += n;
+            int i = step <= wo.HitIndex ? step : step <= wo.HitIndex + hold ? wo.HitIndex : step - hold;
+            return f[Math.Max(0, Math.Min(f.Count - 1, i))];
         }
 
         /// <summary>A little burst: a ring spreading out and sparks flying (t: 0..1).</summary>

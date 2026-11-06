@@ -2,7 +2,6 @@
 // 3. set up the Blender add-on. Nothing here changes your SD card or the Mod Manager: the costume file it makes is
 // added with the Mod Manager's "Add from file", through its usual checks.
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -13,6 +12,8 @@ using SkinManager.Core;
 
 namespace PPlusBlenderBridge
 {
+    /// <summary>The Bridge's only window: send a costume to Blender, bring it back as a costume file, and set up the
+    /// add-on.</summary>
     class BridgeForm : Form
     {
         static readonly Color Back = Color.FromArgb(22, 24, 30), Panel = Color.FromArgb(34, 37, 46), Text1 = Color.FromArgb(235, 236, 240), Muted = Color.FromArgb(150, 155, 168), Gold = Color.FromArgb(255, 176, 46);
@@ -30,6 +31,7 @@ namespace PPlusBlenderBridge
         static Button Big(string t) => new Button { Text = t, AutoSize = true, Padding = new Padding(14, 6, 14, 6), BackColor = Gold, ForeColor = Color.FromArgb(28, 22, 10), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), Cursor = Cursors.Hand };
         static Button Small(string t) => new Button { Text = t, AutoSize = true, Padding = new Padding(8, 3, 8, 3), BackColor = Panel, ForeColor = Text1, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f), Cursor = Cursors.Hand };
 
+        /// <summary>Lays out the three steps (send, bring back, other) and wires up their buttons.</summary>
         public BridgeForm()
         {
             Text = "P+ Blender Bridge (test)"; BackColor = Back; ForeColor = Text1; ClientSize = new Size(940, 760); StartPosition = FormStartPosition.CenterScreen;
@@ -71,6 +73,8 @@ namespace PPlusBlenderBridge
             Shown += (s, e) => Start();
         }
 
+        /// <summary>Once the window shows: finds Brawl Online's card and the Mod Manager's list, picks a first fighter,
+        /// and brings back a file straight away if the Blender add-on started the Bridge with one.</summary>
         void Start()
         {
             _install = BrawlOnlineInstall.Find();
@@ -86,8 +90,11 @@ namespace PPlusBlenderBridge
             if (_bringOnStart != null) Bring(_bringOnStart, _ownHead);
         }
 
+        /// <summary>A costume slot in the Costume list, named with the mod on it when the Mod Manager added
+        /// one.</summary>
         sealed class SlotItem { public CostumeSlot Slot; public string Text; public override string ToString() => Text; }
 
+        /// <summary>Lists the picked fighter's costumes that are on the card.</summary>
         void FillSlots()
         {
             _slot.Items.Clear(); _preview.Image = null;
@@ -109,6 +116,8 @@ namespace PPlusBlenderBridge
 
         byte[] Read(Func<Fat32Image, byte[]> f) { using (var card = new Fat32Image(_install.CardPath, false)) return f(card); }
 
+        /// <summary>Draws the picked costume in the preview box (in the background; dropped if another costume was
+        /// picked meanwhile).</summary>
         async void ShowPreview()
         {
             var c = _who.SelectedItem as Character; var it = _slot.SelectedItem as SlotItem;
@@ -131,6 +140,7 @@ namespace PPlusBlenderBridge
         }
         void Busy(bool b) { _send.Enabled = _file.Enabled = _bring.Enabled = !b; Cursor = b ? Cursors.WaitCursor : Cursors.Default; }
 
+        /// <summary>Sends the fighter and costume picked in the lists to Blender.</summary>
         async void SendPicked()
         {
             var c = _who.SelectedItem as Character; var it = _slot.SelectedItem as SlotItem;
@@ -138,6 +148,8 @@ namespace PPlusBlenderBridge
             await Send(c, it.Slot, $"{c.Name} {it.Text}".Replace(":", " -"), () => Read(card => card.ReadFile(it.Slot.CostumePath(c))));
         }
 
+        /// <summary>Sends a costume .pac picked from disk, working out the fighter and slot number from its file name
+        /// (FitPeach19.pac).</summary>
         async void SendFile()
         {
             using (var d = new OpenFileDialog { Title = "Open a costume file", Filter = "Costume (Fit*.pac)|*.pac" })
@@ -151,6 +163,8 @@ namespace PPlusBlenderBridge
             }
         }
 
+        /// <summary>Gets the costume (and the fighter's own file, for its skeleton) ready for Blender and opens Blender
+        /// with it, asking once where Blender is if it can't be found.</summary>
         async Task Send(Character c, CostumeSlot slot, string label, Func<byte[]> costume)
         {
             Busy(true); Say("Sending " + label + " to Blender...");
@@ -189,6 +203,7 @@ namespace PPlusBlenderBridge
         string _bringOnStart; bool _ownHead;
         public void BringOnStart(string glb, bool ownHead) { _bringOnStart = glb; _ownHead = ownHead; }
 
+        /// <summary>Asks for the .glb saved from Blender and makes it into a costume file.</summary>
         void BringBack()
         {
             using (var d = new OpenFileDialog { Title = "What you saved from Blender", Filter = "Saved from Blender (*.glb)|*.glb", InitialDirectory = Directory.Exists(BridgeWork.KitFolder) ? BridgeWork.KitFolder : "" })
@@ -198,6 +213,9 @@ namespace PPlusBlenderBridge
             }
         }
 
+        /// <summary>Makes a costume file from a .glb saved in Blender, then shows before/after pictures and the file. A
+        /// .glb saved outside a Bridge folder is first tied to the costume picked above. ownHead: the head was made in
+        /// Blender, so the costume's own face pieces aren't kept.</summary>
         async void Bring(string glb, bool ownHead)
         {
             // a file saved somewhere else (not into the folder the costume was sent to): it's made for the costume picked above
@@ -254,6 +272,8 @@ namespace PPlusBlenderBridge
             return result;
         }
 
+        /// <summary>Shows the result: a button to find the costume file, before and after pictures, and the notes from
+        /// making it.</summary>
         void ShowResult(BridgeWork.Back r)
         {
             foreach (Control c in _results.Controls) c.Dispose();
@@ -304,8 +324,11 @@ namespace PPlusBlenderBridge
         }
     }
 
+    /// <summary>Starts the Bridge.</summary>
     static class Program
     {
+        /// <summary>Opens the Bridge window; --bring "file.glb" [--own-head] (from the Blender add-on) makes that file
+        /// into a costume as soon as it opens.</summary>
         [STAThread]
         static void Main(string[] args)
         {

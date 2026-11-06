@@ -3,12 +3,12 @@
 // folder (Documents\Dolphin Emulator), or wherever its settings say (Dolphin.ini: WiiSDCardPath). Some Dolphins copy a
 // folder into the card each time they start ("sync SD folder"): then changes to the card don't last, so that's said.
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Another Dolphin's SD card picked in Settings, and whether (and how) it can be used.</summary>
     public sealed class OtherCard
     {
         public string Card;            // the sd.raw
@@ -18,6 +18,7 @@ namespace SkinManager.Core
         public string Root;            // the build's folder on it ("/Project+", or another build's own)
     }
 
+    /// <summary>Finds and checks other Dolphins' SD cards and sets up their own mods lists.</summary>
     public static class OtherCards
     {
         /// <summary>The card of the Dolphin in this folder (or this file, if an sd.raw was picked), checked.</summary>
@@ -60,6 +61,7 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Reads one setting from a Dolphin .ini file (null if it isn't set).</summary>
         static string Setting(string ini, string key)
         {
             foreach (var line in File.ReadAllLines(ini))
@@ -94,6 +96,8 @@ namespace SkinManager.Core
         [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
         static extern bool CreateHardLink(string newFile, string existing, IntPtr security);
 
+        /// <summary>Hard-links every file of a folder into another one (copying when Windows won't link), skipping
+        /// files already there.</summary>
         static void LinkFolder(string from, string to)
         {
             Directory.CreateDirectory(to);

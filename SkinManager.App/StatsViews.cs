@@ -17,6 +17,7 @@ namespace SkinManager.App
         protected int ContentHeight;
         bool _dragging; int _dragFrom, _scrollFrom;
 
+        /// <summary>Paints itself, with a see-through background, and can take keyboard focus (for the wheel).</summary>
         protected ScrollView()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
@@ -32,6 +33,7 @@ namespace SkinManager.App
         protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); _childTop[e.Control] = e.Control.Top + Scroll; e.Control.LocationChanged += ChildMoved; }
         protected override void OnControlRemoved(ControlEventArgs e) { base.OnControlRemoved(e); _childTop.Remove(e.Control); e.Control.LocationChanged -= ChildMoved; }
         void ChildMoved(object s, EventArgs e) { if (!_movingChildren && s is Control c) _childTop[c] = c.Top + Scroll; }
+        /// <summary>Moves the controls on the view to match the scroll.</summary>
         void MoveChildren()
         {
             _movingChildren = true;
@@ -64,6 +66,7 @@ namespace SkinManager.App
         void SetScroll(int v) { int s = Math.Max(0, Math.Min(MaxScroll, v)); if (s != Scroll) { Scroll = s; MoveChildren(); Invalidate(); } }
         protected override void OnResize(EventArgs e) { base.OnResize(e); Layout2(); SetScroll(Scroll); }
 
+        /// <summary>Where the scroll bar's handle is; empty when everything fits.</summary>
         RectangleF Thumb()
         {
             if (MaxScroll <= 0) return RectangleF.Empty;
@@ -115,16 +118,18 @@ namespace SkinManager.App
         protected static readonly Color CardBack = Color.FromArgb(215, 26, 28, 36);
         protected static readonly Color You = Theme.Accent, Them = Color.FromArgb(96, 182, 255);
         protected static readonly StringFormat Clip = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
-        protected static readonly StringFormat Right = new StringFormat { Alignment = StringAlignment.Far, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+        protected static new readonly StringFormat Right = new StringFormat { Alignment = StringAlignment.Far, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
         protected static readonly StringFormat Center = new StringFormat { Alignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
 
+        /// <summary>Draws a card: a rounded, see-through box with a faint edge.</summary>
         protected static void Card(Graphics g, RectangleF r, Color? back = null)
         {
             using (var b = new SolidBrush(back ?? CardBack)) using (var p = StatsArt.Round(r, 8)) g.FillPath(b, p);
             using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255))) using (var p = StatsArt.Round(r, 8)) g.DrawPath(pen, p);
         }
-        protected static void Text(Graphics g, string s, Font f, Color c, RectangleF r, StringFormat fmt = null) { using (var b = new SolidBrush(c)) g.DrawString(s ?? "", f, b, r, fmt ?? Clip); }
+        protected static new void Text(Graphics g, string s, Font f, Color c, RectangleF r, StringFormat fmt = null) { using (var b = new SolidBrush(c)) g.DrawString(s ?? "", f, b, r, fmt ?? Clip); }
         protected static void Caps(Graphics g, string s, float x, float y, float w, Color? c = null) => Text(g, (s ?? "").ToUpperInvariant(), Theme.Small, c ?? Theme.Muted, new RectangleF(x, y, w, 18));
+        /// <summary>Draws a character's face in a rounded box (an empty box while there's no picture).</summary>
         protected static void Head(Graphics g, Image img, RectangleF r, bool mirror = false)
         {
             using (var bg = new SolidBrush(Color.FromArgb(40, 255, 255, 255))) using (var p = StatsArt.Round(r, 5)) g.FillPath(bg, p);
@@ -187,6 +192,7 @@ namespace SkinManager.App
     {
         public StatsData Data;
 
+        /// <summary>One stat tile on the overview: its number, how it changed, a little trend line or a ring.</summary>
         sealed class Tile { public string Title, Value, Sub, Delta; public bool? Better; public List<double> Spark; public double? Ring; }
 
         protected override void Draw(Graphics g, int w)
@@ -388,6 +394,7 @@ namespace SkinManager.App
             ContentHeight = y + 8;
         }
 
+        /// <summary>Draws one stat tile; waiting shows "..." until your replays have been read.</summary>
         static void DrawTile(Graphics g, Tile t, RectangleF r, bool waiting)
         {
             Card(g, r);
@@ -420,6 +427,7 @@ namespace SkinManager.App
         readonly List<(int Char, RectangleF Box)> _spots = new List<(int, RectangleF)>();
         int? _hover;
 
+        /// <summary>Paints itself, with a see-through background.</summary>
         public CharacterChart()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -599,8 +607,8 @@ namespace SkinManager.App
             var kills = Data.Moves(mySm.SelectMany(s => s.KillMoves.Select(m => (c, m)))).Take(5).ToList();
             float half = (w - 12) / 2f;
             float listH = 34 + 5 * 26;
-            MoveList(g, "Lands most", landed, new RectangleF(0, y, half, listH), "times");
-            MoveList(g, "Kills with", kills, new RectangleF(half + 12, y, half, listH), "kills");
+            MoveList(g, "Lands most", landed, new RectangleF(0, y, half, listH));
+            MoveList(g, "Kills with", kills, new RectangleF(half + 12, y, half, listH));
             y += (int)listH + 14;
 
             // matchups as it
@@ -614,6 +622,8 @@ namespace SkinManager.App
             ContentHeight = y + 8;
         }
 
+        /// <summary>How often you did something across your games, as a percent (say, L-cancels out of
+        /// aerial landings); NaN without replays that show it.</summary>
         static double HabitRate(IEnumerable<GameSmash> games, Func<PlayerHabits, int> part, Func<PlayerHabits, int> of)
         {
             int a = 0, b = 0;
@@ -621,7 +631,8 @@ namespace SkinManager.App
             return b == 0 ? double.NaN : 100.0 * a / b;
         }
 
-        void MoveList(Graphics g, string title, List<(string Name, int Count)> moves, RectangleF r, string unit)
+        /// <summary>A card listing moves with a bar for how often each was used, the most used first.</summary>
+        void MoveList(Graphics g, string title, List<(string Name, int Count)> moves, RectangleF r)
         {
             Card(g, r);
             Caps(g, title, r.X + 14, r.Y + 10, r.Width - 28);
@@ -637,6 +648,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>A card of matchups: each character with your record and win rate against it.</summary>
         void Matchups(Graphics g, string title, List<(int Char, Record Rec)> list, RectangleF r)
         {
             Card(g, r);
@@ -671,6 +683,8 @@ namespace SkinManager.App
         }
         protected override void Clicked(Point p, MouseButtons b) { foreach (var r in _rows) if (r.Box.Contains(p)) { Selected = r.Id; Picked?.Invoke(r.Id); Invalidate(); } }
 
+        /// <summary>How a day is shown over its games: Today, Yesterday, the weekday and date, or the full date for
+        /// past years.</summary>
         static string Day(DateTime local)
         {
             var d = (DateTime.Now.Date - local.Date).TotalDays;

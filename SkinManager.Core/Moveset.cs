@@ -8,6 +8,7 @@ using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>One event in a script: what it does (its id) and its arguments, as stored.</summary>
     public sealed class MoveEvent
     {
         public uint Id;                 // e.g. 0x06000D00 Offensive Collision
@@ -19,6 +20,8 @@ namespace SkinManager.Core
         public override string ToString() => $"{Id:X8}(" + string.Join(", ", Values.Select((v, i) => Types[i] == 1 ? (v / 60000f).ToString("0.###") : v.ToString())) + ")";
     }
 
+    /// <summary>One of the fighter's subactions: the animation it plays and its scripts (the main one is what frame
+    /// data reads).</summary>
     public sealed class Subaction
     {
         public int Index;
@@ -36,9 +39,10 @@ namespace SkinManager.Core
         public int ParamsAt;                        // its own parameter block (the game's "m_param", header +0x34; 0 = none)
         public List<Subaction> Subactions = new List<Subaction>();
         public List<List<MoveEvent>> Actions = new List<List<MoveEvent>>();   // its actions' entry scripts (timers, what it turns into)
-        public bool HasHitbox => Subactions.Any(s => s.Main.Any(e => e.Id == 0x06000D00 || e.Id == 0x06150F00));
     }
 
+    /// <summary>A fighter's moveset as read from its file: subactions and their scripts, action entry scripts,
+    /// articles, attributes and parameter blocks.</summary>
     public sealed class Moveset
     {
         readonly byte[] _d;            // the file data, from 0x20 on (offsets are relative to it)
@@ -60,7 +64,6 @@ namespace SkinManager.Core
         public int AttrInt(int off) => I(AttributesAt + off);
         /// <summary>A number anywhere in the data (an offset a parameter points to: a table of speeds...).</summary>
         public float RawF(int at) => F(at);
-        public int RawI(int at) => I(at);
 
         /// <summary>Olimar's Pikmin: each colour has its own scripts (the article's data +0x38: one list per colour, red,
         /// yellow, blue, white, purple, of a script per subaction). Null when there's none.</summary>
@@ -175,6 +178,9 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Finds the fighter's articles in the data section's extra offsets (each checked to look like one),
+        /// then reads each one's subactions and its actions' entry scripts. Every article keeps its slot: the game
+        /// numbers them by place.</summary>
         void ReadArticles(int data, SortedSet<int> starts)
         {
             var all = new SortedSet<int>(starts);
@@ -232,7 +238,8 @@ namespace SkinManager.Core
             }
         }
 
-        Moveset(byte[] data, bool raw) { _d = data; }
+        // the bytes as they are (the public constructor reads a whole moveset file); the second argument only tells them apart
+        Moveset(byte[] data, bool _) { _d = data; }
 
         /// <summary>An item's own scripts (an entry of /item/ItmCommonParam.pac, like R.O.B.'s gyro): its "animParam" block
         /// holds the subaction flags/names (+0), their count (+4) and the main scripts (+28). Null if it isn't laid out so.</summary>

@@ -8,8 +8,12 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>How far the game's code moves the fighter during certain specials, so the frame-data preview can show
+    /// them travelling.</summary>
     public static class FighterMotion
     {
+        /// <summary>One special: which fighter and animations it covers, how fast it moves them (from the fighter's own
+        /// parameters), and a note for the page.</summary>
         sealed class Rule
         {
             public string Fighter; public string[] Parts;

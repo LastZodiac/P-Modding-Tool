@@ -12,11 +12,14 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "Add your own music" window: one card per song, then makes them all into .brstm songs in a
+    /// temporary folder.</summary>
     class MusicImportForm : Form
     {
         /// <summary>The folder with the finished songs (.brstm), once made.</summary>
         public string ResultFolder { get; private set; }
 
+        /// <summary>One song in the list: its file, the decoded sound once read, and its card's boxes.</summary>
         sealed class Row
         {
             public string File; public AudioClip Clip; public Panel Card;
@@ -33,6 +36,8 @@ namespace SkinManager.App
         System.Media.SoundPlayer _player;
         bool _working;
 
+        /// <summary>Builds the window (quality, loudness, add buttons, drop target) and starts reading the songs it was
+        /// given.</summary>
         public MusicImportForm(IEnumerable<string> files)
         {
             Text = "Add your own music";
@@ -104,6 +109,8 @@ namespace SkinManager.App
                 return d.ShowDialog(owner) == DialogResult.OK ? d.FileNames.ToList() : null;
         }
 
+        /// <summary>Adds a card for each new music file (skipping ones already in the list) and reads each one in the
+        /// background.</summary>
         async void AddFiles(IEnumerable<string> files)
         {
             foreach (var f in files.Where(MusicImport.IsAudio))
@@ -127,6 +134,8 @@ namespace SkinManager.App
 
         static string Title(AudioClip c) => (c.Title ?? "My song").Trim();
 
+        /// <summary>Makes a song's card: name, what happens when it ends, volume, listen buttons and a remove
+        /// button.</summary>
         void BuildCard(Row row)
         {
             var card = new Panel { Width = Math.Max(700, _list.ClientSize.Width - 50), Height = 112, BackColor = Theme.Panel, Margin = new Padding(0, 6, 0, 6) };
@@ -158,6 +167,8 @@ namespace SkinManager.App
             _list.Controls.Add(card);
         }
 
+        /// <summary>The settings a song is made with: the chosen quality and loudness plus this card's volume and
+        /// loop.</summary>
         MusicOptions Options(Row r)
         {
             var o = new MusicOptions { Rate = _quality.SelectedIndex == 1 ? 44100 : 32000, Even = _even.Checked, VolumeDb = r.Volume.Value, Loop = r.Loop.SelectedIndex != 2 };
@@ -175,6 +186,8 @@ namespace SkinManager.App
             return Math.Max(0, s);
         }
 
+        /// <summary>Plays a song as it will sound in the game: its start, or (loop) its last seconds then where it
+        /// loops back to.</summary>
         async void Play(Row r, bool loop)
         {
             if (r.Clip == null) return;
@@ -190,6 +203,8 @@ namespace SkinManager.App
             catch (Exception e) { _summary.Text = "Couldn't play it here: " + Friendly.Explain(e); }
         }
 
+        /// <summary>Updates the line at the bottom (how many songs are ready) and whether Next can be
+        /// clicked.</summary>
         void Summary()
         {
             int ok = _rows.Count(r => r.Clip != null);
@@ -197,6 +212,8 @@ namespace SkinManager.App
             _next.Enabled = ok > 0 && !_working;
         }
 
+        /// <summary>Makes every readable song into a .brstm in a new temporary folder, then closes with OK so the music
+        /// window can place them.</summary>
         async Task Make()
         {
             var todo = _rows.Where(r => r.Clip != null).ToList();
@@ -231,6 +248,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>A song name made safe for a file name: no dots or banned characters, at most 48 letters.</summary>
         static string Safe(string n)
         {
             foreach (var c in Path.GetInvalidFileNameChars()) n = n.Replace(c, ' ');

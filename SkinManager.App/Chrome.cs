@@ -10,6 +10,8 @@ using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>Your choices for how the app looks and behaves (background, Stat Tracker, opponent card, overlay, card
+    /// and replay folders), saved in look.json.</summary>
     [DataContract]
     class LookSettings
     {
@@ -23,12 +25,15 @@ namespace SkinManager.App
         public bool Tours { get => ToursOff != true; set => ToursOff = value ? (bool?)null : true; }
         [DataMember] public System.Collections.Generic.List<string> ToursSeen = new System.Collections.Generic.List<string>();
         [DataMember] public string Hotkey;                    // the full overlay's hotkey (null: Alt+T)
-        [DataMember] public bool? OverlayLeft;
-        [DataMember] public bool? CardOpen;
+        [DataMember] public bool? OverlayLeft;               // the opponent card in the top-left corner (null: top right)
+        [DataMember] public float? CardX, CardY, ReportX, ReportY;   // where the opponent card and the after-game card were dragged (null: their corner)
+        public PointF? CardSpot { get => CardX != null && CardY != null ? new PointF(CardX.Value, CardY.Value) : (PointF?)null; set { CardX = value?.X; CardY = value?.Y; } }
+        public PointF? ReportSpot { get => ReportX != null && ReportY != null ? new PointF(ReportX.Value, ReportY.Value) : (PointF?)null; set { ReportX = value?.X; ReportY = value?.Y; } }
+        [DataMember] public bool? CardOpen;                  // the opponent card opened up all the way (null: the small one)
         [DataMember] public string OverlayTheme;              // the look over the game: a theme id, "custom" (null: seasonal)
         [DataMember] public int? OverlayColor;                // "custom": its color
         [DataMember] public bool? OverlayEffectsOff;          // no snow, bats or stars
-        public void ApplyOverlay() { OverlayLook.Choice = OverlayTheme ?? OverlayLook.Seasonal; OverlayLook.CustomAccent = OverlayColor != null ? (Color?)Color.FromArgb(OverlayColor.Value) : null; OverlayLook.Effects = OverlayEffectsOff != true; }                   // the opponent card opened up all the way (null: the small one)                // the opponent card in the top-left corner (null: top right)
+        public void ApplyOverlay() { OverlayLook.Choice = OverlayTheme ?? OverlayLook.Seasonal; OverlayLook.CustomAccent = OverlayColor != null ? (Color?)Color.FromArgb(OverlayColor.Value) : null; OverlayLook.Effects = OverlayEffectsOff != true; }
         [DataMember] public int? Glow, Glow2;                 // the built-in background's two glows (ARGB; null: gold and blue)
         public static readonly Color GlowGold = Color.FromArgb(255, 176, 46), GlowBlue = Color.FromArgb(90, 110, 255);
         [DataMember] public string CardFile;                  // your own Dolphin's sd.raw (or its folder) to mod instead of Brawl Online's (null: Brawl Online's)
@@ -38,6 +43,8 @@ namespace SkinManager.App
 
         static string FilePath => Path.Combine(Program.DataFolder, "look.json");
 
+        /// <summary>Reads the saved settings (the defaults if there are none or the file is damaged) and puts the
+        /// replay folders to use.</summary>
         public static LookSettings Load()
         {
             LookSettings look = null;
@@ -48,6 +55,7 @@ namespace SkinManager.App
             return look;
         }
 
+        /// <summary>Writes the settings to look.json; a failed save is ignored.</summary>
         public void Save()
         {
             try { Directory.CreateDirectory(Program.DataFolder); using (var s = File.Create(FilePath)) new DataContractJsonSerializer(typeof(LookSettings)).WriteObject(s, this); } catch { }
@@ -62,6 +70,8 @@ namespace SkinManager.App
         Size _cacheSize;
         LookSettings _look;
 
+        /// <summary>Switches to the look's background picture (or none, or the built-in one) and throws away the old
+        /// drawn copy.</summary>
         public void Apply(LookSettings look)
         {
             _look = look;
@@ -72,6 +82,7 @@ namespace SkinManager.App
             BackCache.Generation++;
         }
 
+        /// <summary>Draws the part of the backdrop being painted, from a copy made once per window size.</summary>
         public void Paint(Graphics g, Size size)
         {
             if (size.Width <= 0 || size.Height <= 0) return;
@@ -89,6 +100,8 @@ namespace SkinManager.App
             if (clip.Width > 0 && clip.Height > 0) g.DrawImage(_cache, clip, clip, GraphicsUnit.Pixel);
         }
 
+        /// <summary>Draws the whole backdrop once: the picture cover-fitted and darkened, or the built-in night-stage
+        /// glows, with a shadow behind the menu.</summary>
         void Render(Graphics g, Size size)
         {
             var all = new Rectangle(Point.Empty, size);
@@ -132,7 +145,6 @@ namespace SkinManager.App
         public void Dispose() { _picture?.Dispose(); _cache?.Dispose(); }
     }
 
-    /// <summary>A panel that lets the window's backdrop show through (tinted).</summary>
     /// <summary>What's behind a see-through panel, kept as a picture. Without it every card, button and label on the
     /// panel would have the window draw everything behind it again (the backdrop, each panel's tint, all the way up),
     /// on every frame of a scroll: that is what made scrolling choppy. Made again when the panel moves within the
@@ -141,6 +153,7 @@ namespace SkinManager.App
     {
         public static int Generation;   // goes up whenever the window's backdrop is drawn anew
 
+        /// <summary>Where a control sits inside its window, adding up its parents' positions.</summary>
         public static Point OffsetInForm(Control c)
         {
             int x = 0, y = 0;
@@ -152,11 +165,14 @@ namespace SkinManager.App
     /// <summary>A panel that keeps a picture of what's behind it (see BackPicture).</summary>
     interface IGlass { BackPicture Back { get; } }
 
+    /// <summary>The kept picture of what's behind one see-through panel, made again only when it moves, resizes or the
+    /// backdrop changes.</summary>
     sealed class BackPicture : IDisposable
     {
         Bitmap _bmp; Point _at; Size _size; int _gen = -1;
         Action<PaintEventArgs> _build;
 
+        /// <summary>Makes the picture again if it's out of date; false if there's nothing to draw yet.</summary>
         bool Ensure(Control owner)
         {
             var size = owner.ClientSize;
@@ -171,6 +187,8 @@ namespace SkinManager.App
             return true;
         }
 
+        /// <summary>Paints a panel's background from the kept picture; build draws what's behind it when the picture
+        /// has to be made again.</summary>
         public void Paint(Control owner, PaintEventArgs e, Action<PaintEventArgs> build)
         {
             _build = build;
@@ -215,12 +233,14 @@ namespace SkinManager.App
         public void Dispose() => Drop();
     }
 
+    /// <summary>A panel that lets the window's backdrop show through (tinted).</summary>
     class GlassPanel : Panel, IGlass
     {
         public int Tint = 0;   // 0..255 darkness drawn over the backdrop
         public Color TintColor = Color.FromArgb(10, 11, 16);
         readonly BackPicture _back = new BackPicture();
         public BackPicture Back => _back;
+        /// <summary>Paints itself, with a see-through background.</summary>
         public GlassPanel()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -242,6 +262,7 @@ namespace SkinManager.App
     {
         readonly BackPicture _back = new BackPicture();
         public BackPicture Back => _back;
+        /// <summary>Paints itself, with a see-through background.</summary>
         public GlassFlow()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
@@ -263,6 +284,8 @@ namespace SkinManager.App
         bool _hover;
         static readonly Font IconFont = MakeIconFont();
 
+        /// <summary>The Windows icon font (Segoe Fluent Icons on Windows 11, Segoe MDL2 Assets on 10); null if neither
+        /// is installed.</summary>
         static Font MakeIconFont()
         {
             foreach (var name in new[] { "Segoe Fluent Icons", "Segoe MDL2 Assets" })
@@ -274,6 +297,7 @@ namespace SkinManager.App
             return null;
         }
 
+        /// <summary>Paints itself, with a see-through background and a hand cursor.</summary>
         public NavButton()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw, true);

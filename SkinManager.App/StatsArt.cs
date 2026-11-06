@@ -9,6 +9,7 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>Character and stage pictures for the Stats page, read from the card once and shared.</summary>
     class StatsArt
     {
         public readonly Dictionary<int, Bitmap> Heads = new Dictionary<int, Bitmap>();      // game character number -> head
@@ -32,6 +33,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Reads every character's head and portrait (the stock icon when there's no head) and every stage
+        /// preview.</summary>
         static StatsArt Read(Fat32Image card)
         {
             var art = new StatsArt();
@@ -76,6 +79,7 @@ namespace SkinManager.App
             g.Restore(state);
         }
 
+        /// <summary>A rectangle with rounded corners, as a path (a plain rectangle when radius is 0).</summary>
         public static GraphicsPath Round(RectangleF r, float radius)
         {
             var p = new GraphicsPath();

@@ -10,6 +10,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "Add a skin" window: steps through costume, slot, pictures and checks, and leaves the finished Plan
+    /// for the caller to install.</summary>
     class AddSkinForm : Form
     {
         readonly Installer _installer;
@@ -35,6 +37,7 @@ namespace SkinManager.App
             if (bmp != null && !IsDisposed) done(bmp);
         }
 
+        /// <summary>A resized copy of a picture (for tiles and for pictures made from the model).</summary>
         static Bitmap Smaller(Bitmap b, int w, int h)
         {
             var r = new Bitmap(w, h);
@@ -53,6 +56,8 @@ namespace SkinManager.App
         /// <summary>An update: the old version's costume, whose slot is picked when the new one fits it.</summary>
         public InstalledSkin Replacing;
 
+        /// <summary>Builds the window around the steps. Starts on the costume step only when the download has several
+        /// costumes and none was picked already.</summary>
         public AddSkinForm(Installer installer, Library lib, SkinPackage pkg, Character preferred, PackageCostume start = null)
         {
             _installer = installer; _lib = lib; _pkg = pkg;
@@ -82,6 +87,7 @@ namespace SkinManager.App
             Shown += (s, e) => Go(_firstStep);
         }
 
+        /// <summary>Shows a step (0 costume, 1 slot, 2 pictures, 3 checks), replacing what the last one showed.</summary>
         void Go(int step)
         {
             if (step < _firstStep) return;
@@ -100,12 +106,14 @@ namespace SkinManager.App
             _next.PerformLayout(); OnResize(EventArgs.Empty);
         }
 
+        /// <summary>Goes to the next step; on the last one, closes with OK so the skin gets installed.</summary>
         void Next()
         {
             if (_step == 3) { DialogResult = DialogResult.OK; Close(); return; }
             Go(_step + 1);
         }
 
+        /// <summary>Sets the step's title, hint and Next button text, and lines the buttons up again for the new text.</summary>
         void SetHeader(string title, string hint, string next)
         {
             _stepTitle.Text = title; _stepHint.Text = hint; _stepHint.ForeColor = Theme.Muted; _next.Text = next;
@@ -113,6 +121,7 @@ namespace SkinManager.App
             if (foot != null) { _next.Location = new Point(foot.Width - _next.Width - 24, (foot.Height - _next.Height) / 2); _back.Location = new Point(_next.Left - _back.Width - 10, _next.Top); }
         }
 
+        /// <summary>An empty scrolling grid filling the step's area.</summary>
         FlowLayoutPanel Grid()
         {
             var g = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(0, 6, 0, 0) };
@@ -120,6 +129,7 @@ namespace SkinManager.App
             return g;
         }
 
+        /// <summary>Loads a picture without keeping its file locked; null if it can't be read.</summary>
         static Image LoadImage(string path)
         {
             if (path == null) return null;
@@ -148,6 +158,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Picks another costume, forgetting the slot and pictures chosen for the old one.</summary>
         void Choose(PackageCostume c)
         {
             if (c == _costume) return;
@@ -267,6 +278,9 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>One picture's row on the pictures step: what's chosen, and buttons to pick a file, make one from
+        /// the 3D model or keep P+'s. With nothing in the skin, a CSP and stock icon are made from the model on their
+        /// own.</summary>
         Control PictureRow(PictureKind kind)
         {
             var size = Cosmetics.SizeOf(kind);
@@ -355,6 +369,7 @@ namespace SkinManager.App
 
         bool _askedModel, _askedHead;
 
+        /// <summary>A picture file's size; empty if it can't be read.</summary>
         static Size ImageSize(string path)
         {
             try { using (var i = Image.FromFile(path)) return i.Size; } catch { return Size.Empty; }
@@ -395,6 +410,7 @@ namespace SkinManager.App
                 }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
+        /// <summary>One check's row: a tick or cross, the title and the explanation, growing to fit the text.</summary>
         static Control CheckRow(CheckResult r)
         {
             var row = new Panel { Width = 900, Height = 70, Margin = new Padding(0, 0, 0, 8), BackColor = Theme.Panel };

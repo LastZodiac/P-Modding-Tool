@@ -7,6 +7,7 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Reads Brawl's own costume files off the disc (kept in a cache folder after the first read).</summary>
     public static class DiscCostumes
     {
         /// <summary>Returns the disc's copy of a costume file, or null if it cannot be read.</summary>
@@ -40,6 +41,7 @@ namespace SkinManager.Core
             return null;
         }
 
+        /// <summary>Runs a program hidden and waits up to two minutes; true if it finished without an error.</summary>
         static bool Run(string exe, string args)
         {
             var psi = new ProcessStartInfo(exe, args)

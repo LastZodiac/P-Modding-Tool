@@ -12,6 +12,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>One of your moves as an answer to their move on shield: how fast it comes out and whether it gets there
+    /// in time.</summary>
     public sealed class PunishRow
     {
         public string Name, How;          // "Up smash", "straight out of shield" / "jump, then the aerial"
@@ -23,6 +25,8 @@ namespace SkinManager.Core
         public bool Reaches;              // reaches as far as their hit did
     }
 
+    /// <summary>Everything about punishing one of their moves on shield: how long you're in shieldstun, your window and
+    /// your options.</summary>
     public sealed class PunishReport
     {
         public MoveEntry Theirs;
@@ -34,6 +38,7 @@ namespace SkinManager.Core
         public int Window => -Advantage;
     }
 
+    /// <summary>Works out what you can punish out of shield, from both fighters' frame data.</summary>
     public static class Punish
     {
         /// <summary>The first frame a move hits (not a grab) and the most damage of its hits on that frame; null if none.</summary>
@@ -47,6 +52,8 @@ namespace SkinManager.Core
             return null;
         }
 
+        /// <summary>The last hit of a multi-hit move and its damage (the one that leaves you in shield longest); falls
+        /// back to the first.</summary>
         static (int Frame, float Damage)? LastHit(MoveData d)
         {
             int from = d.Active.Last().From;

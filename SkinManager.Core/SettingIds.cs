@@ -7,6 +7,8 @@ using System.Collections.Generic;
 
 namespace SkinManager.Core
 {
+    /// <summary>Where each fighter's numbered settings live in their parameter data (the mapping only, not the
+    /// values).</summary>
     public static class SettingIds
     {
         static readonly Dictionary<string, string> Raw = new Dictionary<string, string>

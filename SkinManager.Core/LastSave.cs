@@ -4,10 +4,11 @@
 // same date): if Brawl Online updated P+ since, putting the old card back would undo P+'s update too.
 using System;
 using System.IO;
-using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>The one undo point for "Undo last save": setting it up during a save, checking it can still be used,
+    /// and using it.</summary>
     public sealed class LastSave
     {
         readonly string _folder;
@@ -22,6 +23,8 @@ namespace SkinManager.Core
         string InfoFile => Path.Combine(_folder, "info.txt");
         static readonly string[] Parts = { "installed.json", "Originals", "Skins", "StageMods" };
 
+        /// <summary>What info.txt says about the undo point: which card, when it was saved, the card's size and date
+        /// then, and what the save did.</summary>
         public sealed class Info
         {
             public string Card, What;
@@ -29,6 +32,7 @@ namespace SkinManager.Core
             public long CardSize;
         }
 
+        /// <summary>The undo point's details, or null when there isn't one (or it can't be read).</summary>
         public Info Read()
         {
             try
@@ -115,7 +119,7 @@ namespace SkinManager.Core
         /// so the card is exactly as before that save. Returns what happened, for a message (null: nothing to do).</summary>
         public string RecoverInterruptedSave(string cardPath)
         {
-            int state = CardJournal.State(NewJournal, out string journalCard, out long length);
+            int state = CardJournal.State(NewJournal, out string journalCard, out _);
             if (state == 0) return null;
             if (journalCard != null && !string.Equals(Path.GetFullPath(journalCard), Path.GetFullPath(cardPath), StringComparison.OrdinalIgnoreCase)) return null;
             if (state == CardJournal.Done) return null;   // the save finished; only its undo point wasn't set up
@@ -184,11 +188,13 @@ namespace SkinManager.Core
             try { string old = cardPath + ".skinmanager-backup"; if (File.Exists(old)) File.Delete(old); } catch { }
         }
 
+        /// <summary>Deletes a folder or file if it's there; never throws.</summary>
         static void Clear(string path)
         {
             try { if (Directory.Exists(path)) Directory.Delete(path, true); else if (File.Exists(path)) File.Delete(path); } catch { }
         }
 
+        /// <summary>Copies a file, or a folder and everything in it (overwriting); nothing if it isn't there.</summary>
         static void CopyPart(string from, string to)
         {
             if (File.Exists(from)) { File.Copy(from, to, true); return; }
@@ -198,6 +204,7 @@ namespace SkinManager.Core
             foreach (var d in Directory.GetDirectories(from)) CopyPart(d, Path.Combine(to, Path.GetFileName(d)));
         }
 
+        /// <summary>Copies a big file (the card) in 4 MB pieces, saying how far along it is in percent.</summary>
         static void Copy(string from, string to, Action<int> progress)
         {
             using (var src = new FileStream(from, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))

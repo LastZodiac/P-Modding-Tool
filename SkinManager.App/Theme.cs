@@ -6,6 +6,7 @@ using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>The app's look: its colors, fonts, buttons and the drawing helpers the windows share.</summary>
     static class Theme
     {
         public static readonly Color Back = Color.FromArgb(24, 26, 33);
@@ -85,14 +86,17 @@ namespace SkinManager.App
         /// <summary>Stops a control drawing until the result is disposed (then it's drawn once, whole): for rebuilding a
         /// list of cards without the half-built list flashing up.</summary>
         public static IDisposable Freeze(Control c) => new Frozen(c);
+        /// <summary>What Freeze hands back: turns drawing off for a control, then back on (and redraws it) when disposed.</summary>
         sealed class Frozen : IDisposable
         {
             readonly Control _c; readonly bool _on;
+            /// <summary>Turns drawing off, only on Windows and only when the control is on screen.</summary>
             public Frozen(Control c)
             {
                 _c = c;
                 if (OnWindows && c.IsHandleCreated && c.Visible) try { SendMessage(c.Handle, 0x000B, IntPtr.Zero, IntPtr.Zero); _on = true; } catch { }   // WM_SETREDRAW off
             }
+            /// <summary>Turns drawing back on and redraws the control and everything in it.</summary>
             public void Dispose()
             {
                 if (!_on || _c.IsDisposed) return;
@@ -101,7 +105,6 @@ namespace SkinManager.App
             }
         }
 
-        /// <summary>Copies a picture 1:1 (no resizing, whatever the screen's scaling).</summary>
         /// <summary>Draws a picture stretched to a box without keeping a resized copy (animations: many frames, each on
         /// show briefly; keeping a window-sized copy of each ran the app out of memory).</summary>
         public static void Stretch(Graphics g, Image img, Rectangle r)
@@ -113,6 +116,7 @@ namespace SkinManager.App
             g.InterpolationMode = mode; g.PixelOffsetMode = off;
         }
 
+        /// <summary>Copies a picture 1:1 (no resizing, whatever the screen's scaling).</summary>
         public static void Blit(Graphics g, Image b, int x, int y) { if (b != null) g.DrawImage(b, new Rectangle(x, y, b.Width, b.Height), 0, 0, b.Width, b.Height, GraphicsUnit.Pixel); }
 
         static Icon _icon; static Image _logo;
@@ -120,6 +124,7 @@ namespace SkinManager.App
         public static Icon AppIcon { get { if (_icon == null) try { using (var st = typeof(Theme).Assembly.GetManifestResourceStream("app.ico")) _icon = new Icon(st); } catch { } return _icon; } }
         public static Image Logo { get { if (_logo == null) try { using (var st = typeof(Theme).Assembly.GetManifestResourceStream("logo96.png")) _logo = new Bitmap(Image.FromStream(st)); } catch { } return _logo; } }
 
+        /// <summary>The main button of a window or step: gold with dark text.</summary>
         public static Button Primary(string text)
         {
             var b = new SmoothButton
@@ -132,6 +137,7 @@ namespace SkinManager.App
             return b;
         }
 
+        /// <summary>A plain button for the other choices (dark, with a thin border).</summary>
         public static Button Secondary(string text)
         {
             var b = new SmoothButton
@@ -154,11 +160,13 @@ namespace SkinManager.App
             b.FlatAppearance.MouseOverBackColor = on ? Accent : PanelHover;
         }
 
+        /// <summary>A see-through, self-sizing text label in the app's colors (body text unless a font is given).</summary>
         public static Label Label(string text, Font font = null, Color? color = null) => new Label
         {
             Text = text, Font = font ?? Body, ForeColor = color ?? Text, AutoSize = true, BackColor = Color.Transparent,
         };
 
+        /// <summary>The outline of a rectangle with rounded corners, for filling or drawing.</summary>
         public static GraphicsPath Rounded(Rectangle r, int radius)
         {
             var p = new GraphicsPath();
@@ -245,6 +253,7 @@ namespace SkinManager.App
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         static extern System.IntPtr SendMessage(System.IntPtr h, int msg, System.IntPtr w, string l);
 
+        /// <summary>Fills a box with a dark grey checkerboard, the usual backdrop that shows a picture's see-through parts.</summary>
         public static void Checkerboard(Graphics g, Rectangle r)
         {
             using (var a = new SolidBrush(Color.FromArgb(40, 43, 54))) using (var b = new SolidBrush(Color.FromArgb(48, 52, 64)))

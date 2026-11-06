@@ -1,4 +1,5 @@
-// The main window: a sidebar (My Mods, Mod Store, Costume Slots) and the page you picked.
+// The main window: a sidebar (My Mods, Mod Store, Costume Slots, Model Swapper, Frame Data, Stat Tracker, Settings...)
+// and the page you picked.
 // Switching skins on and off is collected first and written to the SD card in one go ("Save").
 using System;
 using System.Collections.Generic;
@@ -12,6 +13,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The app's main window: the header, the sidebar and its pages, the notice bars, and everything that changes
+    /// the card (switching mods, profiles, cards, adding downloads).</summary>
     class MainForm : Form, IModHost
     {
         BrawlOnlineInstall _install;
@@ -37,6 +40,8 @@ namespace SkinManager.App
         List<InstalledSkin> _overwritten = new List<InstalledSkin>();
         List<InstalledSkin> _tooBig = new List<InstalledSkin>();
         List<InstalledStage> _tooBigStages = new List<InstalledStage>();
+        List<InstalledStage> _remake = new List<InstalledStage>();   // stage mods an older version made with a known fault
+        bool _remakeCrash;                                           // ...one of which can crash the game
         Button _putBack;
         bool _bannerSerious;   // the mods banner is about something that crashes the game (red), not a notice (gold)
         readonly ToolTip _bannerTip = new ToolTip();
@@ -56,6 +61,7 @@ namespace SkinManager.App
             };
         }
 
+        /// <summary>Puts a notice bar's button at its right end and lets the text use the room left.</summary>
         static void PlaceBannerButton(Panel bar, Label text, Button button)
         {
             button.Location = new Point(bar.Width - button.Width - 18, (bar.Height - button.Height) / 2);
@@ -71,6 +77,8 @@ namespace SkinManager.App
             return s.Length > 48 ? s.Substring(0, 46).TrimEnd() + "…" : s;
         }
         List<InstalledStage> _overwrittenStages = new List<InstalledStage>();
+        /// <summary>Whether the app is changing the card. When it stops, work that had to wait for the card (a finished
+        /// download) runs.</summary>
         bool _busy
         {
             get => Program.Busy;
@@ -106,10 +114,12 @@ namespace SkinManager.App
         FullOverlay _full;
         ReportCard _report;
         DateTime _checkAgainAt = DateTime.MaxValue;
+        DateTime _seenBefore;   // the newest game the Stat Tracker knew of before it looked again after a game
 
         /// <summary>A game just ended: its report over the game (if the overlay is on), and the Stat Tracker shows it.</summary>
         void ShowReport(long gameId)
         {
+            Program.Doing = "showing the after-game report";
             try
             {
                 var d = _stats.Data;
@@ -121,7 +131,11 @@ namespace SkinManager.App
                 _stats.MarkNew(gameId);
                 bool test = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_REPORT") != null;
                 if (!(_look.Stats && _look.Card) && !test) return;
-                if (_report == null) _report = new ReportCard();
+                if (_report == null)
+                {
+                    _report = new ReportCard { Spot = _look.ReportSpot };
+                    _report.Dragged += () => { _look.ReportSpot = _report.Spot; _look.Save(); };
+                }
                 _report.Game = _game ?? (_install != null ? GameWindow.Find(_install) : null);
                 _report.Left = _look.OverlayLeft == true;
                 var coach = _stats.Coach(gameId, c =>
@@ -131,10 +145,11 @@ namespace SkinManager.App
                     if (_report != null && _report.Visible && _report.GameId == gameId) _report.SetCoach(c);
                 });
                 _lastCoach = Line(coach);
-                _report.Show(p, smash, x.Me, x.Them, d.History.StageName(x.Game.Stage), d.MoveName, StatsArt.Cached, coach);
+                _report.Show(p, smash, x.Me, x.Them, d.History.StageName(x.Game.Stage), coach);
                 PlaceReport();
             }
             catch (Exception e) { Program.Log("after-game report", e); }
+            finally { Program.Doing = null; }
         }
         /// <summary>The after-game report sits right under the opponent card.</summary>
         void PlaceReport()
@@ -153,8 +168,19 @@ namespace SkinManager.App
         /// <summary>Reads what the game wrote since last time and shows, updates or hides the overlay.</summary>
         void LiveTick()
         {
+            Program.Doing = "following the game's log";
             try
             {
+                // where the game is (it can be moved or resized), and whether it's running at all: checked every 2 seconds
+                if (_install != null && DateTime.Now >= _gameLookAt)
+                {
+                    _gameLookAt = DateTime.Now.AddSeconds(2);
+                    var g = GameWindow.Find(_install);
+                    GamePriority(GameWindow.Running);
+                    if (g != _game) { _game = g; if (_card != null) { _card.Game = g; if (_card.Visible) _card.Place(); } if (_full != null && _full.Visible) _full.Place(g); if (_report != null) { _report.Game = g; PlaceReport(); } }
+                    // the game was closed (or minimized): nothing stays over the desktop (the log may never say the match ended)
+                    if (g == null && !Program.Testing) { if (++_gameGone >= 2) HideOverlays(); } else _gameGone = 0;
+                }
                 if (!_look.Stats || _install == null) { _card?.Hide(); _full?.Hide(); UpdateLivePage(false); return; }
                 if (_log == null) _log = new LogFollower(LogFollower.LogPath(_install));
                 bool changed = false;
@@ -164,15 +190,9 @@ namespace SkinManager.App
                 var s = _live.State;
                 UpdateLivePage(true);
                 if (!_look.Card) { _card?.Hide(); _full?.Hide(); if (changed && s.Phase == MatchPhase.GameOver) _reloadAt = DateTime.Now.AddSeconds(4); if (DateTime.Now >= _reloadAt) { _reloadAt = DateTime.MaxValue; _stats.CheckNewGame(); } return; }
-                if (DateTime.Now >= _reloadAt) { _reloadAt = DateTime.MaxValue; _cardHistory = null; changed = true; _stats.CheckNewGame(); _checkAgainAt = DateTime.Now.AddSeconds(12); }
-                if (DateTime.Now >= _checkAgainAt) { _checkAgainAt = DateTime.MaxValue; _stats.CheckNewGame(); }   // in case the game was saved late
-                // where the game is (it can be moved or resized): checked every 2 seconds
-                if (DateTime.Now >= _gameLookAt)
-                {
-                    _gameLookAt = DateTime.Now.AddSeconds(2);
-                    var g = GameWindow.Find(_install);
-                    if (g != _game) { _game = g; if (_card != null) { _card.Game = g; if (_card.Visible) _card.Place(); } if (_full != null && _full.Visible) _full.Place(g); if (_report != null) { _report.Game = g; PlaceReport(); } }
-                }
+                if (DateTime.Now >= _reloadAt) { _reloadAt = DateTime.MaxValue; _cardHistory = null; changed = true; _seenBefore = _stats.NewestSeen; _stats.CheckNewGame(); _checkAgainAt = DateTime.Now.AddSeconds(12); }
+                // in case the game was saved late (only when the first look didn't find it: reading everything again costs time)
+                if (DateTime.Now >= _checkAgainAt) { _checkAgainAt = DateTime.MaxValue; if (_stats.NewestSeen == _seenBefore) _stats.CheckNewGame(); }
                 if (changed)
                 {
                     if (_cardHistory == null && !_historyLoading) LoadCardHistory();
@@ -186,7 +206,8 @@ namespace SkinManager.App
                         _hideCardAt = DateTime.MaxValue;
                         if (_card == null)
                         {
-                            _card = new LiveCard { Scout = id => _stats.Scout(id, 2), Expanded = _look.CardOpen == true };
+                            _card = new LiveCard { Scout = id => _stats.Scout(id, 2), Expanded = _look.CardOpen == true, Spot = _look.CardSpot };
+                            _card.Dragged += () => { _look.CardSpot = _card.Spot; _look.Save(); PlaceReport(); };
                             _card.ExpandedChanged += open => { _look.CardOpen = open ? (bool?)true : null; _look.Save(); PlaceReport(); };
                             _card.VisibleChanged += (o, e) => PlaceReport();
                         }
@@ -212,6 +233,29 @@ namespace SkinManager.App
                 if (flag != null && System.IO.File.Exists(flag) != (_full != null && _full.Visible)) ToggleFull();
             }
             catch (Exception e) { Program.Log("overlay", e); }
+            finally { Program.Doing = null; }
+        }
+
+        int _gameGone;          // checks in a row the game's window wasn't found
+        bool _lowPriority;      // the app runs below the game's priority (while the game is running)
+
+        /// <summary>Takes everything over the game away (the game was closed): the card, the report, the full overlay.</summary>
+        void HideOverlays()
+        {
+            if (_card != null && _card.Visible) { _card.Disappear(); _cardSig = null; }
+            _hideCardAt = DateTime.MaxValue; _pillAt = DateTime.MaxValue;
+            if (_report != null && _report.Visible) _report.Disappear();
+            if (_full != null && _full.Visible) _full.Hide();
+        }
+
+        /// <summary>While the game runs, the app's own work (reading replays, the after-game notes, pictures) runs below
+        /// it, so the game always gets the computer first; back to normal once it's closed.</summary>
+        void GamePriority(bool game)
+        {
+            if (game == _lowPriority) return;
+            _lowPriority = game;
+            try { using (var me = Process.GetCurrentProcess()) me.PriorityClass = game ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Normal; }
+            catch (Exception e) { Program.Log("setting the app's priority", e); }
         }
 
         /// <summary>The Live Match page (when on show) and the recording dot by its name in the menu.</summary>
@@ -255,6 +299,8 @@ namespace SkinManager.App
         }
 
         DateTime _historyFailedAt;
+        /// <summary>Reads your match history for the overlay over the game, in the background. If it fails, the overlay says so
+        /// and it isn't tried again for 30 seconds.</summary>
         async void LoadCardHistory()
         {
             if (DateTime.Now - _historyFailedAt < TimeSpan.FromSeconds(30)) return;
@@ -262,11 +308,13 @@ namespace SkinManager.App
             Program.HistoryProblem = null;
             try
             {
-                var install = _install; var installer = _installer;
+                var install = _install; var installer = _installer; var known = _stats?.StageNames;
                 _cardHistory = await System.Threading.Tasks.Task.Run(() =>
                 {
-                    Dictionary<int, string> names;
-                    try { using (var card = installer?.OpenCard()) names = card != null ? StageSelect.SlotListNames(card) : new Dictionary<int, string>(); } catch { names = new Dictionary<int, string>(); }
+                    // the stage names: the Stat Tracker's when it has read them (no need to open the SD card again)
+                    Dictionary<int, string> names = known;
+                    if (names == null)
+                        try { using (var card = installer?.OpenCard()) names = card != null ? StageSelect.SlotListNames(card) : new Dictionary<int, string>(); } catch { names = new Dictionary<int, string>(); }
                     var path = MatchHistory.DatabasePath(install);
                     return MatchHistory.Load(path, names, StatsPanel.KeptFolder);
                 });
@@ -302,6 +350,8 @@ namespace SkinManager.App
         readonly Panel _saveBar = new Panel { Dock = DockStyle.Bottom, Height = 54, BackColor = Theme.Accent, Visible = false };
         readonly Label _saveText = Theme.Label("", Theme.BodyBold, Theme.AccentText);
 
+        /// <summary>Builds the window: header, sidebar, pages, notice bars and save bar. openOnStart: a mod dropped on the app's
+        /// icon, added once it has started.</summary>
         public MainForm(string openOnStart = null)
         {
             _openOnStart = openOnStart;
@@ -371,6 +421,11 @@ namespace SkinManager.App
                     var c = new Installer.Change(); c.StageReapply.AddRange(_tooBigStages);
                     Run(c, "Done: your stages fit now and look the same.");
                 }
+                else if (_remake.Count > 0)
+                {
+                    var c = new Installer.Change(); c.StageReapply.AddRange(_remake);
+                    Run(c, "Done: those stage mods were made again. You still play on P+'s stages exactly as P+ made them, so they're safe online.");
+                }
             };
             _putBack = putBack;
             _banner.Controls.Add(_bannerText); _banner.Controls.Add(putBack);
@@ -429,7 +484,7 @@ namespace SkinManager.App
             BuildSlotsPage();
             _swap = new SwapPanel(() => _installer, folder => AddSkin(folder)) { Visible = false };
             _look.ApplyOverlay();
-            _settings = new SettingsPanel(_look, () => { _look.ApplyOverlay(); _card?.Invalidate(); _report?.Invalidate(); _full?.Invalidate(); _backdrop.Apply(_look); _statsToggle?.Invoke(); ApplyHotkey(); Invalidate(true); }) { Visible = false, SaveFirst = () => SavedFirst() };
+            _settings = new SettingsPanel(_look, () => { _look.ApplyOverlay(); if (_card != null) { _card.Spot = _look.CardSpot; if (_card.Visible) _card.Place(); } if (_report != null) { _report.Spot = _look.ReportSpot; PlaceReport(); } _card?.Invalidate(); _report?.Invalidate(); _full?.Invalidate(); _backdrop.Apply(_look); _statsToggle?.Invoke(); ApplyHotkey(); Invalidate(true); }) { Visible = false, SaveFirst = () => SavedFirst() };
             _settings.DatabasePath = () => _install == null ? null : MatchHistory.DatabasePath(_install);
             _settings.ReplayFoldersChanged = () => { _cardHistory = null; _stats?.CheckNewGame(); };
             _content.Controls.Add(_library); _content.Controls.Add(_store); _content.Controls.Add(_slotsPage); _content.Controls.Add(_swap); _content.Controls.Add(_settings);
@@ -484,7 +539,19 @@ namespace SkinManager.App
             DoubleBuffered = true;
             _backdrop.Apply(_look);
             Resize += (s, e) => Invalidate(true);
-            Shown += (s, e) => { ApplyHotkey(); Startup(); };
+            Shown += (s, e) =>
+            {
+                ApplyHotkey(); Startup(); Watchdog.Start(this);
+                // UI tests: the window stops answering for 3 seconds once, so the watchdog's note can be checked
+                if (Environment.GetEnvironmentVariable("SKINMANAGER_TEST_FREEZE") != null)
+                {
+                    var freeze = new Timer { Interval = 5000 };
+                    freeze.Tick += (o, a) => { freeze.Stop(); Program.Doing = "a test freeze"; System.Threading.Thread.Sleep(3000); Program.Doing = null; };
+                    freeze.Start();
+                }
+            };
+            // the overlays are windows of their own: closed with the app, so none can be left over the desktop
+            FormClosed += (s, e) => { foreach (var o in new Form[] { _card, _report, _full }) try { o?.Close(); } catch { } };
             Activated += (s, e) => { if (_install != null && !_busy) UpdateStatus(); };
             FormClosing += (s, e) =>
             {
@@ -516,6 +583,7 @@ namespace SkinManager.App
 
         Control _shownPage;
         Control _header;
+        /// <summary>A page's name as the sidebar shows it (tours are kept by these names).</summary>
         string PageName(Control page) =>
             page == _library ? "My Mods" : page == _store ? "Mod Store" : page == _slotsPage ? "Costume Slots" : page == _swap ? "Model Swapper"
             : page == _settings ? "Settings" : page == _frameData ? "Frame Data" : page == _stats ? "Stat Tracker" : page == _credits ? "Credits" : page == _livePage ? "Live Match" : null;
@@ -537,6 +605,7 @@ namespace SkinManager.App
         /// <summary>Settings' "How accurate is the frame data?": Frame Data, on its accuracy view.</summary>
         public void ShowFrameDataAccuracy() { ShowPage(_frameData); _frameData.ShowAccuracy(); }
 
+        /// <summary>Shows a page and lights up its sidebar button; the first time, its tour starts once the page has drawn.</summary>
         void ShowPage(Control page)
         {
             Frozen(_content, () =>
@@ -565,6 +634,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Builds the Costume Slots page: the list of characters on the left, their costume slots on the right.</summary>
         void BuildSlotsPage()
         {
             var left = new GlassPanel { Dock = DockStyle.Left, Width = 210, Tint = 210, TintColor = Theme.Back, Padding = new Padding(10, 14, 0, 10) };
@@ -586,6 +656,8 @@ namespace SkinManager.App
             _slotsPage.Controls.Add(right); _slotsPage.Controls.Add(left);
         }
 
+        /// <summary>Finds Brawl Online (or your own Dolphin's card, if picked in Settings) and loads your mods; with neither,
+        /// offers to pick a Dolphin. A list that can't be loaded leaves the app usable without it.</summary>
         void Startup()
         {
             Program.Trace("startup");
@@ -630,6 +702,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Opens the card: puts back a save that was cut off, loads the mods list, then runs the checks done at start
+        /// (replaced mods, versions, mod updates, hand-made changes, app update).</summary>
         void StartWithCard()
         {
             _cards = new Cards(_install, CardData);
@@ -734,6 +808,7 @@ namespace SkinManager.App
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
+        /// <summary>Downloads and checks the new version of the app, then restarts into it (the swap happens on start).</summary>
         async Task UpdateApp(Button button)
         {
             if (_appRelease == null) return;
@@ -757,6 +832,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Shows the red bar when a stage mod that's on plays differently from P+'s stage (it could desync online).</summary>
         void CheckUnsafe()
         {
             if (_lib.Stages.Count == 0 || OnCleanCard) { _unsafeBanner.Visible = false; return; }
@@ -774,11 +850,20 @@ namespace SkinManager.App
                 }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
+        /// <summary>Stage mods to make again (Installer.NeedsRemaking), and whether one can crash the game.</summary>
+        (List<InstalledStage> list, bool crash) Remake(Fat32Image card)
+        {
+            var list = _installer.NeedsRemaking(card, out bool crash);
+            return (list, crash);
+        }
+
+        /// <summary>Updates the mods bar: mods a P+ update replaced, costumes or stages too big for the game's memory, or
+        /// costumes that can have their full-quality pictures back.</summary>
         void CheckOverwritten()
         {
             CheckUnsafe();
             if (_lib.Skins.Count == 0 && _lib.Stages.Count == 0) { _banner.Visible = false; return; }
-            Task.Run(() => { using (var card = _installer.OpenCard()) return (_installer.Overwritten(card), _installer.OverwrittenStages(card), _installer.TooBig(card), _installer.ShrunkForNothing(card), _installer.TooBigStages()); })
+            Task.Run(() => { using (var card = _installer.OpenCard()) return (_installer.Overwritten(card), _installer.OverwrittenStages(card), _installer.TooBig(card), _installer.ShrunkForNothing(card), _installer.TooBigStages(), Remake(card)); })
                 .ContinueWith(t =>
                 {
                     if (t.IsFaulted) return;
@@ -786,8 +871,10 @@ namespace SkinManager.App
                     _tooBig = t.Result.Item3.Concat(t.Result.Item4).Where(x => !_overwritten.Contains(x)).ToList();
                     var shrunk = t.Result.Item4.Where(x => !_overwritten.Contains(x)).ToList();
                     _tooBigStages = t.Result.Item5.Where(x => !_overwrittenStages.Any(o => o.Id == x.Id)).ToList();
+                    _remakeCrash = t.Result.Item6.crash;
+                    _remake = t.Result.Item6.list.Where(x => !_overwrittenStages.Any(o => o.Id == x.Id) && !_tooBigStages.Any(o => o.Id == x.Id)).ToList();
                     int n = _overwritten.Count + _overwrittenStages.Count;
-                    _banner.Visible = n > 0 || _tooBig.Count > 0 || _tooBigStages.Count > 0;
+                    _banner.Visible = n > 0 || _tooBig.Count > 0 || _tooBigStages.Count > 0 || _remake.Count > 0;
                     _bannerSerious = false;
                     string full = null;
                     if (n > 0)
@@ -812,6 +899,16 @@ namespace SkinManager.App
                         _bannerText.Text = (names.Count == 1 ? $"{Short(names[0])} is" : $"{names.Count} stages are") + " too big and will crash the game when loaded.";
                         full = string.Join("\r\n", names);
                         _putBack.Text = "Make them fit";
+                    }
+                    else if (_tooBig.Count == 0 && _remake.Count > 0)
+                    {
+                        var names = _remake.Select(x => x.Name).Distinct().ToList();
+                        _bannerSerious = _remakeCrash;
+                        _bannerText.Text = _remakeCrash
+                            ? (names.Count == 1 ? $"{Short(names[0])} can crash the game when the stage loads." : $"{names.Count} stage mods need making again (one can crash the game when its stage loads).")
+                            : (names.Count == 1 ? $"{Short(names[0])}'s ground shows off the floor you stand on." : $"{names.Count} stage mods show their ground off the floor you stand on.");
+                        full = "Made by an older version of the app:\r\n" + string.Join("\r\n", names) + "\r\n\r\nMaking them again only changes what you see; you still play on P+'s stages exactly as P+ made them.";
+                        _putBack.Text = "Fix them";
                     }
                     else if (shrunk.Count > 0)
                     {
@@ -838,6 +935,8 @@ namespace SkinManager.App
             _placeHeader();
         }
 
+        /// <summary>The Profile menu: your profiles, new and manage, and (on Brawl Online's card) the SD cards, undo last save,
+        /// and making or deleting the big and clean cards.</summary>
         void ShowProfileMenu()
         {
             if (_lib == null || _busy) return;
@@ -940,6 +1039,7 @@ namespace SkinManager.App
             {
                 var notes = new List<string>();
                 var release = Versions.Release(_install, v.PPlus);
+                FindOriginalFixes(release);
                 try { using (var card = _installer.OpenCard()) if (_install.OwnCard && release != null && !Versions.IsOn(card, release)) notes.Add($"this card isn't on P+ {v.PPlus}: open Brawl Online once so it updates it"); } catch { }
                 if (v.NewestPPlus != null && Versions.Newer(v.NewestPPlus, v.PPlus)) notes.Add($"P+ {v.NewestPPlus} is out: open Brawl Online to get it");
                 string latest = Versions.LatestLauncherOnline();
@@ -947,6 +1047,7 @@ namespace SkinManager.App
                 return notes;
             }).ContinueWith(t =>
             {
+                ApplyOriginalFixes();
                 if (t.IsFaulted || t.Result.Count == 0) return;
                 _updateNote = char.ToUpper(t.Result[0][0]) + string.Join("; ", t.Result).Substring(1);
                 UpdateStatus();
@@ -959,6 +1060,8 @@ namespace SkinManager.App
 
         // where P+'s stages are on the stage select: read once from the card in the background
         StageSelect _stageSelect; bool _stageSelectReading;
+        /// <summary>Where a stage mod is on the stage select. The first ask starts reading it in the background and returns
+        /// null; My Mods refreshes when it's read.</summary>
         public StageSpot WhereInGame(InstalledStage s)
         {
             if (_stageSelect == null)
@@ -984,6 +1087,7 @@ namespace SkinManager.App
         SwapPanel _swap;
         public TexturePacks Textures => _textures;
 
+        /// <summary>Asks, then adds a download of textures (screen-only pictures) as a texture pack.</summary>
         void AddTextures(string folder, string name, SkinSource source, string sourcePath)
         {
             int count = TexturePacks.Find(folder).Count;
@@ -996,6 +1100,7 @@ namespace SkinManager.App
             Dialog.Show(this, $"Added \"{pack.Name}\". You'll see it next time you play (My Mods > Textures turns it off and on).", "Texture pack", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+        /// <summary>Turns a texture pack on or off straight away (it doesn't touch the card, so it needs no save).</summary>
         public void SetOn(TexturePack p, bool on)
         {
             if (_busy) return;
@@ -1004,6 +1109,7 @@ namespace SkinManager.App
             _library.Refresh();
         }
 
+        /// <summary>Asks, then deletes a texture pack.</summary>
         public void Delete(TexturePack p)
         {
             if (Dialog.Show(this, $"Delete the texture pack \"{p.Name}\"?", "Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
@@ -1018,6 +1124,7 @@ namespace SkinManager.App
 
         public bool HasUpdate(long fileId) => fileId != 0 && _updates.ContainsKey(fileId);
 
+        /// <summary>Looks for newer versions of your mods on GameBanana in the background, then shows them in My Mods.</summary>
         void CheckModUpdates(bool force = false)
         {
             if (_lib == null) return;
@@ -1081,6 +1188,8 @@ namespace SkinManager.App
         /// <summary>"Undo last save" from Settings.</summary>
         public void UndoLastSaveAsked() { if (_install == null || _cards == null) { Dialog.Show(this, "There's no save to undo yet.", "Undo last save"); return; } UndoLastSave(); }
 
+        /// <summary>Asks, then puts the card and mods list back to how they were before the last save (when that can
+        /// still be done).</summary>
         void UndoLastSave()
         {
             if (!CardsCanChange()) return;
@@ -1096,6 +1205,7 @@ namespace SkinManager.App
             else Dialog.Show(this, "Done: your SD card and mods are back to how they were before your last save.", "Undo last save", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+        /// <summary>Whether the card can be changed now: Brawl Online must be closed and unsaved switches dealt with.</summary>
         bool CardsCanChange()
         {
             if (_install.IsRunning(out string what))
@@ -1123,6 +1233,50 @@ namespace SkinManager.App
             }
             if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
             return result;
+        }
+
+        /// <summary>Older versions could save an old build of a stage mod as P+'s file for its path (when the mod was
+        /// made smaller to fit), so turning the mod off put that build back. Finds P+'s real file for those, for every
+        /// card's mods list, from your other cards or saved originals (in the background; ApplyOriginalFixes saves them).</summary>
+        void FindOriginalFixes(PPlusRelease release)
+        {
+            if (release == null || _cards == null) return;
+            var found = new List<(Library lib, Dictionary<string, byte[]> fixes, string card)>();
+            var files = new[] { Cards.Normal, Cards.Big, Cards.Clean }.Select(n => (n, path: n == _cards.Active ? _install.CardPath : _cards.Parked(n))).Where(x => File.Exists(x.path)).ToList();
+            var cards = new List<Fat32Image>();
+            try
+            {
+                foreach (var f in files) try { cards.Add(new Fat32Image(f.path, false)); } catch { cards.Add(null); }
+                var active = _lib;
+                var libs = files.Select(f => f.n == _cards.Active ? active : new Library(_cards.LibraryFolder(f.n))).ToList();
+                for (int i = 0; i < files.Count; i++)
+                {
+                    if (cards[i] == null) continue;
+                    var fixes = OriginalsRepair.Find(libs[i], cards[i], release, cards.Where(c => c != null), libs);
+                    if (fixes.Count > 0) found.Add((libs[i], fixes, files[i].n));
+                }
+            }
+            catch (Exception e) { Program.Log("checking the saved originals", e); }
+            finally { foreach (var c in cards) c?.Dispose(); }
+            lock (this) _originalFixes = found;
+        }
+        List<(Library lib, Dictionary<string, byte[]> fixes, string card)> _originalFixes;
+
+        /// <summary>Saves what FindOriginalFixes found, unless the app is changing a card right now (then next time).</summary>
+        void ApplyOriginalFixes()
+        {
+            List<(Library lib, Dictionary<string, byte[]> fixes, string card)> found;
+            lock (this) { found = _originalFixes; _originalFixes = null; }
+            if (found == null || _busy) return;
+            foreach (var (lib, fixes, card) in found)
+            {
+                try
+                {
+                    OriginalsRepair.Apply(lib, fixes);
+                    Program.Trace($"P+'s own file put back as the original for {fixes.Count} stage(s) of the {card} card: {string.Join(", ", fixes.Keys)}");
+                }
+                catch (Exception e) { Program.Log("fixing the saved originals", e); }
+            }
         }
 
         /// <summary>The P+ release Brawl Online has (its files, to compare cards with); null when it can't be read.</summary>
@@ -1156,6 +1310,7 @@ namespace SkinManager.App
             return error;
         }
 
+        /// <summary>Explains and makes the big (4 GB) card for Unranked and Ranked, then offers to switch to it.</summary>
         void MakeBigCard()
         {
             if (!CardsCanChange()) return;
@@ -1173,6 +1328,7 @@ namespace SkinManager.App
                 SwitchCard(Cards.Big);
         }
 
+        /// <summary>Asks, then deletes the big card and its mods list.</summary>
         void DeleteBigCard()
         {
             if (!CardsCanChange()) return;
@@ -1182,6 +1338,8 @@ namespace SkinManager.App
             UpdateStatus();
         }
 
+        /// <summary>Switches to another of your SD cards (normal, big, clean), first catching it up with any P+ update it missed.
+        /// quiet: say nothing unless there's something to say.</summary>
         bool SwitchCard(string to, bool quiet = false)
         {
             _stageSelect = null;
@@ -1375,8 +1533,7 @@ namespace SkinManager.App
             finally { _handScanning = false; }
         }
 
-        public HandScan Hand => HandMods.Last;
-
+        /// <summary>Shows the changes made to the card by hand (outside the app), with a way to look again from scratch.</summary>
         public void ShowHandMods()
         {
             using (var f = new HandModsForm(HandMods.Last, fresh =>
@@ -1398,6 +1555,7 @@ namespace SkinManager.App
             if (HandMods.Last != null) _library.ShowHand(HandMods.Last);
         }
 
+        /// <summary>Before something that changes the card: asks to save or drop unsaved switches. False if you cancelled.</summary>
         bool SavedFirst()
         {
             if (_pending.Count == 0) return true;
@@ -1440,10 +1598,13 @@ namespace SkinManager.App
             return ok;
         }
 
+        /// <summary>Whether a profile name is in use (or is "P+ as it comes"), ignoring case.</summary>
         bool NameTaken(string name, Profile except = null) =>
             name.Equals(Library.DefaultName, StringComparison.OrdinalIgnoreCase) || name.StartsWith("P+ as it comes", StringComparison.OrdinalIgnoreCase) ||
             _lib.Profiles.Any(p => p != except && p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
+        /// <summary>Makes a new profile, starting with the mods that are on now (it becomes the one in use) or with none
+        /// (switched to).</summary>
         void NewProfile()
         {
             if (!SavedFirst()) return;
@@ -1459,6 +1620,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Renames a profile.</summary>
         void RenameProfile(string name)
         {
             var p = _lib.Profiles.FirstOrDefault(x => x.Name == name); if (p == null) return;
@@ -1472,6 +1634,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Makes a new profile with the same mods as another, placed right after it.</summary>
         void CopyProfile(string name)
         {
             var p = _lib.Profiles.FirstOrDefault(x => x.Name == name); if (p == null) return;
@@ -1515,6 +1678,7 @@ namespace SkinManager.App
             UpdateProfileButton();
         }
 
+        /// <summary>Opens the profiles window (switch, new, rename, copy, delete, share, open a shared setup).</summary>
         void ManageProfiles()
         {
             if (_lib == null || _busy) return;
@@ -1543,6 +1707,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Opens a .ppsetup file a friend sent and shows its mods, to fetch the ones you want.</summary>
         void OpenSharedSetup()
         {
             string path;
@@ -1603,6 +1768,8 @@ namespace SkinManager.App
         public bool IsOn(InstalledStage s) => _pending.TryGetValue(s.Id, out bool on) ? on : s.Enabled;
         public bool IsPending(InstalledStage s) => _pending.ContainsKey(s.Id);
 
+        /// <summary>Marks stage mods to turn on or off at the next save; turning one on turns off any other on the same
+        /// stage file.</summary>
         public void SetOn(IEnumerable<InstalledStage> stages, bool on)
         {
             foreach (var s in stages.ToList())
@@ -1615,6 +1782,7 @@ namespace SkinManager.App
             PendingChanged();
         }
 
+        /// <summary>Asks, then deletes a stage mod (all of its versions together); if it's on, P+'s stage goes back on the card.</summary>
         public void Delete(InstalledStage s)
         {
             // a stage on all of a normal version's files (Smashville's five times of day) is one mod: they go together
@@ -1641,6 +1809,8 @@ namespace SkinManager.App
         public void AddMore(InstalledStage s) => AddMore(new InstalledSkin { Name = s.Name, SourcePath = s.SourcePath, GameBananaModId = s.GameBananaModId, GameBananaFileId = s.GameBananaFileId, Author = s.Author, PageUrl = s.PageUrl, ThumbUrl = s.ThumbUrl });
         public void GoToStore() => ShowPage(_store);
 
+        /// <summary>Marks skins to turn on or off at the next save; turning one on turns off whatever else is on in that
+        /// costume slot.</summary>
         public void SetOn(IEnumerable<InstalledSkin> skins, bool on)
         {
             foreach (var s in skins.ToList())
@@ -1653,11 +1823,13 @@ namespace SkinManager.App
             PendingChanged();
         }
 
+        /// <summary>Notes a skin's wanted state (forgotten when it's already that way on the card).</summary>
         void Want(InstalledSkin s, bool on)
         {
             if (on == s.Enabled) _pending.Remove(s.Id); else _pending[s.Id] = on;
         }
 
+        /// <summary>Shows or hides the save bar with how many switches wait, and redraws what shows them.</summary>
         void PendingChanged()
         {
             int on = _pending.Count(kv => kv.Value), off = _pending.Count - on;
@@ -1670,6 +1842,7 @@ namespace SkinManager.App
             _characters.Invalidate();
         }
 
+        /// <summary>Writes the waiting switches to the card in one go. False if the save didn't happen.</summary>
         bool SavePending()
         {
             if (_pending.Count == 0) return true;
@@ -1679,6 +1852,7 @@ namespace SkinManager.App
             return Run(change, on > 0 && off > 0 ? $"Saved: {on} on, {off} off." : on > 0 ? (on == 1 ? "Saved: 1 mod turned on." : $"Saved: {on} mods turned on.") : (off == 1 ? "Saved: 1 mod turned off." : $"Saved: {off} mods turned off."));
         }
 
+        /// <summary>Adds the waiting switches to a change for the card.</summary>
         void AddPending(Installer.Change change)
         {
             foreach (var kv in _pending)
@@ -1690,6 +1864,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Asks, then deletes a skin; if it's on, P+'s own costume goes back in its slot.</summary>
         public void Delete(InstalledSkin s)
         {
             string text = $"Delete \"{s.Name}\" from My Mods?\r\n\r\n" + (s.Enabled ? $"It's on right now, so P+'s own costume goes back in {s.Character.Name}'s costume {s.SlotIndex + 1}. " : "It's off, so nothing on your SD card changes. ") +
@@ -1710,6 +1885,8 @@ namespace SkinManager.App
 
         public void InstallDownload(DownloadInfo d) => AddSkin(d.Path, d.Source);
 
+        /// <summary>Notes how many costumes (or stages, songs) a download has, so My Mods' Downloaded tab can say how
+        /// many are added.</summary>
         void RememberCostumeCount(string path, int count)
         {
             try
@@ -1720,7 +1897,6 @@ namespace SkinManager.App
             catch { }
         }
 
-        /// <summary>The download a skin came from, if it's still on this PC.</summary>
         /// <summary>Whether a deleted mod can come back: from its download, or not at all.</summary>
         static string AgainLine(string source) => source != null
             ? "Its download stays, so you can add it again later (My Mods > Downloaded, or the file you added it from)."
@@ -1733,6 +1909,7 @@ namespace SkinManager.App
             catch (Exception e) { Program.Log("save list", e); Dialog.Show(this, Friendly.Explain(e) + "\r\n\r\nNothing was deleted.", "Couldn't delete it", MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
         }
 
+        /// <summary>The download a skin came from, if it's still on this PC.</summary>
         public string SourceOf(InstalledSkin s)
         {
             if (!string.IsNullOrEmpty(s.SourcePath) && (File.Exists(s.SourcePath) || Directory.Exists(s.SourcePath))) return s.SourcePath;
@@ -1748,6 +1925,7 @@ namespace SkinManager.App
             return null;
         }
 
+        /// <summary>Opens a skin's download again to add more of its costumes (says so if the download is gone).</summary>
         public void AddMore(InstalledSkin s)
         {
             string path = SourceOf(s);
@@ -1818,6 +1996,8 @@ namespace SkinManager.App
 
         Character Current => _characters.SelectedItem as Character;
 
+        /// <summary>Fills the Costume Slots page for the picked character: each slot's CSP and what's in it. Clicking a slot
+        /// offers to turn your skin off there, or takes you to your skins or the Mod Store for that character.</summary>
         async void ShowCharacter(bool refreshPictures = false)
         {
             var c = Current;
@@ -1866,6 +2046,7 @@ namespace SkinManager.App
             _characters.Invalidate();
         }
 
+        /// <summary>Asks, then turns a skin off so P+'s costume is back in that slot.</summary>
         void OfferTurnOff(InstalledSkin skin)
         {
             var answer = Dialog.Show(this, $"Turn off \"{skin.Name}\"?\r\n\r\n{skin.Character.Name}'s costume {skin.SlotIndex + 1} goes back to P+'s. The skin stays in My Mods for later.",
@@ -1893,7 +2074,6 @@ namespace SkinManager.App
             }
         }
 
-        /// <summary>Your own MP3/WAV songs: made into game songs, then placed like any music.</summary>
         /// <summary>"Choose stage versions": which version of a stage you get by just picking it.</summary>
         public void StageVersions()
         {
@@ -1907,6 +2087,15 @@ namespace SkinManager.App
             if (add) PickSkin();
         }
 
+        /// <summary>"Other versions…" on a stage mod in My Mods: the stage versions window, opened at its stage with the
+        /// mod as the look, to tick the versions it goes on.</summary>
+        public void StageVersionsFor(InstalledStage stage)
+        {
+            if (_busy || _installer == null || _lib == null) return;
+            using (var f = new StageVersionsForm(_installer, _lib, stage))
+                if (f.ShowDialog(this) == DialogResult.OK && f.Change != null && !f.Change.IsEmpty) Run(f.Change, f.Done);
+        }
+
         /// <summary>Does a folder have mod files in it (costumes, stages, game songs, archives)?</summary>
         static bool LooksLikeMod(string folder)
         {
@@ -1914,6 +2103,7 @@ namespace SkinManager.App
             catch { return false; }
         }
 
+        /// <summary>Your own MP3/WAV songs: made into game songs, then placed like any music.</summary>
         public void AddOwnMusic(List<string> files = null)
         {
             if (_busy) return;
@@ -1924,6 +2114,9 @@ namespace SkinManager.App
                 else AddSkin(f.ResultFolder);
         }
 
+        /// <summary>Adds a mod from a download, file or folder: opens it and, by what's inside, goes on to the songs, the stage
+        /// versions, a texture pack, one costume's step-by-step setup, or the list of a pack's costumes. Waits if the
+        /// card is busy.</summary>
         void AddSkin(string path, SkinSource source = null, List<string> files = null)
         {
             // a download that finishes while the SD card is being changed: its turn comes right after
@@ -1961,7 +2154,7 @@ namespace SkinManager.App
             if (pkg.Costumes.Count == 0 && pkg.StageFiles.Count == 0 && pkg.SongFiles.Count > 0)
             {
                 RememberCostumeCount(originalPath, pkg.SongFiles.Count);
-                using (var form = new SongForm(_installer, _lib, pkg))
+                using (var form = new SongForm(_installer, pkg))
                 {
                     if (form.ShowDialog(this) != DialogResult.OK || form.Plans.Count == 0) return;
                     var change = new Installer.Change(); change.StageInstall.AddRange(form.Plans);
@@ -1982,7 +2175,7 @@ namespace SkinManager.App
                 // music that came with the stage goes on that stage
                 var songPlans = new List<StagePlan>();
                 if (pkg.SongFiles.Count > 0)
-                    using (var songs = new SongForm(_installer, _lib, pkg, stagePlans.Count > 0 ? stagePlans.Select(p => p.Target.CardPath).ToList() : null))
+                    using (var songs = new SongForm(_installer, pkg, stagePlans.Count > 0 ? stagePlans.Select(p => p.Target.CardPath).ToList() : null))
                         if (songs.ShowDialog(this) == DialogResult.OK) songPlans = songs.Plans;
                 if (stagePlans.Count == 0 && songPlans.Count == 0) return;
                 var change = new Installer.Change(); change.StageInstall.AddRange(stagePlans); change.StageInstall.AddRange(songPlans);
@@ -2164,6 +2357,7 @@ namespace SkinManager.App
         }
     }
 
+    /// <summary>The small "Working" window shown while slow work runs.</summary>
     class ProgressForm : Form
     {
         readonly Label _text = Theme.Label("Starting...", Theme.Body);
@@ -2180,6 +2374,7 @@ namespace SkinManager.App
             _text.Location = new Point(20, 20); _bar.Location = new Point(20, 56);
             Controls.Add(_text); Controls.Add(_bar);
         }
+        /// <summary>Updates the message and bar; safe to call from any thread.</summary>
         public void Report(string message, int percent)
         {
             if (IsDisposed || !IsHandleCreated) return;

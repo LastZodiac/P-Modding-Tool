@@ -9,10 +9,10 @@ using System.Linq;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
-using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>A file a skin put on the card, with the hash of what was written.</summary>
     [DataContract]
     public sealed class InstalledFile
     {
@@ -20,6 +20,7 @@ namespace SkinManager.Core
         [DataMember] public string Sha256;
     }
 
+    /// <summary>A menu picture a skin changed (its CSP, stock icon...), so it can be checked and put back.</summary>
     [DataContract]
     public sealed class InstalledPicture
     {
@@ -29,6 +30,8 @@ namespace SkinManager.Core
         [DataMember] public string PixelHash;      // what the picture looked like right after installing
     }
 
+    /// <summary>A skin in My Mods: which costume slot it's for, the files and pictures it put on the card, and where it
+    /// came from.</summary>
     [DataContract]
     public sealed class InstalledSkin
     {
@@ -45,10 +48,11 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public string Author;
         [DataMember(EmitDefaultValue = false)] public string PageUrl;
         [DataMember(EmitDefaultValue = false)] public string ThumbUrl;
-        [DataMember(EmitDefaultValue = false)] public bool Disabled;
+        [DataMember(EmitDefaultValue = false)] public bool Disabled;      // kept in My Mods but not on the card
         [DataMember(EmitDefaultValue = false)] public string PackageKey;   // which costume of its download
-        [DataMember(EmitDefaultValue = false)] public string SourcePath;   // the download it came from           // kept in My Mods but not on the card
+        [DataMember(EmitDefaultValue = false)] public string SourcePath;   // the download it came from
         public bool Enabled => !Disabled;
+        /// <summary>A copy whose file and picture lists can be changed without touching this one.</summary>
         public InstalledSkin Copy()
         {
             var c = (InstalledSkin)MemberwiseClone();
@@ -99,6 +103,7 @@ namespace SkinManager.Core
         [DataMember] public List<string> On = new List<string>();   // ids of skins and stages that are on
     }
 
+    /// <summary>How the mods list saves one entry of Written (a shared picture file and its hash).</summary>
     [DataContract]
     public sealed class WrittenFile
     {
@@ -106,6 +111,7 @@ namespace SkinManager.Core
         [DataMember] public string Sha256;
     }
 
+    /// <summary>The layout of installed.json, the mods list as saved on disk.</summary>
     [DataContract]
     sealed class LibraryFile
     {
@@ -118,6 +124,8 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public bool ProfilesMade;   // the first "Main" was made (so deleting every profile sticks)
     }
 
+    /// <summary>One card's mods list: the skins, stages and profiles in My Mods, and P+'s original files and pictures
+    /// they replaced.</summary>
     public sealed class Library
     {
         public string Folder { get; }
@@ -156,6 +164,7 @@ namespace SkinManager.Core
         public string SkinFolder(string id) => Path.Combine(Folder, "Skins", id);
         string OriginalsFolder => Path.Combine(Folder, "Originals");
 
+        /// <summary>Opens the mods list in a folder (an empty one if it has none yet).</summary>
         public Library(string folder)
         {
             Folder = folder;
@@ -187,6 +196,7 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Saves the mods list (through a temporary file, so a crash can't leave it half written).</summary>
         public void Save()
         {
             SyncProfiles();
@@ -208,7 +218,6 @@ namespace SkinManager.Core
         public InstalledSkin At(Character c, int slot) => Skins.FirstOrDefault(s => s.Enabled && s.SlotListId == c.SlotListId && s.SlotIndex == slot);
         /// <summary>Every skin in My Mods for this slot (only one can be on).</summary>
         public List<InstalledSkin> AllAt(int slotListId, int slot) => Skins.Where(s => s.SlotListId == slotListId && s.SlotIndex == slot).ToList();
-        public bool InConflict(InstalledSkin s) => Skins.Count(x => x.SlotListId == s.SlotListId && x.SlotIndex == s.SlotIndex) > 1;
 
         // ----- P+'s originals -----
 
@@ -229,6 +238,7 @@ namespace SkinManager.Core
             else File.WriteAllBytes(bin, contents);
         }
 
+        /// <summary>Drops the saved original for a path, so the next mod there saves the card's file afresh.</summary>
         public void ForgetOriginalFile(string cardPath)
         {
             foreach (var ext in new[] { ".bin", ".absent" })
@@ -256,6 +266,8 @@ namespace SkinManager.Core
 
         string PictureKey(string brresPath, string texture) => Path.Combine(OriginalsFolder, "pictures", Key(brresPath) + "__" + texture + ".png");
         public bool HasOriginalPicture(string brresPath, string texture) => File.Exists(PictureKey(brresPath, texture));
+        /// <summary>Saves P+'s own version of a menu picture before a skin changes it (kept unless replace is
+        /// set).</summary>
         public void SaveOriginalPicture(string brresPath, string texture, Bitmap picture, bool replace = false)
         {
             string p = PictureKey(brresPath, texture);
@@ -263,14 +275,7 @@ namespace SkinManager.Core
             Directory.CreateDirectory(Path.GetDirectoryName(p));
             picture.Save(p, ImageFormat.Png);
         }
-        public void ForgetOriginalPicture(string brresPath, string texture) { try { File.Delete(PictureKey(brresPath, texture)); } catch { } }
-        /// <summary>The pictures of a file whose originals were saved (their texture names).</summary>
-        public List<string> OriginalPictureNames(string brresPath)
-        {
-            string dir = Path.Combine(OriginalsFolder, "pictures"), prefix = Key(brresPath) + "__";
-            if (!Directory.Exists(dir)) return new List<string>();
-            return Directory.GetFiles(dir, prefix + "*.png").Select(f => Path.GetFileNameWithoutExtension(f).Substring(prefix.Length)).ToList();
-        }
+        /// <summary>P+'s own version of a menu picture, or null when none was saved.</summary>
         public Bitmap OriginalPicture(string brresPath, string texture)
         {
             string p = PictureKey(brresPath, texture);
@@ -278,6 +283,7 @@ namespace SkinManager.Core
             using (var tmp = new Bitmap(p)) return new Bitmap(tmp);
         }
 
+        /// <summary>A file's SHA-256 as lowercase hex (how the app and Brawl Online tell files apart).</summary>
         public static string Sha256(byte[] b)
         {
             using (var h = SHA256.Create()) return string.Concat(h.ComputeHash(b).Select(x => x.ToString("x2")));

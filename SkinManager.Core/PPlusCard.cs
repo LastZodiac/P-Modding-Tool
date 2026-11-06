@@ -4,6 +4,7 @@ using System.Collections.Generic;
 
 namespace SkinManager.Core
 {
+    /// <summary>One costume slot of a character, as the card lists it.</summary>
     public sealed class CostumeSlot
     {
         public int Index;        // position on the character select screen (0 = first)
@@ -13,6 +14,7 @@ namespace SkinManager.Core
         public string CostumePath(Character c, string prefix = null) => $"{c.FighterFolderPath}/Fit{prefix ?? c.FilePrefix}{FileNumber:00}.pac";
     }
 
+    /// <summary>Reads P+'s costume slot lists from the card, plus the size limits a costume must stay under.</summary>
     public static class PPlusCard
     {
         /// <summary>Largest costume file P+ itself ships (FitSamus27.pac, compressed). Brawl Online copies the
@@ -25,12 +27,13 @@ namespace SkinManager.Core
         /// <summary>Largest Kirby hat file P+ ships (FitKirbyPikachu00.pac, compressed).</summary>
         public const long MaxKirbyHatBytes = 247771;
 
-        /// <summary>Space that must stay free on the card (Brawl Online prunes replays below 16 MiB).</summary>
         /// <summary>Room kept free on the card. Brawl Online adds its online plugin (about 240 KB) to its copy of the card,
         /// and P+ updates only need room for how much bigger they make P+ (the updater deletes each old file before
         /// writing the new one; 3.2.0 -> 3.2.1 made P+ 69 MB smaller). The game itself saves to Brawl Online's copy, not this card.</summary>
         public const long MinFreeBytes = 6L * 1024 * 1024;
 
+        /// <summary>A character's costume slots in select-screen order, each marked with whether its costume file is on
+        /// the card (the rest come from the Brawl disc).</summary>
         public static List<CostumeSlot> ReadSlots(Fat32Image card, Character c)
         {
             var b = card.ReadFile(c.SlotListPath);
@@ -47,6 +50,7 @@ namespace SkinManager.Core
             return slots;
         }
 
+        /// <summary>The name of a P+ team color id, for showing next to a slot.</summary>
         public static string TeamColorName(int id)
         {
             switch (id)

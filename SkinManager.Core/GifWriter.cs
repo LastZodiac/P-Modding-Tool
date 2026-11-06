@@ -10,14 +10,12 @@ using System.Runtime.InteropServices;
 
 namespace SkinManager.Core
 {
+    /// <summary>Writes animated GIFs with no outside library.</summary>
     public static class GifWriter
     {
-        /// <summary>delay: hundredths of a second per picture (2 = 50 a second, about game speed).</summary>
-        public static void Save(string path, IList<Bitmap> frames, int delay = 2) =>
-            Save(path, frames.Count, i => new Bitmap(frames[i]), delay);
 
-        /// <summary>The same, with each picture made when it's needed (and let go of right after): a long move's pictures
-        /// don't all have to be in memory twice. frame(i) is asked for twice per picture.</summary>
+        /// <summary>Saves count pictures as a looping GIF, each made when it's needed (and let go of right after): a long move's
+        /// pictures don't all have to be in memory at once. frame(i) is asked for twice per picture.</summary>
         public static void Save(string path, int count, Func<int, Bitmap> frame, int delay = 2)
         {
             if (count == 0) return;
@@ -80,6 +78,8 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Packs one picture's colour indexes the way GIF needs (LZW codes in blocks of up to 255
+        /// bytes).</summary>
         static void Lzw(BinaryWriter o, byte[] idx)
         {
             const int minCode = 8;

@@ -1,3 +1,5 @@
+// Where the app starts: sets up error handling, puts in a newer build if one was downloaded, clears old
+// temporary downloads and opens the main window. Also the app-wide error log and crash message.
 using System;
 using System.IO;
 using System.Windows.Forms;
@@ -5,6 +7,7 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The app's starting point and a few app-wide helpers (trace, error log, crash message).</summary>
     static class Program
     {
         /// <summary>Downloads are unpacked into a temp folder to be read; ones older than half a day are no longer needed.</summary>
@@ -25,6 +28,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Starts the app. args[0], if given, is a skin to add (one dropped on the app's icon).</summary>
         [STAThread]   // Windows' file dialogs, drag and drop and autocomplete only work on a single-threaded (STA) main thread
         static void Main(string[] args)
         {
@@ -70,13 +74,22 @@ namespace SkinManager.App
         /// then made the normal way to save).</summary>
         public static bool FastSave => true;
 
+        /// <summary>What the app's window is busy with right now (set around work done on the window's thread), so a
+        /// freeze the Watchdog notes says what it was; null when nothing marked is going on.</summary>
+        public static volatile string Doing;
+
+        /// <summary>Notes something worth knowing later (a freeze, say) in Data\errors.log.</summary>
+        public static void Note(string line)
+        {
+            try { Directory.CreateDirectory(DataFolder); File.AppendAllText(Path.Combine(DataFolder, "errors.log"), $"{DateTime.Now:u} {line}\r\n\r\n"); } catch { }
+        }
+
         /// <summary>Notes an error the app recovered from in Data\errors.log (to find out later what went wrong).</summary>
         public static void Log(string what, Exception e)
         {
             try { Directory.CreateDirectory(DataFolder); File.AppendAllText(Path.Combine(DataFolder, "errors.log"), $"{DateTime.Now:u} ({what})\r\n{e}\r\n\r\n"); } catch { }
         }
 
-        /// <summary>What went wrong, with a button that copies the details (to paste in a message to the app's maker).</summary>
         /// <summary>What went wrong, with the way to report it (filled in for you).</summary>
         static void ShowCrash(Exception e)
         {
@@ -92,6 +105,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Handles an error nothing else caught: logs it to Data\errors.log and shows the crash message (a
+        /// plain box if that fails).</summary>
         static void Crash(Exception e)
         {
             Trace("crash: " + e);

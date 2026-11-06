@@ -5,11 +5,12 @@
 using System;
 using System.Drawing;
 using System.IO;
-using System.Linq;
 using System.Windows.Forms;
 
 namespace SkinManager.App
 {
+    /// <summary>Puts together a problem report and sends you to GitHub's Issues page with it filled in (or copies it
+    /// for Discord).</summary>
     static class BugReport
     {
         const string FallbackRepo = "LastZodiac/P-Modding-Tool";

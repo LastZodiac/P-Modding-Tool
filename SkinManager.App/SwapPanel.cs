@@ -13,6 +13,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Model Swapper page: pick a model and a character's costume, adjust it, preview it in a pose and
+    /// make it a costume.</summary>
     class SwapPanel : GlassPanel
     {
         readonly Func<Installer> _installer;
@@ -59,6 +61,8 @@ namespace SkinManager.App
         static ComboBox Combo(int w) => new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = w, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text };
         static PictureBox Pic() => new PictureBox { Size = new Size(256, 320), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(20, 22, 28) };
 
+        /// <summary>Lays out the page's pickers, the two previews and the buttons, and wires them up (most changes
+        /// rebuild after a short pause).</summary>
         public SwapPanel(Func<Installer> installer, Action<string> install)
         {
             _installer = installer; _install = install;
@@ -140,6 +144,8 @@ namespace SkinManager.App
         }
 
         HandScan _scanSeen;
+        /// <summary>Lists the picked character's costume slots: P+'s own, plus yours (from My Mods or put on the card
+        /// by hand).</summary>
         void FillSlots()
         {
             string was = (_slot.SelectedItem as SlotItem)?.Text;
@@ -180,6 +186,8 @@ namespace SkinManager.App
             _motion = null;
         }
 
+        /// <summary>A costume slot in the drop-down; Yours: the costume in that slot now rather than P+'s
+        /// own.</summary>
         class SlotItem { public CostumeSlot Slot; public bool Yours; public string Text; public override string ToString() => Text; }
 
         /// <summary>The costume picked: yours as it is on the card, or P+'s own.</summary>
@@ -314,6 +322,8 @@ namespace SkinManager.App
             finally { _pictures.Enabled = true; }
         }
 
+        /// <summary>Asks for a model file, reads it, and stands it up if it looks like it was made lying
+        /// down.</summary>
         async void Choose()
         {
             string test = Environment.GetEnvironmentVariable("SKINMANAGER_TEST_MODEL");   // UI tests (no file dialog)
@@ -406,7 +416,7 @@ namespace SkinManager.App
                     SwapMesh own = null;
                     try { own = ModelSwap.AsOwnShape(mesh, target); } catch (Exception e) { Program.Trace("own shape: " + e.Message); }
                     if (own != null)
-                        return (Built: ModelSwap.Build(own, target, modelName, null, ModelSwap.OwnWeights(target, joints != null ? ModelSwap.SightWeights(own, joints) : null)), Placed: own, Joints: joints, Auto: new Dictionary<string, BrawlLib.Internal.Vector3>(), Own: true);
+                        return (Built: ModelSwap.Build(own, target, null, ModelSwap.OwnWeights(target, joints != null ? ModelSwap.SightWeights(own, joints) : null)), Placed: own, Joints: joints, Auto: new Dictionary<string, BrawlLib.Internal.Vector3>(), Own: true);
                     var box = ModelSwap.TargetBox(target);
                     var placed = ModelSwap.Simplify(ModelSwap.Fit(mesh, box, fit), budget);
                     // nothing placed by hand yet: the dots are placed by measuring the model
@@ -414,7 +424,7 @@ namespace SkinManager.App
                     if (marks.Count == 0) marks = auto;
                     var lined = ModelSwap.LineUp(placed, joints, marks);
                     var keep = ModelSwap.KeepTest(placed, lined, dabs);
-                    return (Built: ModelSwap.Build(lined, target, modelName, keep, ModelSwap.SightWeights(lined, joints, keep)), Placed: placed, Joints: joints, Auto: auto, Own: false);
+                    return (Built: ModelSwap.Build(lined, target, keep, ModelSwap.SightWeights(lined, joints, keep)), Placed: placed, Joints: joints, Auto: auto, Own: false);
                 });
                 if (gen != _gen) return;
                 var built = made.Built;
@@ -446,7 +456,7 @@ namespace SkinManager.App
         void LineUp()
         {
             if (_placed == null || _joints == null || _target == null) return;
-            using (var f = new JointsForm(_placed, _joints, _marks.Count > 0 ? _marks : _auto, _auto, _dabs, _target, _motion, Path.GetFileNameWithoutExtension(_path)))
+            using (var f = new JointsForm(_placed, _joints, _marks.Count > 0 ? _marks : _auto, _auto, _dabs, _target, _motion))
             {
                 if (f.ShowDialog(FindForm()) != DialogResult.OK) return;
                 _marks = f.Marks; _dabs = f.Dabs;
@@ -461,6 +471,8 @@ namespace SkinManager.App
             Refresh2();
         }
 
+        /// <summary>Where the joint dots and paint for one model on one costume are saved (named by a short hash of
+        /// key).</summary>
         static string MarksFile(string key)
         {
             using (var sha = System.Security.Cryptography.SHA1.Create())
@@ -470,12 +482,14 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>The saved paint dabs for key (none if there are none or they can't be read).</summary>
         static List<PaintDab> LoadDabs(string key)
         {
             try { string f = MarksFile(key); if (File.Exists(f)) return ModelSwap.ReadDabs(File.ReadAllText(f)); } catch { }
             return new List<PaintDab>();
         }
 
+        /// <summary>The saved joint dots for key (none if there are none or they can't be read).</summary>
         static Dictionary<string, BrawlLib.Internal.Vector3> LoadMarks(string key)
         {
             try { string f = MarksFile(key); if (File.Exists(f)) return ModelSwap.ReadMarks(File.ReadAllText(f)); } catch { }
@@ -484,6 +498,8 @@ namespace SkinManager.App
 
         static void Swap(PictureBox box, Image img) { var old = box.Image; box.Image = img; old?.Dispose(); }
 
+        /// <summary>Saves the built costume into a folder and hands it to the usual add-a-skin steps (refusing a model
+        /// too complex for the game).</summary>
         void Make()
         {
             var c = _targetFor; var slot = _targetSlot;

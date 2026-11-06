@@ -12,8 +12,12 @@ using BrawlLib.Internal;
 
 namespace SkinManager.Core
 {
+    /// <summary>The part of model swapping that reads glTF models.</summary>
     public static partial class ModelSwap
     {
+        /// <summary>Reads a .glb or .gltf into the swapper's mesh: every mesh placed where the scene puts it, one part
+        /// per material, with its base colour picture saved out. Compressed models are refused with a plain
+        /// message.</summary>
         static SwapMesh LoadGltf(string path)
         {
             byte[] file = File.ReadAllBytes(path);
@@ -216,6 +220,8 @@ namespace SkinManager.Core
 
         // 4x4 matrices, column-major like glTF
         static double[] Identity() => new double[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+        /// <summary>A node's own placement as a matrix: its "matrix" if it has one, else built from its translation,
+        /// rotation and scale.</summary>
         static double[] Local(object node)
         {
             var m = Json.Arr(node, "matrix");
@@ -233,6 +239,8 @@ namespace SkinManager.Core
                 t[0], t[1], t[2], 1,
             };
         }
+        /// <summary>Multiplies two column-major 4x4 matrices (a then b, as glTF stacks a parent and its
+        /// child).</summary>
         static double[] Mul(double[] a, double[] b)
         {
             var r = new double[16];
@@ -245,10 +253,12 @@ namespace SkinManager.Core
                 }
             return r;
         }
+        /// <summary>Moves a point by a matrix (translation included).</summary>
         static Vector3 Point(double[] m, float[] p) => new Vector3(
             (float)(m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]),
             (float)(m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]),
             (float)(m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]));
+        /// <summary>Turns a normal by a matrix (no translation) and makes it length 1 again.</summary>
         static Vector3 Direction(double[] m, float[] n)
         {
             double x = m[0] * n[0] + m[4] * n[1] + m[8] * n[2], y = m[1] * n[0] + m[5] * n[1] + m[9] * n[2], z = m[2] * n[0] + m[6] * n[1] + m[10] * n[2];

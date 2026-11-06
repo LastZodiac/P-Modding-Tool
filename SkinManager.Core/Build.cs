@@ -6,6 +6,7 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Which folder on the card holds the game (P+'s /Project+ or another build's own), and paths inside it.</summary>
     public static class Build
     {
         public const string PPlusRoot = "/Project+";

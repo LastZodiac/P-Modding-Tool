@@ -1,3 +1,4 @@
+// The one lock every use of BrawlLib (the library that opens the game's files) goes through.
 namespace SkinManager.Core
 {
     /// <summary>BrawlLib can't open two files at the same time safely: every use goes through this lock.

@@ -10,12 +10,15 @@ using System.Text.RegularExpressions;
 
 namespace SkinManager.Core
 {
+    /// <summary>The versions this PC has: the Brawl Online launcher, its Dolphin, P+, and the newest P+ it knows of.</summary>
     public sealed class VersionInfo
     {
         public string Launcher, Dolphin, PPlus, NewestPPlus;
         public string Key => $"{Launcher}|{Dolphin}|{PPlus}";
     }
 
+    /// <summary>One P+ release as Brawl Online lists it: every file with its fingerprint, and the one file it checks to
+    /// tell which release a card is on.</summary>
     public sealed class PPlusRelease
     {
         public string Version, ProbePath, ProbeSha;
@@ -23,10 +26,12 @@ namespace SkinManager.Core
         public Dictionary<string, long> Sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);       // path -> bytes (when known)
     }
 
+    /// <summary>Reads version numbers from Brawl Online's files and compares them.</summary>
     public static class Versions
     {
         static string ProgramFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Brawl Online");
 
+        /// <summary>The versions on this PC; any that can't be read are left empty.</summary>
         public static VersionInfo Read(BrawlOnlineInstall install)
         {
             var v = new VersionInfo();
@@ -37,6 +42,7 @@ namespace SkinManager.Core
             return v;
         }
 
+        /// <summary>A text value from a JSON file by its key (a quick look-up, not a full reader); null if missing.</summary>
         static string Field(string json, string key)
         {
             var m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"");
@@ -75,6 +81,7 @@ namespace SkinManager.Core
             catch { return null; }
         }
 
+        /// <summary>Compares two version numbers part by part ("1.10" is newer than "1.9"); missing parts count as 0.</summary>
         public static bool Newer(string a, string b)   // is a newer than b?
         {
             int[] P(string s) => Regex.Matches(s ?? "", @"\d+").Cast<Match>().Select(x => int.Parse(x.Value)).ToArray();

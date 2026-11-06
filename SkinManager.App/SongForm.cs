@@ -14,13 +14,15 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "Add music" window: for each song in a download, where it plays and whether it's added or replaces
+    /// one. On Install, Plans holds what to put on the card.</summary>
     class SongForm : Form
     {
         readonly Installer _installer;
-        readonly Library _lib;
         readonly SkinPackage _pkg;
         public List<StagePlan> Plans { get; private set; } = new List<StagePlan>();
 
+        /// <summary>One song file from the download and what's been picked for it.</summary>
         sealed class Row
         {
             public string File; public long Size;
@@ -55,9 +57,9 @@ namespace SkinManager.App
         Dictionary<(int, string), Bitmap> _pics = new Dictionary<(int, string), Bitmap>();
 
         /// <param name="stages">stage files (card paths or names) this music came with: their stage is picked for it</param>
-        public SongForm(Installer installer, Library lib, SkinPackage pkg, IList<string> stages = null)
+        public SongForm(Installer installer, SkinPackage pkg, IList<string> stages = null)
         {
-            _installer = installer; _lib = lib; _pkg = pkg; _stages = stages ?? pkg.StageFiles;
+            _installer = installer; _pkg = pkg; _stages = stages ?? pkg.StageFiles;
             Text = "Add music: " + pkg.Name;
             BackColor = Theme.Back; ForeColor = Theme.Text; Font = Theme.Body;
             Size = new Size(1180, 800); MinimumSize = new Size(940, 600);
@@ -124,6 +126,8 @@ namespace SkinManager.App
             Shown += async (s, e) => await Fill();
         }
 
+        /// <summary>Places everything for the window's size; when step 2 is hidden the stage pictures take its
+        /// room.</summary>
         void Lay()
         {
             int bottom = ClientSize.Height - 70;
@@ -143,12 +147,16 @@ namespace SkinManager.App
             foreach (var h in _tiles.Controls.OfType<TileHeading>()) h.Width = Math.Max(200, _tiles.ClientSize.Width - 24);
         }
 
+        /// <summary>A song in the "replace" list, saying when it's Brawl's own or also plays elsewhere.</summary>
         sealed class SongPick
         {
             public SongInfo Song;
             public override string ToString() => Song.Title + (Song.FromBrawl ? "   (Brawl's own)" : "") + (Song.Lists.Count > 1 ? $"   · also on {Song.Lists.Count - 1} more" : "");
         }
 
+        /// <summary>Reads P+'s songs, where they play and the stage pictures from the card, then lists your songs with
+        /// a first guess at their place (the stage they came with, one named in the download, or the P+ song with the
+        /// same file name).</summary>
         async Task Fill()
         {
             Dictionary<string, string> map;
@@ -203,12 +211,16 @@ namespace SkinManager.App
             using (var pen = new Pen(Theme.Line)) g.DrawLine(pen, e.Bounds.X + 8, e.Bounds.Bottom - 1, e.Bounds.Right - 8, e.Bounds.Bottom - 1);
         }
 
+        /// <summary>The short line under a song in the left list: left out, needs a place, or what will happen to
+        /// it.</summary>
         (string, Color) Status(Row r) =>
             r.Skip ? ("Left out", Theme.Muted)
             : r.Place == null ? ("Pick where it plays", Theme.Warn)
             : r.Replace != null ? ($"Replaces \"{r.Replace.Title}\" · {r.Place.Title}", Theme.Good)
             : ($"New song on {r.Place.Title}", Theme.Good);
 
+        /// <summary>Shows the song picked on the left: switches to the tab with its place and shows its step
+        /// 2.</summary>
         void ShowRow(Row r)
         {
             _row = r;
@@ -248,6 +260,7 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Switches between the Stages and "Menus &amp; more" tabs.</summary>
         void ShowTiles()
         {
             Theme.Toggle(_tabStages, !_menusTab); Theme.Toggle(_tabMenus, _menusTab);
@@ -255,6 +268,8 @@ namespace SkinManager.App
             FilterTiles();
         }
 
+        /// <summary>Shows the tiles for the tab (and search), under headings by stage select page or kind, with the
+        /// song's place picked.</summary>
         void FilterTiles()
         {
             if (_places == null) return;
@@ -311,6 +326,8 @@ namespace SkinManager.App
             finally { _drawingMissing = false; }
         }
 
+        /// <summary>Sets where the song picked on the left plays. Places where each song belongs to one fighter
+        /// (victory themes) can only be replaced, so one is picked for it.</summary>
         void PickPlace(SongPlace p)
         {
             if (_row == null) return;
@@ -356,6 +373,8 @@ namespace SkinManager.App
             _filling = false;
         }
 
+        /// <summary>Gives every other song the same place, each replacing a different song where only replacing is
+        /// allowed.</summary>
         void UseForAll()
         {
             if (_row?.Place == null) return;
@@ -398,6 +417,8 @@ namespace SkinManager.App
             foreach (var t in _tileList) t.Selected = _row != null && t.Value == _row.Place;
         }
 
+        /// <summary>Checks every song with the installer and closes with the ones that passed; if some can't go on,
+        /// says why and asks before going on without them.</summary>
         async void Install()
         {
             var picked = _rows.Where(r => !r.Skip && r.Place != null).Select(r => (r.File, Song: r.Replace, Place: r.Place)).ToList();

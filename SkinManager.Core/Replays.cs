@@ -16,10 +16,15 @@ using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>One hit in a replay: who hit whom, with which move, for how much, and where.</summary>
     [DataContract] public sealed class ReplayHit { [DataMember] public int Frame, Attacker, Victim, Move; [DataMember] public float Damage, Before, X, Y; }   // X, Y: where the one hit was
+    /// <summary>A stock lost: who died, at what percent, and who (and which move) last hit them.</summary>
     [DataContract] public sealed class ReplayDeath { [DataMember] public int Frame, Victim, Killer = -1, Move = -1; [DataMember] public float Percent; }
+    /// <summary>A run of hits by one player on another before they got free (a combo or punish).</summary>
     [DataContract] public sealed class ReplayOpening { [DataMember] public int Attacker, Start, End, Hits, FirstMove; [DataMember] public float Damage; [DataMember] public bool Killed; }
 
+    /// <summary>What the app reads out of one replay for the stats: players, hits, deaths, openings and
+    /// habits.</summary>
     [DataContract]
     public sealed class ReplayData
     {
@@ -39,13 +44,11 @@ namespace SkinManager.Core
         public int PlayerOf(string userId, string code) { for (int i = 0; i < Ids.Count; i++) if (userId != null && Ids[i] == userId || code != null && Codes[i] == code) return i; return -1; }
     }
 
+    /// <summary>Reads Brawl Online's replay files for stats and keeps what was read.</summary>
     public static class Replays
     {
         const int OwnerPercent = 128 + 36, OwnerStocks = 128 + 55, MotionSub = 768 + 90;
         const int PostureX = 1136 + 12, PostureY = 1136 + 16, PostureFacing = 1136 + 64, Situation = 1344 + 44;   // situation: 0 ground, 1 ledge, 2 air
-
-        /// <summary>Reads a replay. Throws if it isn't one.</summary>
-        public static ReplayData Read(string path) => Read(path, null, null);
 
         /// <summary>Reads a replay; with move names (a character's subaction animation names by number) also each
         /// player's habits. Throws if it isn't one.</summary>
@@ -63,8 +66,8 @@ namespace SkinManager.Core
                 // per port, the bytes we follow (XOR state)
                 var state = new Dictionary<int, byte[]>();
                 var percent = new List<float>[4]; var stocks = new List<int>[4]; var move = new List<int>[4];
-                var px = new List<float>[4]; var py = new List<float>[4]; var face = new List<sbyte>[4]; var sit = new List<byte>[4];
-                for (int i = 0; i < 4; i++) { percent[i] = new List<float>(); stocks[i] = new List<int>(); move[i] = new List<int>(); px[i] = new List<float>(); py[i] = new List<float>(); face[i] = new List<sbyte>(); sit[i] = new List<byte>(); }
+                var px = new List<float>[4]; var py = new List<float>[4]; var sit = new List<byte>[4];
+                for (int i = 0; i < 4; i++) { percent[i] = new List<float>(); stocks[i] = new List<int>(); move[i] = new List<int>(); px[i] = new List<float>(); py[i] = new List<float>(); sit[i] = new List<byte>(); }
                 int[] watch = { OwnerPercent, OwnerPercent + 1, OwnerPercent + 2, OwnerPercent + 3, OwnerStocks, MotionSub, MotionSub + 1,
                                 PostureX, PostureX + 1, PostureX + 2, PostureX + 3, PostureY, PostureY + 1, PostureY + 2, PostureY + 3, PostureFacing, Situation + 3 };
                 while (f.Position + 20 <= f.Length)
@@ -112,7 +115,6 @@ namespace SkinManager.Core
                                 move[k].Add(st[5] << 8 | st[6]);
                                 px[k].Add(BitConverter.ToSingle(new[] { st[10], st[9], st[8], st[7] }, 0));
                                 py[k].Add(BitConverter.ToSingle(new[] { st[14], st[13], st[12], st[11] }, 0));
-                                face[k].Add((sbyte)((st[15] & 0x80) != 0 ? -1 : 1));   // the float's sign: -1 or 1
                                 sit[k].Add(st[16]);
                             }
                         }
@@ -134,13 +136,14 @@ namespace SkinManager.Core
                     for (int k = 0; k < players; k++)
                     {
                         var n = names(d.Characters[k]);
-                        d.Habits.Add(n == null ? new PlayerHabits() : Habits.Read(k, players, n, move, px, py, face, sit, d));
+                        d.Habits.Add(n == null ? new PlayerHabits() : Habits.Read(k, players, n, move, px, py, sit, d));
                     }
                 }
             }
             return d;
         }
 
+        /// <summary>Unpacks a chunk's zlib data (skipping the 2-byte zlib header) to its known size.</summary>
         internal static byte[] Inflate(byte[] z, int size)
         {
             using (var ms = new MemoryStream(z, 2, z.Length - 2))
@@ -236,26 +239,6 @@ namespace SkinManager.Core
                 if (File.Exists(file)) File.Replace(tmp, file, null); else File.Move(tmp, file);
             }
             catch { }
-            return d;
-        }
-
-        /// <summary>A replay's events, read once and kept in the cache folder.</summary>
-        public static ReplayData Cached(string path, string cacheFolder) => Cached(path, cacheFolder, null, null);
-
-        /// <summary>The same, with each player's habits (read again if the names have changed since).</summary>
-        public static ReplayData Cached(string path, string cacheFolder, Func<int, MoveTable> names, string namesKey)
-        {
-            var info = new FileInfo(path);
-            string key = Convert.ToBase64String(System.Security.Cryptography.SHA1.Create().ComputeHash(Encoding.UTF8.GetBytes(path.ToLowerInvariant() + "|" + info.Length))).Replace('/', '_').Replace('+', '-').TrimEnd('=');
-            string file = Path.Combine(cacheFolder, key + ".json");
-            var ser = new DataContractJsonSerializer(typeof(ReplayData));
-            try
-            {
-                if (File.Exists(file)) using (var s = File.OpenRead(file)) { var old = (ReplayData)ser.ReadObject(s); if (old.Version == ReplayData.CurrentVersion && old.Size == info.Length && (names == null || old.NamesKey == namesKey)) return old; }
-            }
-            catch { }
-            var d = Read(path, names, namesKey);
-            try { Directory.CreateDirectory(cacheFolder); using (var s = File.Create(file)) ser.WriteObject(s, d); } catch { }
             return d;
         }
     }

@@ -8,6 +8,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Opens downloaded skins (folders, .zip, .rar, .7z) into a temp folder the app can read files
+    /// from.</summary>
     public static class Archives
     {
         static readonly string[] Kinds = { ".zip", ".rar", ".7z" };
@@ -60,6 +62,7 @@ namespace SkinManager.Core
             return dest;
         }
 
+        /// <summary>Copies a whole folder, sub-folders included, overwriting what's there.</summary>
         static void CopyFolder(string from, string to)
         {
             Directory.CreateDirectory(to);
@@ -71,6 +74,8 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Unpacks one archive into a folder: .zip by itself, anything else with 7-Zip, WinRAR or Windows' own
+        /// tar, in that order.</summary>
         static void Extract(string archive, string dest)
         {
             string ext = Path.GetExtension(archive).ToLowerInvariant();
@@ -101,6 +106,7 @@ namespace SkinManager.Core
         /// <summary>True when a 7-Zip or WinRAR install was found (zip files never need one).</summary>
         public static bool HasExtractor => FindProgram(@"7-Zip\7z.exe") != null || FindProgram(@"WinRAR\WinRAR.exe") != null || FindProgram(@"WinRAR\UnRAR.exe") != null;
 
+        /// <summary>The tar.exe that comes with Windows 10 and 11, or null if it's missing.</summary>
         static string WindowsTar()
         {
             string sys = Environment.GetFolderPath(Environment.SpecialFolder.System);
@@ -109,6 +115,7 @@ namespace SkinManager.Core
             return File.Exists(p) ? p : null;
         }
 
+        /// <summary>Looks for an installed program in both Program Files folders; null if it isn't there.</summary>
         static string FindProgram(string relative)
         {
             foreach (var root in new[] { Environment.GetEnvironmentVariable("ProgramW6432"), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86) })
@@ -120,6 +127,8 @@ namespace SkinManager.Core
             return null;
         }
 
+        /// <summary>Runs an unpacker hidden and waits up to 5 minutes; true only if it finished without an
+        /// error.</summary>
         static bool Run(string exe, string args)
         {
             try

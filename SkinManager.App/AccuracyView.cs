@@ -10,11 +10,14 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The "How accurate" page: lists, for one fighter or the whole cast, which frame data rows are exact,
+    /// approximate or not drawn.</summary>
     class AccuracyView : GlassFlow
     {
         public event Action WholeCastRequested;
         public event Action<Character> FighterPicked;
 
+        /// <summary>Sets up a see-through, scrolling, top-to-bottom list.</summary>
         public AccuracyView()
         {
             FlowDirection = FlowDirection.TopDown; WrapContents = false; AutoScroll = true; Padding = new Padding(16, 12, 16, 12);
@@ -23,6 +26,8 @@ namespace SkinManager.App
 
         int TextWidth => Math.Max(300, ClientSize.Width - 50);
 
+        /// <summary>Adds one wrapped line of text to the page, sized to fit, and hands it back (so it can be made
+        /// clickable).</summary>
         Label Line(string text, Font font, Color color, int gap = 2)
         {
             var size = TextRenderer.MeasureText(text ?? "", font, new Size(TextWidth, 0), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
@@ -31,6 +36,8 @@ namespace SkinManager.App
             return l;
         }
 
+        /// <summary>Clears the page before it's filled again. Layout stays paused until the caller calls
+        /// ResumeLayout.</summary>
         void Start()
         {
             SuspendLayout();
@@ -38,6 +45,7 @@ namespace SkinManager.App
             Controls.Clear();
         }
 
+        /// <summary>Adds the "Check every fighter" button, which asks for the whole-cast list.</summary>
         Button CastButton()
         {
             var b = Theme.Secondary("Check every fighter");

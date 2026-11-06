@@ -5,11 +5,12 @@
 // or away is from the other player's side at that moment.
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Runtime.Serialization;
 
 namespace SkinManager.Core
 {
+    /// <summary>How often a player did each habit (techs, ledge options, defence, grabs, L-cancels, where they stood),
+    /// counted from replays.</summary>
     [DataContract]
     public sealed class PlayerHabits
     {
@@ -34,6 +35,7 @@ namespace SkinManager.Core
         public int LedgeOptions => LedgeGetup + LedgeRoll + LedgeAttack + LedgeJump + LedgeDrop;
         public int Throws => ThrowF + ThrowB + ThrowUp + ThrowDown;
 
+        /// <summary>Adds another game's counts to these (games read without move names are left out).</summary>
         public void Add(PlayerHabits o)
         {
             if (o == null || !o.Known) return;
@@ -49,6 +51,7 @@ namespace SkinManager.Core
     {
         [DataMember] public List<string> Names = new List<string>();
         [DataMember] public int[] LandingLag = new int[5];
+        /// <summary>An aerial's full landing lag, by its landing animation's name (0 if it isn't one).</summary>
         public int LagOf(string landingAnim)
         {
             switch (landingAnim) { case "LandingAirN": return LandingLag[0]; case "LandingAirF": return LandingLag[1]; case "LandingAirB": return LandingLag[2]; case "LandingAirHi": return LandingLag[3]; case "LandingAirLw": return LandingLag[4]; }
@@ -56,10 +59,11 @@ namespace SkinManager.Core
         }
     }
 
+    /// <summary>Reads a player's habits out of a replay's frame-by-frame moves and positions.</summary>
     public static class Habits
     {
-        /// <summary>One player's habits. moves: each player's subaction per frame; names: this player's animation names.</summary>
-        public static PlayerHabits Read(int me, int players, MoveTable table, List<int>[] move, List<float>[] px, List<float>[] py, List<sbyte>[] face, List<byte>[] sit, ReplayData d)
+        /// <summary>One player's habits. move: each player's subaction per frame; table: this player's animation names and landing lag.</summary>
+        public static PlayerHabits Read(int me, int players, MoveTable table, List<int>[] move, List<float>[] px, List<float>[] py, List<byte>[] sit, ReplayData d)
         {
             var h = new PlayerHabits { Known = true };
             var m = move[me]; int n = m.Count;

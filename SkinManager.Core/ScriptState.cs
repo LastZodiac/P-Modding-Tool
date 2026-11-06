@@ -7,6 +7,8 @@ using System.Collections.Generic;
 
 namespace SkinManager.Core
 {
+    /// <summary>The state a move's scripts run against when the app plays them through to work out frame
+    /// data.</summary>
     public sealed class ScriptState
     {
         public Moveset M;
@@ -29,6 +31,8 @@ namespace SkinManager.Core
             return _vars.TryGetValue(raw, out var x) ? x : (float?)null;
         }
 
+        /// <summary>Sets a script variable (null forgets it: its value isn't known). The game's own values are left
+        /// alone.</summary>
         public void Set(int raw, float? v)
         {
             if (((raw >> 28) & 0xF) == 0) return;   // the game's own values can't be set by a script

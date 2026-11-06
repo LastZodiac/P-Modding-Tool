@@ -9,13 +9,16 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Frame Data page's compare tab: two fighters' shared moves side by side.</summary>
     class CompareView : ScrollView
     {
         FighterBook _a, _b; string _status; static int _col = 74;
         readonly ComboBox _other = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Font = Theme.Body, FlatStyle = FlatStyle.Flat, BackColor = Theme.Panel, ForeColor = Theme.Text };
         public event Action<Character> OtherChanged;
+        /// <summary>A fighter in the "Compare with" list.</summary>
         sealed class Item { public string Text; public Character Value; public override string ToString() => Text; }
 
+        /// <summary>Adds the "Compare with" list; picking a fighter there raises OtherChanged.</summary>
         public CompareView()
         {
             var l = Theme.Label("Compare with", Theme.Small, Theme.Muted); l.Location = new Point(0, 2);
@@ -24,6 +27,7 @@ namespace SkinManager.App
             _other.SelectionChangeCommitted += (s, e) => { if (_other.SelectedItem is Item it) OtherChanged?.Invoke(it.Value); };
         }
 
+        /// <summary>Fills the "Compare with" list with the fighters and picks the one being compared.</summary>
         public void SetCast(List<Character> cast, Character selected)
         {
             _other.BeginUpdate(); _other.Items.Clear();
@@ -77,6 +81,8 @@ namespace SkinManager.App
             ContentHeight = y + 44;
         }
 
+        /// <summary>Draws one fighter's startup, active frames and FAF for a move, in green where it beats the other
+        /// fighter's.</summary>
         static void Cells(Graphics g, MoveData d, MoveData other, int x, int y)
         {
             Color C(int mine, int theirs) => other == null || mine <= 0 || theirs <= 0 || mine == theirs ? Theme.Text : mine < theirs ? Theme.Good : Theme.Muted;

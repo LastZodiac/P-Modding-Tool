@@ -11,27 +11,27 @@ using System.Runtime.Serialization.Json;
 
 namespace SkinManager.Core
 {
+    /// <summary>Takes and reads the snapshot of a card that isn't plain P+, used to tell which files were put on by
+    /// hand.</summary>
     public static class CardBaseline
     {
         public const string Prefix = "snapshot:";
+        /// <summary>One file in the snapshot: where it is on the card, its size and its fingerprint.</summary>
         [DataContract] sealed class Item { [DataMember] public string Path, Sha; [DataMember] public long Size; }
+        /// <summary>The saved snapshot: when it was taken, which build folder, and every file in it.</summary>
         [DataContract] sealed class Snapshot { [DataMember] public DateTime Taken; [DataMember] public string Root; [DataMember] public List<Item> Files = new List<Item>(); }
 
         static string FileIn(string folder) => System.IO.Path.Combine(folder, "card-snapshot.json");
 
-        /// <summary>When the snapshot was taken (null: none yet).</summary>
-        public static DateTime? Taken(string folder)
-        {
-            var s = Read(folder);
-            return s?.Taken;
-        }
-
+        /// <summary>The snapshot saved for this card, or null if there's none or it can't be read.</summary>
         static Snapshot Read(string folder)
         {
             try { var f = FileIn(folder); if (!File.Exists(f)) return null; using (var st = File.OpenRead(f)) return (Snapshot)new DataContractJsonSerializer(typeof(Snapshot)).ReadObject(st); }
             catch { return null; }
         }
 
+        /// <summary>Turns a snapshot into the same shape as P+'s own list of files, so the rest of the app can compare
+        /// against either.</summary>
         static PPlusRelease AsRelease(Snapshot s)
         {
             var r = new PPlusRelease { Version = Prefix + s.Taken.ToString("o") };

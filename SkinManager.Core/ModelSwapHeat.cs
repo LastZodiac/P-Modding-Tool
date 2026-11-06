@@ -9,17 +9,18 @@ using BrawlLib.Internal;
 
 namespace SkinManager.Core
 {
+    /// <summary>Model swapping, the weights part: which of P+'s bones each point of your model follows, worked out by
+    /// what it can see.</summary>
     public static partial class ModelSwap
     {
-        public static int HeatSmoothing = 0;      // (unused: blending is by distance at the joints)
         public static float BlendZone = 0.25f;    // how far a joint's bend spreads, as a share of the shorter bone
         public static int HeatCandidates = 6;     // nearest bones tried for sight
-        public static float CloseEnough = 0.7f;
-        public static bool ChainForMiddle = false;
-        public static bool HangingHair = true;
+        public static float CloseEnough = 0.7f;   // this near a bone, a point follows it without the sight check
+        public static bool ChainForMiddle = false;   // the middle of the body (and hair off the head) bends as one chain
+        public static bool HangingHair = true;   // hair hanging below the head follows the neck and chest, not the head
         public static bool HangRigid = true;
-        public static float BackDepth = 0.8f;
-        public static float CentreSmooth = 0f;    // how far (along the surface) the middle of the body's bones fade into each other      // behind the spine by more than this share of the chest's depth: hanging, not body     // hair hanging below the head follows the neck and chest, not the head   // the middle of the body (and hair off the head) bends as one chain   // this near a bone, a point follows it without the sight check
+        public static float BackDepth = 0.8f;   // behind the spine by more than this share of the chest's depth: hanging, not body
+        public static float CentreSmooth = 0f;    // how far (along the surface) the middle of the body's bones fade into each other
 
         /// <summary>Weights for the model's points (as placed on P+'s skeleton): point -> bones and weights. keepWithBody: painted points.</summary>
         public static Func<Vector3, List<(string Bone, float W)>> SightWeights(SwapMesh mesh, List<SwapJoint> joints, Func<Vector3, bool> keepWithBody = null)

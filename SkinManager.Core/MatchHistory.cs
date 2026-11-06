@@ -10,6 +10,7 @@ using System.Text;
 
 namespace SkinManager.Core
 {
+    /// <summary>One player in a game: who they are, the character they played and whether they won.</summary>
     [DataContract]
     public sealed class GamePlayer
     {
@@ -18,6 +19,8 @@ namespace SkinManager.Core
         [DataMember] public bool? Won;
     }
 
+    /// <summary>One game: when and where it was played, whether it was ranked, its set, its replay file and its
+    /// players.</summary>
     [DataContract]
     public sealed class GameRecord
     {
@@ -34,6 +37,7 @@ namespace SkinManager.Core
         /// <summary>What makes a game the same game: when it started, which game of the set, and who played.</summary>
         public string Key => $"{Start.Ticks}|{GameNumber}|{string.Join(",", Players.Select(p => p.UserId ?? p.Code).OrderBy(x => x, StringComparer.Ordinal))}";
 
+        /// <summary>A game's Id from its Key, so the same game gets the same Id however it was read.</summary>
         public static long IdOf(string key)
         {
             using (var sha = System.Security.Cryptography.SHA1.Create())
@@ -48,6 +52,7 @@ namespace SkinManager.Core
         static readonly object Gate = new object();
         static string FileIn(string folder) => Path.Combine(folder, "games.json");
 
+        /// <summary>Every game kept so far (none if the file isn't there or can't be read).</summary>
         public static List<GameRecord> Read(string folder)
         {
             lock (Gate)
@@ -101,6 +106,7 @@ namespace SkinManager.Core
         static readonly object Gate = new object();
         static string FileIn(string folder) => Path.Combine(folder, "logged.json");
 
+        /// <summary>Every game logged so far (none if the file isn't there or can't be read).</summary>
         public static List<GameRecord> Read(string folder)
         {
             lock (Gate)
@@ -115,6 +121,8 @@ namespace SkinManager.Core
             }
         }
 
+        /// <summary>Keeps a game seen in the log, unless one starting within five seconds of it is already kept. Keeps
+        /// the newest 5000.</summary>
         public static void Add(string folder, GameRecord g)
         {
             if (g == null || g.Players.Count < 2) return;
@@ -186,6 +194,8 @@ namespace SkinManager.Core
         public static int Same(int id) => id == 17 || id == 18 ? 16 : id == 29 ? 30 : id == 31 ? 32 : id == 33 ? 34 : id;
     }
 
+    /// <summary>Your games and the records worked out from them: overall, by character, matchup, stage and opponent,
+    /// and your chance to win the next one.</summary>
     public sealed class MatchHistory
     {
         public List<GameRecord> Games = new List<GameRecord>();
@@ -237,6 +247,8 @@ namespace SkinManager.Core
             return h;
         }
 
+        /// <summary>Reads the games and their players from Brawl Online's database (games with fewer than two players
+        /// are left out).</summary>
         static List<GameRecord> FromDatabase(string databasePath)
         {
             var db = SqliteReader.Open(databasePath);
@@ -306,6 +318,8 @@ namespace SkinManager.Core
             return result;
         }
 
+        /// <summary>How many replays are in a folder and the folders right inside it; -1 when there's no such
+        /// folder.</summary>
         static int CountReplays(string folder)
         {
             int n = 0;
@@ -340,6 +354,7 @@ namespace SkinManager.Core
             return list;
         }
 
+        /// <summary>The replay folders found for a database, and when (looked for again after a minute).</summary>
         sealed class Cache { public string Db; public DateTime At; public List<string> List; }
         static readonly Cache FolderCache = new Cache();
         /// <summary>Forgets the replay folders found (after the folders picked in Settings change).</summary>
@@ -473,6 +488,7 @@ namespace SkinManager.Core
                  .Select(g => (g, g.Players.FirstOrDefault(p => p.UserId == Me), g.Players.FirstOrDefault(p => p.UserId != Me)))
                  .Where(x => x.Item2 != null && x.Item3 != null && x.Item2.Won != null);
 
+        /// <summary>Wins and losses over a set of games.</summary>
         public static Record Count(IEnumerable<(GameRecord Game, GamePlayer Me, GamePlayer Them)> games)
         {
             var r = new Record();
@@ -493,12 +509,12 @@ namespace SkinManager.Core
 
         public sealed class Factor { public string What; public Record Record; public double Shrunk; public double Effect; }
 
+        /// <summary>Your chance to win a game, with what moved it there and how many games it's based on.</summary>
         public sealed class Projection
         {
             public double Chance;                       // 0..1
             public List<Factor> Factors = new List<Factor>();
             public int Evidence;                        // games behind it (the factors' own games)
-            public string Confidence => Evidence >= 40 ? "good" : Evidence >= 15 ? "some" : "little";
         }
 
         const double Prior = 8;   // how many games of your overall rate each factor starts from (few games: little pull)

@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using BrawlLib.Internal;
 using BrawlLib.SSBB.ResourceNodes;
@@ -26,6 +25,8 @@ namespace SkinManager.Core
     /// <summary>A dab of the "keep with the body" brush (front view, P+'s units), or of the eraser.</summary>
     public sealed class PaintDab { public float X, Y, R; public bool Erase; }
 
+    /// <summary>Model swapping, the joints part: finding P+'s joints, your marks for your model's joints, and bending
+    /// the model to fit.</summary>
     public static partial class ModelSwap
     {
         static readonly (string Pattern, string Label)[] Handles =
@@ -235,6 +236,8 @@ namespace SkinManager.Core
         {
             readonly Vector3 _from, _to, _axis; readonly float[] _r; readonly float _stretch;
             Part(Vector3 from, Vector3 to, float[] r, Vector3 axis, float stretch) { _from = from; _to = to; _r = r; _axis = axis; _stretch = stretch; }
+            /// <summary>Works out a part's move from your model's bone (mine) to P+'s bone (theirs): the turn between
+            /// them and the stretch (kept between half and double).</summary>
             public Part(Vector3 from, Vector3 to, Vector3 mine, Vector3 theirs)
             {
                 _from = from; _to = to;
@@ -245,6 +248,8 @@ namespace SkinManager.Core
             }
             public Part MovedTo(Vector3 from, Vector3 to) => new Part(from, to, _r, _axis, 1f);
             public Vector3 Turn(Vector3 n) => Mul(_r, n);
+            /// <summary>Moves one point of the model with this part: stretched along the bone, turned, then placed on
+            /// P+'s joint.</summary>
             public Vector3 Point(Vector3 p)
             {
                 var o = Sub(p, _from);
@@ -280,6 +285,7 @@ namespace SkinManager.Core
             string.Join("\n", marks.Select(kv => string.Format(CultureInfo.InvariantCulture, "{0} {1} {2} {3}", kv.Key, kv.Value._x, kv.Value._y, kv.Value._z))
                 .Concat((dabs ?? new List<PaintDab>()).Select(d => string.Format(CultureInfo.InvariantCulture, "~{0} {1} {2} {3}", d.Erase ? "erase" : "paint", d.X, d.Y, d.R))));
 
+        /// <summary>Reads the brush dabs back from saved marks (the lines starting with ~paint or ~erase).</summary>
         public static List<PaintDab> ReadDabs(string text)
         {
             var r = new List<PaintDab>();
@@ -292,6 +298,7 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>Reads the joint marks back from saved marks (one "bone x y z" per line; brush lines are skipped).</summary>
         public static Dictionary<string, Vector3> ReadMarks(string text)
         {
             var r = new Dictionary<string, Vector3>(StringComparer.Ordinal);

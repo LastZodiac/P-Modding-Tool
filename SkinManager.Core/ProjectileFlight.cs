@@ -8,6 +8,8 @@ using System.Linq;
 
 namespace SkinManager.Core
 {
+    /// <summary>Works out where a projectile flies once it's out, by the rule for that fighter and article (the rules
+    /// are in ProjectileFlightRules.cs).</summary>
     public static partial class ProjectileFlight
     {
         /// <summary>A rule: which fighter and article, and how to fly it.</summary>
@@ -25,7 +27,6 @@ namespace SkinManager.Core
             public float AF(int off) => M.ArticleF(Article, off);
             public int AI(int off) => M.ArticleI(Article, off);
             public float FF(int slot, int off) => M.FighterF(slot, off);
-            public int FI(int slot, int off) => M.FighterI(slot, off);
             /// <summary>The move's first frame playing this animation (0: not in the move).</summary>
             public int PartStart(string anim) => Entry.Data.Frames.FirstOrDefault(f => string.Equals(f.Animation, anim, StringComparison.OrdinalIgnoreCase))?.Frame ?? 0;
             /// <summary>The frame an article script removes the article on (0: it doesn't).</summary>
@@ -37,9 +38,9 @@ namespace SkinManager.Core
             /// <summary>Frames to show one that keeps going until it hits something: until it's well past the picture.</summary>
             public static int UntilOut(float speed) => speed <= 0.01f ? 60 : Math.Max(10, Math.Min(200, (int)Math.Ceiling(Reach / speed)));
             public bool Air => Entry.Parts.Any(p => p.Contains("Air"));
-            /// <summary>The move's first "let go of an article" event (0: none).</summary>
             /// <summary>The move's first frame setting this flag (0: it doesn't).</summary>
             public int FlagFrame(int v) => Entry.Data.FlagsSet.Where(x => x.Var == v).Select(x => x.Frame).DefaultIfEmpty(0).Min();
+            /// <summary>The move's first "let go of an article" event (0: none).</summary>
             public int ShotFrame => Entry.Data.Shots.Select(x => x.Frame).DefaultIfEmpty(0).Min();
             /// <summary>An article script's hitboxes frame by frame (frame 1 = its first).</summary>
             public List<List<Hitbox>> Script(string name, int frames)

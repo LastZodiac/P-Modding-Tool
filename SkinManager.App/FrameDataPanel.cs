@@ -14,6 +14,8 @@ using SkinManager.Core;
 
 namespace SkinManager.App
 {
+    /// <summary>The Frame Data page: pick a fighter and a move to see it play with its hitboxes, plus the combos, DI,
+    /// punish and compare views.</summary>
     class FrameDataPanel : GlassPanel
     {
         readonly Func<Installer> _installer;
@@ -44,6 +46,8 @@ namespace SkinManager.App
         string _filter = "All";
         Character _targetChar, _diChar, _punishChar, _compareChar;
 
+        /// <summary>Builds the page's views, view buttons and move filter buttons and wires them up; reads the fighters
+        /// the first time it's shown.</summary>
         public FrameDataPanel(Func<Installer> installer)
         {
             _installer = installer;
@@ -84,6 +88,8 @@ namespace SkinManager.App
             Arrange();
         }
 
+        /// <summary>Lays out the header, fighter heads, view buttons, move list and the view on show for the page's
+        /// size.</summary>
         void Arrange()
         {
             int w = Math.Max(760, ClientSize.Width - 44), h = ClientSize.Height;
@@ -124,6 +130,8 @@ namespace SkinManager.App
         public void ShowAccuracy() => ShowTab(3);
 
         bool _starting;
+        /// <summary>Reads which fighters are on the card and their heads, sets up every view's fighter picker, and
+        /// opens Fox (or the first one).</summary>
         async void Start()
         {
             if (_starting) return;
@@ -158,6 +166,7 @@ namespace SkinManager.App
             _note.Text = why; _note.ForeColor = Theme.Warn; _note.Cursor = Cursors.Hand;
         }
 
+        /// <summary>Shows a fighter's moves (read from the card the first time) and plays the first one.</summary>
         async void ShowFighter(Character c)
         {
             _strip.Selected = c; _strip.Invalidate();
@@ -185,6 +194,8 @@ namespace SkinManager.App
 
         bool _combos, _diOn;
         bool _sureOn, _punishOn, _compareOn;
+        /// <summary>Switches to a view (0 moves, 1 combos, 2 DI, 3 how accurate, 4 punish, 5 compare) and fills it
+        /// in.</summary>
         void ShowTab(int tab)
         {
             _combos = tab == 1; _diOn = tab == 2; _sureOn = tab == 3; _punishOn = tab == 4; _compareOn = tab == 5;
@@ -244,6 +255,7 @@ namespace SkinManager.App
             catch (Exception e) { Program.Log("punish", e); _punish.Status("Couldn't work it out: " + e.Message); }
         }
 
+        /// <summary>Fills the "how accurate" view for the fighter on show (when that view is open).</summary>
         void ShowSure()
         {
             if (!_sureOn) return;
@@ -326,6 +338,7 @@ namespace SkinManager.App
             catch (Exception e) { Program.Log("combos", e); _combo.Status("Couldn't work it out: " + e.Message); }
         }
 
+        /// <summary>Lets go of every drawn move (after a change that means they must be drawn again).</summary>
         void ClearFrames()
         {
             _view.Show(_book, _move, null); _di.Forget();
@@ -354,6 +367,8 @@ namespace SkinManager.App
 
         string Key(MoveEntry m) => _book.Character.FilePrefix + "|" + m.Group + "|" + m.Name + "|" + string.Join("+", m.Parts);
 
+        /// <summary>Shows a move: its numbers right away, then its pictures, drawn in the background (or reused if
+        /// drawn lately).</summary>
         async void ShowMove(MoveEntry m)
         {
             _move = m; _list.Selected = m; _list.Invalidate();
@@ -382,6 +397,8 @@ namespace SkinManager.App
             catch (Exception e) { Program.Log("frame data draw", e); if (_move == m) _view.Failed(e.Message); }
         }
 
+        /// <summary>Saves the move on show as an animated GIF, each frame labelled with its number, its state and the
+        /// move's name.</summary>
         void SaveGif()
         {
             if (_move == null || _view.Pictures == null) return;
@@ -424,6 +441,7 @@ namespace SkinManager.App
         public Character Selected; public event Action<Character> Picked;
         int _hover = -1;
         const int S = 40, Gap = 5;
+        /// <summary>Sets up hover (with the hand cursor) and clicking a head to pick that fighter.</summary>
         public CastStrip()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -432,6 +450,8 @@ namespace SkinManager.App
             MouseLeave += (s, e) => { _hover = -1; Invalidate(); };
             MouseClick += (s, e) => { int i = At(e.Location); if (i >= 0) Picked?.Invoke(_items[i].c); };
         }
+        /// <summary>Shows these fighters, each with their head from the card's pictures (or the start of their name
+        /// when there's none).</summary>
         public void Set(List<Character> cast, StatsArt art)
         {
             var ids = Enumerable.Range(0, 60).GroupBy(Fighters.Name).ToDictionary(g => g.Key, g => g.Min());
@@ -476,6 +496,7 @@ namespace SkinManager.App
         public string Filter = "All";
         int _hover = -1;
         const int H = 34;
+        /// <summary>Sets up a scrolling list where hovering highlights a move and clicking picks it.</summary>
         public MoveList()
         {
             DoubleBuffered = true; AutoScroll = true; BackColor = Color.FromArgb(150, 20, 22, 28);
@@ -485,6 +506,8 @@ namespace SkinManager.App
             MouseClick += (s, e) => { int i = At(e.Location); if (i >= 0 && _rows[i].move != null) Picked?.Invoke(_rows[i].move); };
         }
         int At(Point p) { int y = p.Y - AutoScrollPosition.Y - 30; int i = y < 0 ? -1 : y / H; return i >= 0 && i < _rows.Count ? i : -1; }
+        /// <summary>Lists a fighter's moves in their groups, only those the filter lets through (or shows a message
+        /// instead, when book is null).</summary>
         public void Show(FighterBook book, string message)
         {
             _book = book; _message = message; _rows.Clear();
@@ -550,6 +573,8 @@ namespace SkinManager.App
         readonly CheckBox _pauseHits = new CheckBox { Text = "Pause on quick hits", Checked = _pauseOnHits, AutoSize = true, ForeColor = Theme.Text, BackColor = Color.Transparent, Font = Theme.Small };
         Rectangle _pic, _strip;
 
+        /// <summary>Adds the playback buttons and tick boxes and starts the timer that plays the move (pausing on quick
+        /// hits if asked).</summary>
         public MoveView()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -590,6 +615,8 @@ namespace SkinManager.App
         void Scrub(int x) { if (_move == null) return; int n = Math.Max(1, _move.Data.Frames.Count); _frame = Math.Max(0, Math.Min(n - 1, (x - _strip.X) * n / Math.Max(1, _strip.Width))); _playing = false; _play.Text = "▶▶"; Invalidate(); }
         void Step(int d) { if (_move == null) return; int n = Math.Max(1, _move.Data.Frames.Count); _frame = ((_frame + d) % n + n) % n; _playing = false; _play.Text = "▶▶"; Invalidate(); }
 
+        /// <summary>Fits the picture, the frame strip and the controls to the view's size (shortening labels when
+        /// narrow).</summary>
         void Arrange()
         {
             int w = Width;
@@ -610,6 +637,8 @@ namespace SkinManager.App
             _gif.Location = new Point(w - _gif.Width, by);
         }
 
+        /// <summary>Shows a move: pics are its pictures, or null while they're being drawn. Starts again from frame 1
+        /// for a new move.</summary>
         public void Show(FighterBook book, MoveEntry m, List<Bitmap> pics)
         {
             bool same = _move == m;
@@ -641,6 +670,8 @@ namespace SkinManager.App
             }
         }
 
+        /// <summary>Draws the frame on show, its counter and state, the strip of every frame, the move's numbers and
+        /// each hitbox's numbers.</summary>
         void PaintMove(Graphics g)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias; g.InterpolationMode = InterpolationMode.HighQualityBicubic;

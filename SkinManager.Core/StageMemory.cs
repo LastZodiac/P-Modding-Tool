@@ -10,12 +10,13 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
-using BrawlLib.Internal.IO;
 using BrawlLib.SSBB.ResourceNodes;
 using BrawlLib.Wii.Textures;
 
 namespace SkinManager.Core
 {
+    /// <summary>Checks on a stage file before it goes on the card. This part: whether it fits in the stage memory once
+    /// unpacked, and making it fit.</summary>
     public static partial class StageCheck
     {
         /// <summary>Stage memory a stage program has taken when its file loads (measured), by stage program.</summary>
@@ -31,6 +32,8 @@ namespace SkinManager.Core
         public static long RoomFor(string program) =>
             program != null && TakenFirst.TryGetValue(program, out long taken) ? StageHeap - taken - LoadMargin : StageHeap;
 
+        /// <summary>What FitMemory did: the file that fits, its unpacked size before and after, and what was changed to
+        /// get there.</summary>
         public sealed class MemoryFit
         {
             public byte[] Bytes;            // the file made to fit (null: it couldn't be)
@@ -106,6 +109,8 @@ namespace SkinManager.Core
             return r;
         }
 
+        /// <summary>True when the picture before this one uses this one's pixels (it shares data), so this one mustn't
+        /// be shrunk.</summary>
         static bool LendsPixels(TEX0Node t)
         {
             var sib = t.Parent?.Children; int k = sib?.IndexOf(t) ?? -1;

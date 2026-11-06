@@ -14,8 +14,12 @@ using BrawlLib.Wii.Textures;
 
 namespace SkinManager.Core
 {
+    /// <summary>The part of model swapping the Bridge uses, which keeps some of the costume's own shapes as they
+    /// were.</summary>
     public static partial class ModelSwap
     {
+        /// <summary>True when more than 2% of a picture is partly see-through, so it needs the 16-bit format instead of
+        /// the compressed one.</summary>
         static bool HasHalfAlpha(Bitmap b)
         {
             int n = 0, half = 0;
@@ -23,7 +27,10 @@ namespace SkinManager.Core
             return n > 0 && half > n * 0.02;
         }
 
-        public static Result BuildKeeping(SwapMesh mesh, byte[] costume, string name, Func<Vector3, List<(string Bone, float W)>> weights, Func<MDL0ObjectNode, bool> keepObject, IDictionary<SwapPart, string> pictureNames = null, Func<Vector3, bool> keepWithBody = null, int mixLimit = -1)
+        /// <summary>Builds the new costume like Build, but keeps the shapes keepObject picks as they are, weights each
+        /// new point to the bones weights gives (from Blender), and stays under the costume's limit of bone mixes
+        /// (mixLimit) so the game doesn't crash.</summary>
+        public static Result BuildKeeping(SwapMesh mesh, byte[] costume, Func<Vector3, List<(string Bone, float W)>> weights, Func<MDL0ObjectNode, bool> keepObject, IDictionary<SwapPart, string> pictureNames = null, Func<Vector3, bool> keepWithBody = null, int mixLimit = -1)
         {
             // the costume picture each part showed when it went to Blender (by name)
             var namesByPart = mesh.Parts.Select(p => pictureNames != null && pictureNames.TryGetValue(p, out var n) ? n : null).ToList();
