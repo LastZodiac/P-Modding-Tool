@@ -430,10 +430,11 @@ namespace SkinManager.Core
         /// <summary>What's wrong with a looks install an older version made (null: nothing known): a palette picture of
         /// P+'s made plain (the game crashes loading the stage), or the map's scenery put in a part of P+'s file the stage
         /// program draws as far-off background (its ground shows far off the floor).</summary>
-        static string Fault(byte[] bytes, byte[] original, ICollection<string> program)
+        static string Fault(byte[] bytes, byte[] original, ICollection<string> program, bool oldBuild)
         {
             if (StageCheck.BrokenPictures(bytes, original)) return "one of P+'s pictures it hides had been changed in a way that can crash the game when the stage loads";
             if (StageCheck.LooksMisplaced(bytes, original, program)) return "its scenery is now drawn where P+ draws its own ground, so it lines up with the floor you stand on";
+            if (oldBuild && StageCheck.DrawnElsewhere(bytes, original) > 0) return "parts of its scenery were drawn in another place in the game than where they were lined up (their animation didn't come along), and now they're where they belong";
             return null;
         }
 
@@ -460,7 +461,8 @@ namespace SkinManager.Core
                     if (found < 0)
                     {
                         var bytes = File.ReadAllBytes(p);
-                        found = StageCheck.BrokenPictures(bytes, original) ? 2 : StageCheck.LooksMisplaced(bytes, original, _stageIndex.ProgramNames(card, s.CardPath)) ? 1 : 0;
+                        found = StageCheck.BrokenPictures(bytes, original) ? 2 : StageCheck.LooksMisplaced(bytes, original, _stageIndex.ProgramNames(card, s.CardPath)) ? 1
+                              : s.Placed == 0 && StageCheck.DrawnElsewhere(bytes, original) > 0 ? 1 : 0;
                         lock (FaultsSeen) FaultsSeen[key] = found;
                     }
                     if (found > 0) list.Add(s);
@@ -522,7 +524,7 @@ namespace SkinManager.Core
             var theirs = _stageIndex.Of(card, _lib, s.CardPath);
             var program = _stageIndex.ProgramNames(card, s.CardPath);
             // made by an older version with a known fault (see NeedsRemaking): made again from the map it came as
-            string fault = s.LooksOnly && LooksSource(s) != null ? Fault(bytes, original, program) : null;
+            string fault = s.LooksOnly && LooksSource(s) != null ? Fault(bytes, original, program, s.Placed == 0) : null;
             if (fault == null && StageCheck.Compare(StageCheck.Gameplay(bytes), theirs, "", program).Passed) return bytes;
             if (s.LooksOnly)
             {
@@ -536,6 +538,7 @@ namespace SkinManager.Core
                 {
                     File.WriteAllBytes(Path.Combine(_lib.StageFolder(s.Id), Path.GetFileName(s.CardPath)), redone.Bytes);
                     s.Sha256 = Library.Sha256(redone.Bytes);
+                    s.Placed = 1;
                     if (fault != null && !Notes.Any(n => n.StartsWith(s.Name + " was made again")))
                         Notes.Add($"{s.Name} was made again: {fault}.");
                     return redone.Bytes;
@@ -993,6 +996,7 @@ namespace SkinManager.Core
         static byte[] LinedUp(byte[] map, byte[] original, ICollection<string> program, bool pplusArt, out StageCheck.Alignment al, out byte[] pplus)
         {
             al = null; pplus = original;
+            if (pplusArt) map = StageCheck.AtRest(map);   // measured where the game draws it (see AtRest)
             byte[] cur = map;
             try
             {
@@ -1348,6 +1352,7 @@ namespace SkinManager.Core
                     Author = plan.Source?.Author, PageUrl = plan.Source?.PageUrl, ThumbUrl = plan.Source?.ThumbUrl, SourcePath = plan.SourcePath, PackageKey = plan.PackageKey,
                     Kind = plan.Kind, TargetLabel = plan.Kind != null ? plan.Target.StageName : null,
                     TrackList = plan.TrackList, SongTitle = plan.SongTitle, LooksOnly = plan.Looks != null, Group = plan.Group, Swap = plan.Swap,
+                    Placed = plan.Looks != null ? 1 : 0,
                 };
                 RefreshOriginal(card, record.CardPath);   // what's there now (P+'s, or a stage or song put on by hand) comes back when it's off
                 card.WriteFile(record.CardPath, plan.Bytes);

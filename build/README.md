@@ -733,28 +733,47 @@ with its evidence, and a check for it.
 29. Checked and ruled out (2026-11-04): bone flags that don't match the bone's values (Emerald Coast's "main" bone says
    "no transform" but moves and scales). P+'s own Rainbow Road has the same and draws right, so the game uses the
    values; not a cause.
-30. OPEN (2026-11-05): Snowman's Land (P+ DL 1:1) on Dream Land still crashes after the palette fix (item 25). The game
-   stops 0.25 s after the stage loads, in its shadow system (stShadow, sora_melee 0x80933c84): it reads the width and
-   height of a shadow texture slot whose texture pointer is empty. Shadow surfaces are materials with a "shadow"
-   user-data entry; the slot keeps the texture bound to the material's first texture. Checked and ruled out, all
-   against P+'s own Dream Land: palettes; texture binding (copied the game's rules: own part first, then every Texture
-   Data, and a slot that names a palette needs a palette picture), every slot binds in both files; name lookups in
-   every group; stored name lengths; the user-data values; model file versions (all 9); model count in one part (P+
-   has up to 142); the shadow system's limits (16 and 24, the same for every stage). What differs from P+'s file and
-   the mod's own file: the map's 4 shadow surfaces use the renamed texture zMap_TShadow1 inside the part (2 shadow
-   textures instead of 1), and part [1] gained AnmTexPat and AnmVis groups, so the game builds all 51 models there
-   with extra buffers. Also ruled out since: texture-swap/visibility animations in a part (Entrance and Final Boxing
-   have them and work); the shadow texture inside a part (Battlefield's Palutena look and Entrance have that and
-   work); a second ground binding part [1] again (P+'s Dream Land program gives each ground its own part: 0 Scarfy,
-   1 main art, 2 Whispy, 3 block positions, 4 blocks, 101/102 trainers). The mod's own file can't be used whole: it
-   fails the online check (floors, spawns and stage events differ from P+'s). What's unique to this build: 51 models
-   in one part, all built with extra buffers (next biggest working part: 21). Every input the crashing code reads is
-   valid in the file, so what's left is at runtime (most likely memory); it can't be proven from the file alone.
-   Not fixed.
-31. OPEN (2026-11-05): Emerald Coast (P+ GHZ 1:1) still looks wrong in game after the far-background fix (item 26),
-   though the misplaced check now passes on the installed file. Item 26 doesn't cover it.
+30. Being tested (2026-11-06): Snowman's Land (P+ DL 1:1) on Dream Land crashes 0.25 s after the stage loads, in the
+   game's shadow system (stShadow, sora_melee 0x80933c84: it reads the width and height of a shadow texture whose
+   pointer is empty). Every input that code reads checks out in the file (palettes, texture binding by the game's own
+   rules, name lookups, user-data values, model versions, the shadow limits of 16 and 24, which part each ground
+   uses), so what's left happens at runtime. What was unique to the build: 51 models in one part, all built heavier
+   because the part had picture-swap (AnmTexPat) and visibility animations nothing could play (the map's sign and NPC
+   animations, renamed so nothing asks for them). The game picks each part's model buffers by the kinds of animation
+   in it (bone 0x40, picture-swap 3, texture-scroll 0x204, shape 0x7000). Only animations that can play are brought
+   over now (item 33), so part [1] has exactly P+'s kinds again. Test: if it still crashes, memory isn't it.
+31. Fixed (2026-11-06): Emerald Coast (P+ GHZ 1:1) drawn 30% too big and 20 too high (fighters sunk into the walkway).
+   Its main floor's bone stores full size at 0 in its bind matrix; only the map's own first animation puts it at
+   0.76 and 20 down. On Green Hill Zone, P+'s animation has to stay first, so the map's never played. See item 34.
 32. Not a problem (2026-11-05): the Radical Highway on Green Hill Zone's Z alt is P+'s own stage (the card's file is
    P+'s release file, unchanged). The mod's Green Hill Zone file went on the Marble Zone alt (R).
+33. Fixed (2026-11-06): animations brought over from a map that can't play. Only the first animation of each kind in a
+   part plays; the rest were renamed so nothing asks for them, and still made the game build every model in the part
+   bigger. Now only the map's main part's first of each kind comes over (none when P+'s program uses that part by
+   name). Also fixed: the first of a second kind (a texture scroll after a bone animation) went in at place 1, not 0,
+   so it never played; map water and lights may now move where they stood still. Checked on all 16 installed looks:
+   same models, gameplay unchanged, only animations that couldn't play left out.
+34. Fixed (2026-11-06): where the game draws a bone at rest. A bone the part's playing (first) bone animation has keys
+   for goes where that animation's first frame says; any other bone goes where its bind matrix says (relative to its
+   parent). BrawlLib, and so every check and fit here, uses the bone's stored values instead. Where those differ, the
+   app lined up a picture the game never draws, and a move made by the fit (MoveLooks sets the values, not the bind
+   matrix) didn't show in the game. Now: AtRest puts the map's bones at the game's rest pose before anything is
+   measured, and KeepPose copies each map part's first-animation tracks into the animation that plays where the
+   models go, plus a still track for any bone whose values aren't what its bind matrix says. Catalogue (210 pairs):
+   map pieces drawn elsewhere in the game than where they were lined up went from 5,914 to 46, none worse, none less
+   safe. Builds made before this are flagged by the "Fix them" banner (DrawnElsewhere, InstalledStage.Placed).
+   Watch for: a map's scenery jumping when the stage loads, or a map's moving parts standing still.
+35. Fixed (2026-11-06): MoveLooks moved an animation's keys along with its bones, but a track with no keys at all
+   (holding 0 the whole time) stayed where it was: Clock Town's Majora look sat 44 units low.
+36. Fixed (2026-11-06): the map's first bone animation went in ahead of P+'s, so P+'s stopped and P+'s pieces kept
+   in that part fell back to their bind matrix (Clock Town's stage 290 units off). P+'s keeps playing now; the map's
+   tracks go into it. A part with no bone animation gets a small one only when the map's bones need holding.
+37. Checked and ruled out (2026-11-06): the game drawing a bone flagged "no transform" at no offset. P+'s own Delfino
+   Secret (world 2-3) draws its sand, pyramid, gradient and sky stacked by their bones' offsets although every one is
+   flagged "no transform", and Entrance's TV pile would have sat in the middle of the stage. The bind matrix is what
+   counts (item 34).
+38. OPEN (2026-11-06): two catalogue pairs still have map pieces drawn elsewhere after item 34: Pirate Ship's Molgera
+   look (11) and Port Town's PS2 Death Race (35). Not installed by anyone yet; worth a look before they are.
 
 ## Stage pictures (previews): what used to come out blank, and why
 Checked on all 286 stage files on the card: 281 draw now (before: 256). Still blank: Castle Siege's three files (no

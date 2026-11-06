@@ -87,6 +87,7 @@ namespace SkinManager.Core
         [DataMember(EmitDefaultValue = false)] public bool LooksOnly;       // the map's looks on P+'s own stage file (looks-map.pac: the map)
         [DataMember(EmitDefaultValue = false)] public string Group;         // stage files put on together (Smashville's five times of day): one mod in My Mods
         [DataMember(EmitDefaultValue = false)] public string Swap;          // "swap": the two versions swapped (StageSwaps.Describe)
+        [DataMember(EmitDefaultValue = false)] public int Placed;           // 1: its looks were made keeping each bone where the game draws it (2026-11-06)
         public bool Enabled => !Disabled;
         public bool IsSong => Kind == "song" || Kind == "song-new";
         public bool IsNewSong => Kind == "song-new";

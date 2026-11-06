@@ -178,6 +178,137 @@ namespace SkinManager.Core
         /// models collision rides on, and models the stage program names. looks: the map's looks go on P+'s file, where only
         /// its position markers and the models that move its platforms stay out (MoveKeep). Null (with why) when it can't be
         /// done safely.</summary>
+        /// <summary>Puts each of the map's bones at the place its own file shows it at rest, so what's measured here is what
+        /// the game draws. The game puts a bone the playing animation has keys for (the first of a part) where its first
+        /// frame says, and any other bone where its bind matrix says; BrawlLib (and every check and fit here) goes by the
+        /// bone's stored values instead. Those agree in most maps but not all: Emerald Coast's main floor is stored at
+        /// full size at 0, and only its animation puts it at 0.76 and 20 down (2026-11-06). Each bone gets the values the
+        /// game uses. The same bytes when nothing changed (or the file can't be read).</summary>
+        public static byte[] AtRest(byte[] stage)
+        {
+            try
+            {
+                using (var tIn = new TempFile(".pac", stage))
+                using (var tOut = new TempFile(".pac"))
+                {
+                    lock (BrawlGate.Lock)
+                    using (var root = NodeFactory.FromFile(null, tIn.Path))
+                    {
+                        if (root == null) return stage;
+                        var models = root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().ToList();
+                        foreach (var m in models) m.Populate();
+                        if (!SetAtRest(models)) return stage;
+                        root.Export(tOut.Path);
+                    }
+                    return File.ReadAllBytes(tOut.Path);
+                }
+            }
+            catch { return stage; }
+        }
+
+        /// <summary>AtRest on models already open. True when a bone changed.</summary>
+        internal static bool SetAtRest(IEnumerable<MDL0Node> models)
+        {
+            bool any = false;
+            foreach (var m in models)
+            {
+                var chr = m.Parent?.Parent?.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().FirstOrDefault();
+                var keys = chr?.Children.OfType<CHR0EntryNode>().GroupBy(e => e.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+                bool changed = false;
+                foreach (var bone in m.BoneCache.OfType<MDL0BoneNode>())
+                {
+                    BrawlLib.Internal.Vector3 sc = bone.Scale, ro = bone.Rotation, tr = bone.Translation;
+                    if (keys != null && keys.TryGetValue(bone.Name, out var e))
+                    {
+                        var fr = e.GetAnimFrame(0);
+                        if (!e.UseModelScale) sc = fr.Scale;
+                        if (!e.UseModelRotate) ro = fr.Rotation;
+                        if (!e.UseModelTranslate) tr = fr.Translation;
+                    }
+                    else
+                    {
+                        var local = BindLocal(bone);
+                        if (SameMatrix(local, BrawlLib.Internal.Matrix.TransformMatrix(sc, ro, tr))) continue;
+                        var st = local.Derive();
+                        if (!SameMatrix(local, BrawlLib.Internal.Matrix.TransformMatrix(st._scale, st._rotate, st._translate))) continue;   // not a plain move, turn and size
+                        sc = st._scale; ro = st._rotate; tr = st._translate;
+                    }
+                    if (sc != bone.Scale) { bone.Scale = sc; changed = true; }
+                    if (ro != bone.Rotation) { bone.Rotation = ro; changed = true; }
+                    if (tr != bone.Translation) { bone.Translation = tr; changed = true; }
+                }
+                if (changed) { m.SignalPropertyChange(); any = true; }
+            }
+            return any;
+        }
+
+        /// <summary>How many drawn pieces of the map's looks (models P+'s file doesn't have) the game draws more than a unit
+        /// away from where they're lined up here. The game puts a bone where the part's playing animation (its first) says
+        /// when that has keys for it, and otherwise where its bind matrix says; here everything is measured by the bones'
+        /// stored values. Builds made before KeepPose and AtRest (2026-11-06) can disagree: Emerald Coast drawn 30% too big
+        /// and 20 too high. 0 when the file can't be read.</summary>
+        public static int DrawnElsewhere(byte[] stage, byte[] original)
+        {
+            try
+            {
+                HashSet<string> theirs;
+                using (var t = new TempFile(".pac", original))
+                lock (BrawlGate.Lock)
+                using (var root = NodeFactory.FromFile(null, t.Path))
+                    theirs = new HashSet<string>(root.FindChildrenByType(null, ResourceType.MDL0).Select(m => m.Name), StringComparer.Ordinal);
+                int off = 0;
+                using (var t = new TempFile(".pac", stage))
+                lock (BrawlGate.Lock)
+                using (var root = NodeFactory.FromFile(null, t.Path))
+                    foreach (var m in root.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().Where(m => !theirs.Contains(m.Name)))
+                    {
+                        m.Populate();
+                        try { m.ApplyCHR(null, 0); } catch { continue; }
+                        var chr = m.Parent?.Parent?.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().FirstOrDefault();
+                        var keys = chr?.Children.OfType<CHR0EntryNode>().GroupBy(e => e.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+                        var world = new Dictionary<MDL0BoneNode, BrawlLib.Internal.Matrix>();
+                        BrawlLib.Internal.Matrix W(MDL0BoneNode b)
+                        {
+                            if (world.TryGetValue(b, out var w)) return w;
+                            var parent = b.Parent as MDL0BoneNode;
+                            var up = parent == null ? BrawlLib.Internal.Matrix.Identity : W(parent);
+                            BrawlLib.Internal.Matrix local;
+                            if (keys != null && keys.TryGetValue(b.Name, out var e))
+                            {
+                                var fr = e.GetAnimFrame(0);
+                                local = BrawlLib.Internal.Matrix.TransformMatrix(e.UseModelScale ? b.Scale : fr.Scale, e.UseModelRotate ? b.Rotation : fr.Rotation, e.UseModelTranslate ? b.Translation : fr.Translation);
+                            }
+                            else local = BindLocal(b);
+                            return world[b] = up * local;
+                        }
+                        foreach (var o in m.FindChild("Objects", false)?.Children.OfType<MDL0ObjectNode>() ?? Enumerable.Empty<MDL0ObjectNode>())
+                        {
+                            var verts = o._manager?._vertices;
+                            if (verts == null) continue;
+                            foreach (var v in verts)
+                            {
+                                if (!(v.GetMatrixNode() is MDL0BoneNode bone)) continue;   // bent by several bones: placed the same either way
+                                var g = W(bone) * v._position; var l = v.WeightedPosition;
+                                if (Math.Abs(g._x - l._x) + Math.Abs(g._y - l._y) + Math.Abs(g._z - l._z) > 1) { off++; break; }
+                            }
+                        }
+                    }
+                return off;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>Where a bone's bind matrix puts it against its parent's (where the game draws a bone nothing animates).</summary>
+        internal static BrawlLib.Internal.Matrix BindLocal(MDL0BoneNode bone) =>
+            bone.Parent is MDL0BoneNode parent ? parent.InverseBindMatrix * bone.BindMatrix : bone.BindMatrix;
+
+        /// <summary>Two matrices the same, give or take rounding.</summary>
+        internal static bool SameMatrix(BrawlLib.Internal.Matrix a, BrawlLib.Internal.Matrix b)
+        {
+            for (int i = 0; i < 16; i++) if (Math.Abs(a[i] - b[i]) > 1e-3f * (1 + Math.Abs(b[i]))) return false;
+            return true;
+        }
+
         public static byte[] MoveLooks(byte[] map, Alignment al, ICollection<string> program, out string problem, bool looks = false)
         {
             problem = null;
@@ -224,12 +355,17 @@ namespace SkinManager.Core
                             int frames = Math.Max(1, anim.FrameCount);
                             void Each(int array, Func<float, float> value, float tangentScale)
                             {
+                                bool any = false;
                                 for (int f = 0; f <= frames; f++)
                                 {
                                     var k = keys.GetKeyframe(array, f);
                                     if (k == null) continue;
                                     k._value = value(k._value); k._tangent *= tangentScale;
+                                    any = true;
                                 }
+                                // no keys at all: it holds its default (0 for a position) the whole time, which has to move too
+                                // (Clock Town's Majora look kept its whole scenery 44 units low, 2026-11-06)
+                                if (!any) e.SetKeyframe(array, 0, value(e.GetFrameValue(array, 0)), true);
                             }
                             if (!e.UseModelScale) for (int i = 0; i < 3; i++) Each(i, v => v * s, s);
                             if (!e.UseModelTranslate)

@@ -36,6 +36,69 @@ namespace SkinManager.Core
             public int PlatformsLeftOut;                          // the map's own copies of P+'s moving platforms, not used
         }
 
+        /// <summary>The map's bones stay where the map's own file shows them. A bone the playing animation has keys for is
+        /// where those keys put it; any other bone is drawn where its bind matrix says, whatever its stored values are. So a
+        /// map whose own first animation places some bones (Emerald Coast's main floor: its bind says full size at 0, its
+        /// animation 0.76 at -20) loses that once its animation can't play where its models go, and a bone the fit moved
+        /// (MoveLooks sets the values, not the bind) doesn't move in the game. Both go into the animation that plays in the
+        /// part the models went to: the tracks of each part's own first animation, and a still track (its values) for every
+        /// other bone whose values aren't what its bind matrix says. Only names of the map's own bones (renamed so they
+        /// can't be P+'s) are added, so nothing of P+'s moves. Nothing is done when that part has no bone animation.
+        /// (2026-11-06, Emerald Coast on Green Hill Zone drawn 30% too big and 20 too high in the game.)</summary>
+        static void KeepPose(BRRESNode main, List<MDL0Node> imported, List<CHR0Node> rest)
+        {
+            if (imported.Count == 0) return;
+            var playing = main.FindChildrenByType(null, ResourceType.CHR0).OfType<CHR0Node>().FirstOrDefault();
+            if (playing == null)
+            {
+                // the part has no bone animation: one made to hold the map's bones (only when one is needed)
+                bool needed = rest.Any(x => x != null) || imported.Any(m => m.BoneCache.OfType<MDL0BoneNode>().Any(b =>
+                    !SameMatrix(BindLocal(b), BrawlLib.Internal.Matrix.TransformMatrix(b.Scale, b.Rotation, b.Translation))));
+                if (!needed) return;
+                var folder = main.GetOrCreateFolder<CHR0Node>();
+                string name = "map_pose"; for (int i = 2; folder.Children.Any(c => c.Name == name); i++) name = "map_pose_" + i;
+                playing = new CHR0Node { Name = name };
+                folder.AddChild(playing);
+                playing.FrameCount = Math.Max(1, rest.Where(x => x != null).Select(x => x.FrameCount).DefaultIfEmpty(1).Max());
+                playing.Loop = true;
+            }
+            int frames = Math.Max(1, playing.FrameCount);
+            var have = new HashSet<string>(playing.Children.Select(c => c.Name), StringComparer.Ordinal);
+            var bones = new HashSet<string>(imported.SelectMany(m => m.BoneCache.Select(b => b.Name)), StringComparer.Ordinal);
+            foreach (var src in rest.Where(x => x != null && !ReferenceEquals(x, playing)))
+                foreach (var e in src.Children.OfType<CHR0EntryNode>().Where(e => bones.Contains(e.Name) && !have.Contains(e.Name)).ToList())
+                {
+                    var n = playing.CreateEntry(e.Name);
+                    n.UseModelScale = e.UseModelScale; n.UseModelRotate = e.UseModelRotate; n.UseModelTranslate = e.UseModelTranslate;
+                    int last = Math.Min(frames, Math.Max(1, src.FrameCount)) - 1;
+                    for (int i = 0; i < 9; i++)
+                    {
+                        bool any = false;
+                        for (int f = 0; f <= last; f++)
+                        {
+                            var k = e.GetKeyframe(i, f);
+                            if (k == null) continue;
+                            var nk = n.SetKeyframe(i, f, k._value, true); if (nk != null) nk._tangent = k._tangent;
+                            any = true;
+                        }
+                        if (!any) n.SetKeyframe(i, 0, e.GetFrameValue(i, 0), true);   // its value from the start
+                    }
+                    have.Add(e.Name);
+                }
+            foreach (var m in imported)
+            {
+                foreach (var b in m.BoneCache.OfType<MDL0BoneNode>())
+                {
+                    if (have.Contains(b.Name)) continue;
+                    if (SameMatrix(BindLocal(b), BrawlLib.Internal.Matrix.TransformMatrix(b.Scale, b.Rotation, b.Translation))) continue;
+                    var n = playing.CreateEntry(b.Name);
+                    float[] v = { b.Scale._x, b.Scale._y, b.Scale._z, b.Rotation._x, b.Rotation._y, b.Rotation._z, b.Translation._x, b.Translation._y, b.Translation._z };
+                    for (int i = 0; i < 9; i++) n.SetKeyframe(i, 0, v[i], true);
+                    have.Add(b.Name);
+                }
+            }
+        }
+
         static IEnumerable<ResourceNode> All(ResourceNode n) { foreach (var c in n.Children) { yield return c; foreach (var d in All(c)) yield return d; } }
         /// <summary>The bones P+'s collision rides on (the map's models with a bone by one of these names are its copies of
         /// P+'s moving parts, and stay out: P+'s move instead).</summary>
@@ -280,6 +343,9 @@ namespace SkinManager.Core
                             // the map's animations go first (the one a stage plays) only where the stage program uses nothing:
                             // otherwise after P+'s, so nothing the program times its events by changes
                             bool animsFirst = main.FindChildrenByType(null, ResourceType.MDL0).All(m => !program.Contains(m.Name));
+                            // P+'s own bone animation keeps playing: the map's bone tracks go into it (KeepPose), so P+'s pieces kept
+                            // there don't stop where they are animated to (Clock Town's stage, 2026-11-06)
+                            bool pplusChr = main.FindChildrenByType(null, ResourceType.CHR0).Any();
                             var pplusBones = new HashSet<string>(b.FindChildrenByType(null, ResourceType.MDL0).OfType<MDL0Node>().SelectMany(m => m.BoneCache.Select(x => x.Name)), StringComparer.Ordinal);
 
                             // P+'s scenery out of sight: its pieces go, its bones and names stay (so nothing the stage program looks for is missing)
@@ -321,6 +387,7 @@ namespace SkinManager.Core
                             int file = 0;
                             var imported = new List<MDL0Node>();
                             var importedPat = new List<PAT0Node>();
+                            var rest = new List<CHR0Node>();   // each group's own first bone animation (null: it has none)
                             for (int k = 0; k < groups.Count; k++)
                             {
                                 var (src, models) = groups[k];
@@ -356,7 +423,15 @@ namespace SkinManager.Core
                                     imported.Add(copy);
                                     r.Models++;
                                 }
-                                int at = 0;
+                                // only the first animation of each kind in a part plays: that's the map's main part's first one
+                                // when it goes first (animsFirst), and nothing at all otherwise (the rest get new names nothing asks
+                                // for). The others are left out: each kind a part has makes the game build every model in it bigger
+                                // (a picture-swap animation gives each material its own copy of its pictures), and with many of the
+                                // map's models in one part that's what Snowman's Land on Dream Land didn't have room for (2026-11-06)
+                                rest.Add(anims.OfType<CHR0Node>().FirstOrDefault());
+                                var plays = k == 0 && animsFirst ? anims.GroupBy(x => x.GetType()).Select(g => g.First()).Where(x => !(x is CHR0Node && pplusChr)).ToList() : new List<BRESEntryNode>();
+                                if (plays.Count < anims.Count) r.StaticParts = true;   // some of the map's moving decorations stand still
+                                anims = plays;
                                 foreach (var an in anims)
                                 {
                                     string ext = an is CHR0Node ? ".chr0" : an is SRT0Node ? ".srt0" : an is CLR0Node ? ".clr0" : an is PAT0Node ? ".pat0" : an is VIS0Node ? ".vis0" : ".shp0";
@@ -368,13 +443,13 @@ namespace SkinManager.Core
                                         copy is CHR0Node ? main.GetOrCreateFolder<CHR0Node>() : copy is SRT0Node ? main.GetOrCreateFolder<SRT0Node>() :
                                         copy is CLR0Node ? main.GetOrCreateFolder<CLR0Node>() : copy is PAT0Node ? main.GetOrCreateFolder<PAT0Node>() :
                                         copy is VIS0Node ? main.GetOrCreateFolder<VIS0Node>() : main.GetOrCreateFolder<SHP0Node>();
-                                    // the map's main animations first: a stage plays the first animation of each kind in a part
-                                    if (k == 0 && animsFirst) folder.InsertChild(copy, true, Math.Min(at++, folder.Children.Count)); else folder.AddChild(copy);
+                                    folder.InsertChild(copy, true, 0);   // first of its kind, so it's the one the stage plays
                                     if (copy is PAT0Node pat) importedPat.Add(pat);
                                     r.Animations++;
                                 }
-                                if ((k > 0 || !animsFirst) && anims.Count > 0) r.StaticParts = true;   // may not play: only the first of each kind is sure to
                             }
+
+                            KeepPose(main, imported, rest);
 
                             // the pictures, renamed so they can't mix with P+'s
                             var texNames = new HashSet<string>(StringComparer.Ordinal);

@@ -906,7 +906,7 @@ namespace SkinManager.App
                         _bannerSerious = _remakeCrash;
                         _bannerText.Text = _remakeCrash
                             ? (names.Count == 1 ? $"{Short(names[0])} can crash the game when the stage loads." : $"{names.Count} stage mods need making again (one can crash the game when its stage loads).")
-                            : (names.Count == 1 ? $"{Short(names[0])}'s ground shows off the floor you stand on." : $"{names.Count} stage mods show their ground off the floor you stand on.");
+                            : (names.Count == 1 ? $"{Short(names[0])} shows some of its scenery in the wrong place in the game." : $"{names.Count} stage mods show some of their scenery in the wrong place in the game.");
                         full = "Made by an older version of the app:\r\n" + string.Join("\r\n", names) + "\r\n\r\nMaking them again only changes what you see; you still play on P+'s stages exactly as P+ made them.";
                         _putBack.Text = "Fix them";
                     }
@@ -2344,7 +2344,7 @@ namespace SkinManager.App
                 string undoLine = _installer.UndoNote ?? "Changed your mind? Profile ▾ > Undo last save puts it back.";
                 int stayedOff = notes.Count(n => n.Contains("stayed off"));   // asked to go on, but couldn't: the count above includes them
                 if (stayedOff > 0) doneMessage = stayedOff == 1 ? "Saved, but one mod you turned on couldn't go on, so it stayed off (why is below)." : $"Saved, but {stayedOff} mods you turned on couldn't go on, so they stayed off (why is below).";
-                Dialog.Show(this, doneMessage + "\r\n\r\n" + undoLine + (notes.Count > 0 ? "\r\n\r\nP+ has changed since some of your mods were made:\r\n• " + string.Join("\r\n• ", notes) : ""),
+                Dialog.Show(this, doneMessage + "\r\n\r\n" + undoLine + (notes.Count > 0 ? "\r\n\r\nSome of your mods were made again:\r\n• " + string.Join("\r\n• ", notes) : ""),
                     "Done", MessageBoxButtons.OK, notes.Any(n => n.Contains("turned off") || n.Contains("stayed off")) ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
                 }
             }
